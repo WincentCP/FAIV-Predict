@@ -21,8 +21,8 @@ export default function DashboardChart({ data }: DashboardChartProps) {
       <AreaChart data={data} margin={{ top: 10, right: 8, left: -10, bottom: 0 }}>
         <defs>
           <linearGradient id="accuracy-grad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(272 62% 47%)" stopOpacity={0.45} />
-            <stop offset="100%" stopColor="hsl(272 62% 47%)" stopOpacity={0} />
+            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.45} />
+            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
           </linearGradient>
         </defs>
         <CartesianGrid stroke="hsl(var(--foreground) / 0.04)" vertical={false} />
@@ -40,7 +40,7 @@ export default function DashboardChart({ data }: DashboardChartProps) {
           }}
           cursor={{ stroke: "hsl(var(--primary))", strokeWidth: 1.5, strokeDasharray: "3 3" }}
         />
-        <Area type="monotone" dataKey="accuracy" stroke="hsl(272 62% 47%)" strokeWidth={2.5} fill="url(#accuracy-grad)" />
+        <Area type="monotone" dataKey="accuracy" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#accuracy-grad)" />
       </AreaChart>
     </ResponsiveContainer>
   );

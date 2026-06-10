@@ -137,16 +137,16 @@ export default function HistoryPage() {
 
         {/* Horizontal scroll container — only for the table itself */}
         <div className="w-full overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[800px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-[9px] uppercase tracking-[0.18em] text-muted-foreground font-semibold bg-surface-2/40">
-                <th className="px-4 py-3">Account</th>
-                <th className="px-4 py-3">Format</th>
-                <th className="px-4 py-3">Caption preview</th>
-                <th className="px-4 py-3 text-center">Confidence</th>
-                <th className="px-4 py-3">Result</th>
-                <th className="px-4 py-3">When</th>
-                <th className="px-4 py-3">Actual outcome</th>
+                <th className="px-6 py-5">Account</th>
+                <th className="px-6 py-5">Format</th>
+                <th className="px-6 py-5">Caption preview</th>
+                <th className="px-6 py-5 text-center">Confidence</th>
+                <th className="px-6 py-5">Result</th>
+                <th className="px-6 py-5">When</th>
+                <th className="px-6 py-5">Actual outcome</th>
               </tr>
             </thead>
             <tbody>
@@ -156,40 +156,40 @@ export default function HistoryPage() {
                   className="border-b border-border/50 last:border-0 hover:bg-surface-2/50 transition-colors"
                 >
                   {/* Account + brand stacked */}
-                  <td className="px-4 py-3">
+                  <td className="px-6 py-5 align-middle">
                     <div className="font-semibold text-xs text-foreground leading-tight">{h.account}</div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">{h.brand}</div>
                   </td>
 
                   {/* Format badge */}
-                  <td className="px-4 py-3">
+                  <td className="px-6 py-5 align-middle">
                     <span className="inline-flex items-center rounded-md border border-border bg-surface-2 px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase text-muted-foreground/90">
                       {h.format}
                     </span>
                   </td>
 
                   {/* Caption — clamped */}
-                  <td className="px-4 py-3 max-w-[220px]">
+                  <td className="px-6 py-5 align-middle max-w-[220px]">
                     <p className="truncate text-[11px] text-muted-foreground italic">
                       &quot;{h.caption}&quot;
                     </p>
                   </td>
 
                   {/* Confidence */}
-                  <td className="px-4 py-3 text-center">
+                  <td className="px-6 py-5 align-middle text-center">
                     <span className="font-mono text-xs font-semibold tabular-nums">{h.confidence}%</span>
                   </td>
 
                   {/* Tier badge */}
-                  <td className="px-4 py-3">
+                  <td className="px-6 py-5 align-middle">
                     <TierBadge tier={h.tier} />
                   </td>
 
                   {/* Timestamp */}
-                  <td className="px-4 py-3 text-[11px] text-muted-foreground whitespace-nowrap">{h.when}</td>
+                  <td className="px-6 py-5 align-middle text-[11px] text-muted-foreground whitespace-nowrap">{h.when}</td>
 
                   {/* Actual outcome dropdown */}
-                  <td className="px-4 py-3">
+                  <td className="px-6 py-5 align-middle">
                     <select
                       value={outcomes[h.id] || "PENDING"}
                       onChange={(e) => updateOutcome(h.id, e.target.value)}
@@ -215,7 +215,7 @@ export default function HistoryPage() {
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-muted-foreground">
                     No predictions match these filters.
                   </td>
                 </tr>

@@ -13,7 +13,7 @@ FAIV Predict is a full-stack Machine Learning system that predicts the **perform
 > ⚠️ The system is **not** a generative-AI tool. It does **not** rewrite captions and does **not** predict absolute reach numbers (no "+14% reach" claims). It outputs a **classification** (`predicted_class`) with a **confidence score** (0–100%) and recommends **parameter adjustments** (posting hour, hashtag count, CTA presence).
 
 ### Target Users
-- **Creators / SMB social media managers** — predict and optimize a post before publishing.
+- **Creators / SMB social media specialists** — predict and optimize a post before publishing.
 - **Brand admins** — manage brands, monitor model health, trigger retraining.
 - **Researchers / reviewers** — inspect feature importance and model maturity.
 

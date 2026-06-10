@@ -16,6 +16,7 @@ import {
   Activity
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { motion, AnimatePresence } from "framer-motion";
 
 const MOCK_TRAINING_LOGS = [
   { timestamp: "2026-05-28T15:30:00Z", step: "load_dataset", status: "success", rows_loaded: 412 },
@@ -27,6 +28,21 @@ const MOCK_TRAINING_LOGS = [
   { timestamp: "2026-05-28T15:30:22Z", step: "export_onnx_model", status: "success", path: "s3://faiv-models/lasence-bakeshop/v2.5.4.onnx" },
   { timestamp: "2026-05-28T15:30:23Z", step: "concept_drift_check", status: "resolved", drift_pct: 2.1 }
 ];
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.06,
+    },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 15 },
+  show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 350, damping: 25 } },
+};
 
 export default function ModelHealthPage() {
   const [retrainingModel, setRetrainingModel] = useState<MlModel | null>(null);
@@ -53,25 +69,38 @@ export default function ModelHealthPage() {
   };
 
   return (
-    <div className="px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto space-y-8">
-      <SectionHeader
-        eyebrow="Model Health"
-        title="AI Model Performance"
-        description="Live accuracy diagnostics for AI classifiers. Automated warnings trigger when rolling accuracy drops below category benchmarks."
-        actions={
-          <button
-            type="button"
-            onClick={handleGlobalRetrain}
-            className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2 text-xs font-bold text-foreground transition-all hover:bg-surface-2 active:scale-[0.98]"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Trigger manual retrain
-          </button>
-        }
+    <motion.div
+      variants={containerVariants}
+      initial="hidden"
+      animate="show"
+      className="relative px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto space-y-8 min-h-screen"
+    >
+      {/* Interactive Ambient Backglow Globe */}
+      <div
+        aria-hidden
+        className="absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[350px] rounded-full filter blur-[120px] pointer-events-none -z-10 bg-indigo-500/10 dark:bg-indigo-500/5 shadow-[0_0_80px_rgba(99,102,241,0.15)]"
       />
 
+      <motion.div variants={itemVariants}>
+        <SectionHeader
+          eyebrow="Model Health"
+          title="AI Model Performance"
+          description="Live accuracy diagnostics for AI classifiers. Automated warnings trigger when rolling accuracy drops below category benchmarks."
+          actions={
+            <button
+              type="button"
+              onClick={handleGlobalRetrain}
+              className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface/80 backdrop-blur px-4 py-2.5 text-xs font-bold text-foreground hover:bg-surface-2 hover:scale-[1.01] active:scale-[0.98] transition-all shadow-sm"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Trigger manual retrain
+            </button>
+          }
+        />
+      </motion.div>
+
       {/* Summary Widgets */}
-      <section className="grid gap-4 sm:grid-cols-3">
+      <motion.section variants={itemVariants} className="grid gap-4 sm:grid-cols-3">
         <SummaryCard
           label="Active Models"
           value={MODELS.filter((m) => m.is_active).length.toString()}
@@ -89,25 +118,28 @@ export default function ModelHealthPage() {
           value={MODELS.filter((m) => m.baselineAccuracy - m.rollingAccuracy > 15).length.toString()}
           tone="destructive"
         />
-      </section>
+      </motion.section>
 
       {/* Table grid */}
-      <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
+      <motion.section
+        variants={itemVariants}
+        className="overflow-hidden rounded-2xl border border-border bg-surface/70 backdrop-blur-xl shadow-[var(--shadow-soft)]"
+      >
         <div className="overflow-x-auto">
           <table className="w-full min-w-[970px] table-fixed text-sm text-left">
             <thead>
-              <tr className="border-b border-border bg-surface-2/60 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
-                <th className="w-[220px] px-6 py-4.5">Model ID</th>
-                <th className="w-[130px] px-6 py-4.5">Niche Scope</th>
-                <th className="w-[80px] px-6 py-4.5">Version</th>
-                <th className="w-[100px] px-6 py-4.5">Baseline Acc.</th>
-                <th className="w-[140px] px-6 py-4.5">30d Rolling Acc.</th>
-                <th className="w-[90px] px-6 py-4.5">Historical Trend</th>
-                <th className="w-[110px] px-6 py-4.5">Health Status</th>
-                <th className="w-[100px] px-6 py-4.5 text-right" />
+              <tr className="border-b border-border bg-surface-2/30 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                <th className="w-[220px] px-6 py-5">Model ID</th>
+                <th className="w-[130px] px-6 py-5">Niche Scope</th>
+                <th className="w-[80px] px-6 py-5">Version</th>
+                <th className="w-[100px] px-6 py-5">Baseline Acc.</th>
+                <th className="w-[140px] px-6 py-5">30d Rolling Acc.</th>
+                <th className="w-[90px] px-6 py-5">Historical Trend</th>
+                <th className="w-[110px] px-6 py-5">Health Status</th>
+                <th className="w-[100px] px-6 py-5 text-right" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-border/60">
+            <tbody className="divide-y divide-border/50">
               {MODELS.map((m, i) => {
                 const drop = m.baselineAccuracy - m.rollingAccuracy;
                 const isPersonal = m.scope === "Personal";
@@ -140,8 +172,8 @@ export default function ModelHealthPage() {
                 }
 
                 return (
-                  <tr key={m.id} className="hover:bg-surface-2/40 transition-colors">
-                    <td className="px-6 py-4.5">
+                  <tr key={m.id} className="hover:bg-surface-2/40 transition-colors group">
+                    <td className="px-6 py-5 align-middle">
                       <div className="flex flex-col gap-1.5 items-start min-w-0">
                         {isPersonal ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-accent-lime/10 border border-accent-lime/30 px-2.5 py-0.5 text-[9px] font-bold text-accent-lime-strong uppercase tracking-wider shrink-0">
@@ -159,14 +191,14 @@ export default function ModelHealthPage() {
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4.5 text-xs text-muted-foreground font-semibold truncate" title={m.niche}>{m.niche}</td>
-                    <td className="px-6 py-4.5">
+                    <td className="px-6 py-5 align-middle text-xs text-muted-foreground font-semibold truncate" title={m.niche}>{m.niche}</td>
+                    <td className="px-6 py-5 align-middle">
                       <span className="rounded-lg bg-surface-3 border border-border px-2.5 py-1 font-mono text-[10px] font-bold text-muted-foreground/90">
                         {m.version}
                       </span>
                     </td>
-                    <td className="px-6 py-4.5 font-mono text-xs font-bold tabular-nums text-foreground">{m.baselineAccuracy.toFixed(1)}%</td>
-                    <td className="px-6 py-4.5">
+                    <td className="px-6 py-5 align-middle font-mono text-xs font-bold tabular-nums text-foreground">{m.baselineAccuracy.toFixed(1)}%</td>
+                    <td className="px-6 py-5 align-middle">
                       <div className="flex items-center gap-2.5">
                         <div className="h-2 w-12 overflow-hidden rounded-full bg-surface-3 border border-border/40 shrink-0">
                           <div
@@ -179,11 +211,11 @@ export default function ModelHealthPage() {
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4.5">
+                    <td className="px-6 py-5 align-middle">
                       <Sparkline values={m.rolling30d} isDrift={drop > 15} />
                     </td>
-                    <td className="px-6 py-4.5">{driftBadge}</td>
-                    <td className="px-6 py-4.5 text-right">
+                    <td className="px-6 py-5 align-middle">{driftBadge}</td>
+                    <td className="px-6 py-5 align-middle text-right">
                       <button
                         type="button"
                         onClick={() => startRetrain(m)}
@@ -204,132 +236,140 @@ export default function ModelHealthPage() {
             </tbody>
           </table>
         </div>
-      </section>
+      </motion.section>
 
-      {/* Manual Retrain Summary Dialog and JSON Logs Console */}
-      {retrainingModel && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4 backdrop-blur-sm"
-          onClick={() => setRetrainingModel(null)}
-        >
-          <div
-            className="relative w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-2xl border border-border-strong bg-surface shadow-md"
-            onClick={(e) => e.stopPropagation()}
+      {/* Retrain Console Log Dialog Modal */}
+      <AnimatePresence>
+        {retrainingModel && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 grid place-items-center bg-background/75 p-4 backdrop-blur-sm"
+            onClick={() => !isTraining && setRetrainingModel(null)}
           >
-            <div className="flex items-start justify-between border-b border-border p-6 shrink-0">
-              <div>
-                <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-primary">
-                  <RefreshCw className="h-3 w-3 animate-spin" />
-                  GitHub Actions Runner
-                </div>
-                <h3 className="mt-2 font-display text-base font-bold text-foreground">
-                  Retraining Console: {retrainingModel.name.split(": ")[1] || retrainingModel.name}
-                </h3>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Triggering automated retraining and validation checks.
-                </p>
-              </div>
-              <button
-                onClick={() => setRetrainingModel(null)}
-                className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-surface-2 hover:text-foreground"
-                aria-label="Close"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 overflow-y-auto flex-1">
-              {/* Summary panel */}
-              <div className="grid gap-3 grid-cols-3 bg-surface-2/60 border border-border rounded-xl p-4 text-xs font-semibold">
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              transition={{ type: "spring", stiffness: 350, damping: 25 }}
+              className="relative w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border border-border bg-surface/90 backdrop-blur-2xl shadow-[var(--shadow-elevated)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between border-b border-border p-6 shrink-0">
                 <div>
-                  <span className="text-muted-foreground uppercase text-[9px] block">Model ID</span>
-                  <span className="font-mono mt-0.5 block text-foreground truncate" title={retrainingModel.id}>{retrainingModel.id}</span>
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-primary">
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    n8n Workflow Runner
+                  </div>
+                  <h3 className="mt-2 font-display text-base font-bold text-foreground">
+                    Retraining Console: {retrainingModel.name.split(": ")[1] || retrainingModel.name}
+                  </h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Triggering automated retraining and validation checks.
+                  </p>
                 </div>
-                <div>
-                  <span className="text-muted-foreground uppercase text-[9px] block">Target Version</span>
-                  <span className="font-mono mt-0.5 block text-foreground">
-                    {retrainingModel.version.replace(/(\d+)$/, (m) => String(parseInt(m, 10) + 1))}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground uppercase text-[9px] block">Pipeline Status</span>
-                  <span className={cn(
-                    "mt-0.5 block font-bold",
-                    isTraining ? "text-primary animate-pulse" : "text-emerald-600"
-                  )}>
-                    {isTraining ? "RUNNING" : "COMPLETED"}
-                  </span>
-                </div>
+                <button
+                  onClick={() => !isTraining && setRetrainingModel(null)}
+                  disabled={isTraining}
+                  className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-surface-2 hover:text-foreground transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
 
-              {/* JSON Logs Console Terminal */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">
-                  <span className="flex items-center gap-1.5">
-                    <FileText className="h-3.5 w-3.5" />
-                    Pipeline Logs
-                  </span>
-                  <span>{isTraining ? "streaming..." : "idle"}</span>
+              <div className="p-6 space-y-4 overflow-y-auto flex-1">
+                {/* Summary panel */}
+                <div className="grid gap-3 grid-cols-3 bg-surface-2/60 border border-border rounded-xl p-4 text-xs font-semibold">
+                  <div>
+                    <span className="text-muted-foreground uppercase text-[9px] block">Model ID</span>
+                    <span className="font-mono mt-0.5 block text-foreground truncate" title={retrainingModel.id}>{retrainingModel.id}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground uppercase text-[9px] block">Target Version</span>
+                    <span className="font-mono mt-0.5 block text-foreground">
+                      {retrainingModel.version.replace(/(\d+)$/, (m) => String(parseInt(m, 10) + 1))}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground uppercase text-[9px] block">Pipeline Status</span>
+                    <span className={cn(
+                      "mt-0.5 block font-bold",
+                      isTraining ? "text-primary animate-pulse" : "text-emerald-600"
+                    )}>
+                      {isTraining ? "RUNNING" : "COMPLETED"}
+                    </span>
+                  </div>
                 </div>
-                <div className="h-48 sm:h-60 w-full rounded-xl border border-border-strong bg-slate-950 p-4 font-mono text-[11px] text-slate-300 overflow-y-auto leading-relaxed shadow-inner">
-                  {logsOutput && logsOutput.map((log, index) => {
-                    const formatLogMessage = (l: any) => {
-                      switch (l.step) {
-                        case "load_dataset":
-                          return `Loaded ${l.rows_loaded} rows from dataset database successfully.`;
-                        case "validate_schema":
-                          return `Schema validation completed. ${l.features?.length || 0} features matched.`;
-                        case "split_train_test":
-                          return `Data partition complete: ${l.train_size} training samples, ${l.test_size} validation samples.`;
-                        case "initialize_random_forest":
-                          return `Model parameters set: n_estimators=${l.n_estimators}, max_depth=${l.max_depth}.`;
-                        case "fit_niche_estimator":
-                          return `Estimator fit successful. Out-of-bag (OOB) score: ${l.oob_score?.toFixed(4)}.`;
-                        case "evaluate_metrics": {
-                          const diff = ((l.new_accuracy || 0) - (l.baseline_accuracy || 0)) * 100;
-                          return `Performance check: baseline = ${(l.baseline_accuracy * 100).toFixed(1)}%, rolling = ${(l.new_accuracy * 100).toFixed(1)}% (${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%).`;
+
+                {/* JSON Logs Console Terminal */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">
+                    <span className="flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5" />
+                      Pipeline Logs
+                    </span>
+                    <span>{isTraining ? "streaming..." : "idle"}</span>
+                  </div>
+                  <div className="h-48 sm:h-60 w-full rounded-xl border border-border-strong bg-slate-950 p-4 font-mono text-[11px] text-slate-300 overflow-y-auto leading-relaxed shadow-inner">
+                    {logsOutput && logsOutput.map((log, index) => {
+                      const formatLogMessage = (l: any) => {
+                        switch (l.step) {
+                          case "load_dataset":
+                            return `Loaded ${l.rows_loaded} rows from dataset database successfully.`;
+                          case "validate_schema":
+                            return `Schema validation completed. ${l.features?.length || 0} features matched.`;
+                          case "split_train_test":
+                            return `Data partition complete: ${l.train_size} training samples, ${l.test_size} validation samples.`;
+                          case "initialize_random_forest":
+                            return `Model parameters set: n_estimators=${l.n_estimators}, max_depth=${l.max_depth}.`;
+                          case "fit_niche_estimator":
+                            return `Estimator fit successful. Out-of-bag (OOB) score: ${l.oob_score?.toFixed(4)}.`;
+                          case "evaluate_metrics": {
+                            const diff = ((l.new_accuracy || 0) - (l.baseline_accuracy || 0)) * 100;
+                            return `Performance check: baseline = ${(l.baseline_accuracy * 100).toFixed(1)}%, rolling = ${(l.new_accuracy * 100).toFixed(1)}% (${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%).`;
+                          }
+                          case "export_onnx_model":
+                            return `Serialized & exported ONNX artifact to: ${l.path}`;
+                          case "concept_drift_check":
+                            return `Drift diagnostics: detected drift = ${l.drift_pct}% -> STATUS: ${l.status.toUpperCase()}.`;
+                          default:
+                            return JSON.stringify(l);
                         }
-                        case "export_onnx_model":
-                          return `Serialized & exported ONNX artifact to: ${l.path}`;
-                        case "concept_drift_check":
-                          return `Drift diagnostics: detected drift = ${l.drift_pct}% -> STATUS: ${l.status.toUpperCase()}.`;
-                        default:
-                          return JSON.stringify(l);
-                      }
-                    };
-                    return (
-                      <div key={index} className="whitespace-pre-wrap py-0.5">
-                        <span className="text-slate-500 mr-2">[{log.timestamp.split("T")[1].replace("Z", "")}]</span>{" "}
-                        <span className="text-primary font-bold mr-2">&gt;&gt; {log.step.toUpperCase()}:</span>{" "}
-                        <span className="text-emerald-400 font-semibold">{formatLogMessage(log)}</span>
+                      };
+                      return (
+                        <div key={index} className="whitespace-pre-wrap py-0.5">
+                          <span className="text-slate-500 mr-2">[{log.timestamp.split("T")[1].replace("Z", "")}]</span>{" "}
+                          <span className="text-primary font-bold mr-2">&gt;&gt; {log.step.toUpperCase()}:</span>{" "}
+                          <span className="text-emerald-400 font-semibold">{formatLogMessage(log)}</span>
+                        </div>
+                      );
+                    })}
+                    {isTraining && (
+                      <div className="flex items-center gap-1.5 mt-1 text-slate-500 animate-pulse">
+                        <span className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-ping shrink-0" />
+                        <span>waiting for next step runner...</span>
                       </div>
-                    );
-                  })}
-                  {isTraining && (
-                    <div className="flex items-center gap-1.5 mt-1 text-slate-500 animate-pulse">
-                      <span className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-ping shrink-0" />
-                      <span>waiting for next step runner...</span>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-border bg-surface-2/40 p-4 shrink-0">
-              <button
-                onClick={() => setRetrainingModel(null)}
-                disabled={isTraining}
-                className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95 disabled:opacity-50 transition-colors"
-              >
-                Close Logs Console
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+              <div className="flex items-center justify-end gap-2 border-t border-border bg-surface-2/40 p-4 shrink-0">
+                <button
+                  onClick={() => setRetrainingModel(null)}
+                  disabled={isTraining}
+                  className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95 disabled:opacity-50 transition-colors"
+                >
+                  Close Logs Console
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
@@ -372,31 +412,51 @@ function SummaryCard({
 }) {
   const bg =
     tone === "primary"
-      ? "color-mix(in oklab, hsl(var(--primary)) 5%, hsl(var(--surface)))"
+      ? "color-mix(in oklab, hsl(var(--primary)) 6%, hsl(var(--surface)))"
       : tone === "lime"
-      ? "color-mix(in oklab, hsl(var(--accent-lime)) 6%, hsl(var(--surface)))"
-      : "color-mix(in oklab, hsl(var(--destructive)) 5%, hsl(var(--surface)))";
+      ? "color-mix(in oklab, hsl(var(--accent-lime)) 8%, hsl(var(--surface)))"
+      : "color-mix(in oklab, hsl(var(--destructive)) 6%, hsl(var(--surface)))";
   const border =
     tone === "primary"
-      ? "border-primary/20"
+      ? "border-primary/20 hover:border-primary/45"
       : tone === "lime"
-      ? "border-accent-lime/30"
-      : "border-destructive/20";
+      ? "border-accent-lime/35 hover:border-accent-lime-strong/50"
+      : "border-destructive/20 hover:border-destructive/45";
   const text =
     tone === "primary"
       ? "text-primary"
       : tone === "lime"
       ? "text-[oklch(0.42_0.18_130)] dark:text-[oklch(0.82_0.20_130)]"
       : "text-destructive";
+  const glowColor =
+    tone === "primary"
+      ? "rgba(139, 92, 246, 0.15)"
+      : tone === "lime"
+      ? "rgba(132, 204, 22, 0.15)"
+      : "rgba(239, 68, 68, 0.15)";
 
   const Icon = tone === "primary" ? Cpu : tone === "lime" ? Activity : AlertTriangle;
 
   return (
-    <div
-      className={cn("rounded-2xl border p-6 shadow-[var(--shadow-soft)] hover:shadow-md transition-all hover:bg-surface/90 relative overflow-hidden flex items-start justify-between gap-4", border)}
+    <motion.div
+      whileHover={{ y: -4, scale: 1.01 }}
+      transition={{ type: "spring", stiffness: 350, damping: 25 }}
+      className={cn(
+        "group relative overflow-hidden rounded-2xl border p-6 backdrop-blur-xl transition-all duration-300 shadow-[var(--shadow-soft)] hover:shadow-md flex items-start justify-between gap-4",
+        border
+      )}
       style={{ background: bg }}
     >
-      <div className="space-y-3">
+      {/* Radial glow follow */}
+      <div
+        aria-hidden
+        className="absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-0 transition-opacity duration-500 group-hover:opacity-100 pointer-events-none"
+        style={{
+          background: `radial-gradient(circle, ${glowColor}, transparent 70%)`,
+          filter: "blur(24px)",
+        }}
+      />
+      <div className="relative z-10 space-y-3">
         <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/80 leading-none">
           {label}
         </div>
@@ -404,9 +464,10 @@ function SummaryCard({
           {value}
         </div>
       </div>
-      <div className={cn("grid h-10 w-10 place-items-center rounded-xl bg-surface/50 border border-border/40 shrink-0", text)}>
+      <div className={cn("relative z-10 grid h-10 w-10 place-items-center rounded-xl bg-surface/80 border border-border/40 shrink-0 shadow-sm group-hover:bg-primary group-hover:text-primary-foreground group-hover:border-primary/10 transition-all duration-300", text)}>
         <Icon className="h-5 w-5" />
       </div>
-    </div>
+    </motion.div>
   );
 }
+

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/SectionHeader";
 import { ModelMaturity } from "@/components/ModelMaturity";
@@ -15,7 +15,9 @@ import {
   ChevronDown,
   Check,
   Activity,
+  Cpu
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
 // ─── Local niche data (richer than NICHES string array) ─────────────────────
 interface NicheRow {
@@ -44,6 +46,21 @@ const BRANDS_ENRICHED = [
   { ...BRANDS[4], followers: "4.8K" },
   { ...BRANDS[5], followers: "6.9K" },
 ];
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.05,
+    },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 15 },
+  show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 350, damping: 25 } },
+};
 
 // ─── Toast notification ───────────────────────────────────────────────────────
 function Toast({ message, onDone }: { message: string; onDone: () => void }) {
@@ -80,24 +97,59 @@ export default function NichesPage() {
   };
 
   return (
-    <div className="px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto space-y-8">
-      <SectionHeader
-        eyebrow="Category & Account Workspace"
-        title="Niche & Brand Management"
-        description="Configure performance thresholds for each niche category and monitor brand accounts as they progress toward dedicated personal models."
-        actions={
-          <button
-            onClick={() => setShowAddBrand(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <Users className="h-3.5 w-3.5" />
-            Register New Brand
-          </button>
-        }
+    <motion.div
+      variants={containerVariants}
+      initial="hidden"
+      animate="show"
+      className="relative px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto space-y-8 min-h-screen"
+    >
+      {/* Ambient Backglow Globe */}
+      <div
+        aria-hidden
+        className="absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[350px] rounded-full filter blur-[120px] pointer-events-none -z-10 bg-indigo-500/10 dark:bg-indigo-500/5 shadow-[0_0_80px_rgba(99,102,241,0.15)]"
       />
 
+      <motion.div variants={itemVariants}>
+        <SectionHeader
+          eyebrow="Category & Account Workspace"
+          title="Niche & Brand Management"
+          description="Configure performance thresholds for each niche category and monitor brand accounts as they progress toward dedicated personal models."
+          actions={
+            <button
+              onClick={() => setShowAddBrand(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <Users className="h-3.5 w-3.5" />
+              Register New Brand
+            </button>
+          }
+        />
+      </motion.div>
+
+      {/* Summary Widgets */}
+      <motion.section variants={itemVariants} className="grid gap-4 sm:grid-cols-3">
+        <SummaryCard
+          label="Registered Niches"
+          value={`${niches.length} Categories`}
+          tone="primary"
+          icon={Building2}
+        />
+        <SummaryCard
+          label="Registered Brands"
+          value={`${BRANDS_ENRICHED.length} Accounts`}
+          tone="lime"
+          icon={Users}
+        />
+        <SummaryCard
+          label="Dedicated AI Graduates"
+          value={`${BRANDS_ENRICHED.filter(b => b.samples >= 200).length} Dedicated`}
+          tone="violet"
+          icon={Check}
+        />
+      </motion.section>
+
       {/* ── Underline Tabs ── */}
-      <div className="flex gap-2 border-b border-border pb-px">
+      <motion.div variants={itemVariants} className="flex gap-2 border-b border-border pb-px">
         {(["niches", "brands"] as const).map((tab) => {
           const labels = { niches: "Niche Configuration", brands: "Brand Accounts" };
           const active = activeTab === tab;
@@ -111,223 +163,242 @@ export default function NichesPage() {
               )}
             >
               {labels[tab]}
-              <span
-                className={cn(
-                  "absolute inset-x-0 bottom-0 h-[2px] rounded-t-full transition-all duration-200",
-                  active ? "bg-primary" : "bg-transparent"
-                )}
-              />
+              {active && (
+                <motion.span
+                  layoutId="activeTabUnderline"
+                  className="absolute inset-x-0 bottom-0 h-[2px] rounded-t-full bg-primary"
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                />
+              )}
             </button>
           );
         })}
-      </div>
+      </motion.div>
 
       {/* ── Tab 1: Niche Management ── */}
-      {activeTab === "niches" && (
-        <div className="space-y-4">
-          <div className="overflow-hidden rounded-2xl border border-border bg-surface/70 backdrop-blur shadow-[var(--shadow-soft)]">
-            <div className="flex items-center justify-between border-b border-border px-6 py-5 bg-surface-2/10">
-              <div className="flex items-center gap-2">
-                <Building2 className="h-4.5 w-4.5 text-primary" />
-                <span className="text-sm font-semibold">{niches.length} niche categories</span>
+      <AnimatePresence mode="wait">
+        {activeTab === "niches" && (
+          <motion.div
+            key="niches-tab"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="space-y-4"
+          >
+            <div className="overflow-hidden rounded-2xl border border-border bg-surface/70 backdrop-blur-xl shadow-[var(--shadow-soft)]">
+              <div className="flex items-center justify-between border-b border-border px-6 py-5 bg-surface-2/10">
+                <div className="flex items-center gap-2">
+                  <Building2 className="h-4.5 w-4.5 text-primary" />
+                  <span className="text-sm font-semibold">{niches.length} niche categories</span>
+                </div>
               </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] table-fixed">
-                <thead>
-                  <tr className="border-b border-border bg-surface-2/30 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                    <th className="w-[180px] px-5 py-4 text-left">Niche Name</th>
-                    <th className="w-[320px] px-5 py-4 text-left">Description</th>
-                    <th className="w-[110px] px-5 py-4 text-right">Lower Boundary (P33)</th>
-                    <th className="w-[110px] px-5 py-4 text-right">Upper Boundary (P67)</th>
-                    <th className="w-[90px] px-5 py-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {niches.map((niche) => (
-                    <tr
-                      key={niche.id}
-                      className={cn(
-                        "group transition-colors hover:bg-surface-2/40",
-                        shakeId === niche.id && "animate-[shake_0.5s_ease-in-out]"
-                      )}
-                    >
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-2.5">
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xs font-bold text-primary">
-                            {niche.name[0]}
-                          </span>
-                          <span className="text-xs font-bold text-foreground truncate">{niche.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 max-w-[320px]">
-                        <span className="block text-xs text-muted-foreground leading-normal truncate" title={niche.description}>
-                          {niche.description}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <span className="inline-flex items-center rounded-lg bg-surface-3 border border-border px-2.5 py-1 font-mono text-[10px] font-semibold tabular-nums text-muted-foreground">
-                          {niche.p33}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <span className="inline-flex items-center rounded-lg bg-primary/5 border border-primary/15 px-2.5 py-1 font-mono text-[10px] font-bold tabular-nums text-primary">
-                          {niche.p67}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="flex items-center justify-end gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
-                          <button
-                            title="Edit niche"
-                            className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
-                          <button
-                            title="Delete niche"
-                            onClick={() => handleDeleteNiche(niche)}
-                            className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] table-fixed">
+                  <thead>
+                    <tr className="border-b border-border bg-surface-2/30 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                      <th className="w-[180px] px-6 py-5 text-left">Niche Name</th>
+                      <th className="w-[320px] px-6 py-5 text-left">Description</th>
+                      <th className="w-[110px] px-6 py-5 text-right">Lower Boundary (P33)</th>
+                      <th className="w-[110px] px-6 py-5 text-right">Upper Boundary (P67)</th>
+                      <th className="w-[90px] px-6 py-5 text-right">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Tab 2: Brand Accounts ── */}
-      {activeTab === "brands" && (
-        <div className="space-y-4">
-          <div className="overflow-hidden rounded-2xl border border-border bg-surface/70 backdrop-blur shadow-[var(--shadow-soft)]">
-            <div className="flex items-center justify-between border-b border-border px-6 py-5 bg-surface-2/10">
-              <div className="flex items-center gap-2">
-                <Users className="h-4.5 w-4.5 text-primary" />
-                <span className="text-sm font-semibold">{BRANDS_ENRICHED.length} brand accounts</span>
-              </div>
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider bg-surface-3 border border-border px-2.5 py-1 rounded-lg">
-                Model graduates at 200 samples
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[830px] table-fixed">
-                <thead>
-                  <tr className="border-b border-border bg-surface-2/30 text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
-                    <th className="w-[160px] px-6 py-4.5 text-left">Username</th>
-                    <th className="w-[180px] px-6 py-4.5 text-left">Display Name</th>
-                    <th className="w-[150px] px-6 py-4.5 text-left">Linked Niche</th>
-                    <th className="w-[100px] px-6 py-4.5 text-right">Followers</th>
-                    <th className="w-[240px] px-6 py-4.5 text-left pl-8">Model Maturity Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {BRANDS_ENRICHED.map((b) => {
-                    const pct = Math.min(100, Math.round((b.samples / 200) * 100));
-                    let barColor = "bg-amber-400";
-                    let label = "Niche Fallback Active (Cold Start)";
-                    let labelColor = "text-amber-600 dark:text-amber-400";
-                    let animated = false;
-                    let glowing = false;
-
-                    if (b.samples >= 200) {
-                      barColor = "bg-accent-lime";
-                      label = "Personal Dedicated Model Active";
-                      labelColor = "text-[oklch(0.42_0.18_130)] dark:text-[oklch(0.82_0.20_130)]";
-                      glowing = true;
-                    } else if (b.samples >= 100) {
-                      barColor = "bg-primary";
-                      label = "Learning — accumulating data";
-                      labelColor = "text-primary";
-                      animated = true;
-                    }
-
-                    return (
-                      <tr key={b.id} className="group transition-colors hover:bg-surface-2/40">
-                        {/* Username */}
-                        <td className="px-6 py-5">
-                          <span className="font-mono text-xs text-primary font-semibold bg-primary/5 border border-primary/10 rounded-lg px-2.5 py-1.5 inline-flex max-w-full truncate" title={b.handle}>
-                            {b.handle}
-                          </span>
-                        </td>
-                        {/* Display Name */}
-                        <td className="px-6 py-5">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-xs font-bold text-primary">
-                              {b.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
-                            </div>
-                            <span className="text-sm font-bold text-foreground truncate" title={b.name}>{b.name}</span>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {niches.map((niche) => (
+                      <tr
+                        key={niche.id}
+                        className={cn(
+                          "group transition-colors hover:bg-surface-2/40",
+                          shakeId === niche.id && "animate-[shake_0.5s_ease-in-out]"
+                        )}
+                      >
+                        <td className="px-6 py-5 align-middle">
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xs font-bold text-primary">
+                              {niche.name[0]}
+                            </span>
+                            <span className="text-xs font-bold text-foreground truncate">{niche.name}</span>
                           </div>
                         </td>
-                        {/* Linked Niche */}
-                        <td className="px-6 py-5">
-                          <span className="inline-flex items-center rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[10px] font-semibold text-muted-foreground max-w-full truncate" title={b.niche}>
-                            {b.niche}
+                        <td className="px-6 py-5 align-middle max-w-[320px]">
+                          <span className="block text-xs text-muted-foreground leading-normal truncate" title={niche.description}>
+                            {niche.description}
                           </span>
                         </td>
-                        {/* Followers */}
-                        <td className="px-6 py-5 text-right">
-                          <span className="font-mono text-xs font-bold tabular-nums text-foreground truncate">
-                            {b.followers}
+                        <td className="px-6 py-5 align-middle text-right">
+                          <span className="inline-flex items-center rounded-lg bg-surface-3 border border-border px-2.5 py-1 font-mono text-[10px] font-semibold tabular-nums text-muted-foreground">
+                            {niche.p33}
                           </span>
                         </td>
-                        {/* Model Maturity progress bar */}
-                        <td className="px-6 py-5 pl-8">
-                          <div className="w-full space-y-2">
-                            <div className="flex items-center justify-between gap-3">
-                              <span className={cn("inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider leading-tight min-w-0", labelColor)}>
-                                <span className={cn("h-1.5 w-1.5 rounded-full shrink-0",
-                                  b.samples >= 200 ? "bg-accent-lime animate-pulse" :
-                                  b.samples >= 100 ? "bg-primary" : "bg-amber-400"
-                                )} />
-                                <span className="truncate" title={label}>{label}</span>
-                              </span>
-                              <span className="shrink-0 font-mono text-[10px] font-bold tabular-nums text-muted-foreground">
-                                {b.samples}
-                                <span className="opacity-50">/200</span>
-                              </span>
-                            </div>
-                            <div className="h-2 overflow-hidden rounded-full bg-surface-3">
-                              <div
-                                className={cn(
-                                  "h-full rounded-full transition-all duration-700",
-                                  barColor,
-                                  animated && "relative overflow-hidden",
-                                  glowing && "shadow-[0_0_8px_2px_color-mix(in_oklab,hsl(var(--accent-lime))_60%,transparent)]"
-                                )}
-                                style={{ width: `${pct}%` }}
-                              >
-                                {animated && (
-                                  <span
-                                    className="absolute inset-0 -translate-x-full animate-[shimmer_2s_linear_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent"
-                                  />
-                                )}
-                              </div>
-                            </div>
+                        <td className="px-6 py-5 align-middle text-right">
+                          <span className="inline-flex items-center rounded-lg bg-primary/5 border border-primary/15 px-2.5 py-1 font-mono text-[10px] font-bold tabular-nums text-primary">
+                            {niche.p67}
+                          </span>
+                        </td>
+                        <td className="px-6 py-5 align-middle text-right">
+                          <div className="flex items-center justify-end gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
+                            <button
+                              title="Edit niche"
+                              className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                            <button
+                              title="Delete niche"
+                              onClick={() => handleDeleteNiche(niche)}
+                              className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
                           </div>
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+
+        {/* ── Tab 2: Brand Accounts ── */}
+        {activeTab === "brands" && (
+          <motion.div
+            key="brands-tab"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="space-y-4"
+          >
+            <div className="overflow-hidden rounded-2xl border border-border bg-surface/70 backdrop-blur-xl shadow-[var(--shadow-soft)]">
+              <div className="flex items-center justify-between border-b border-border px-6 py-5 bg-surface-2/10">
+                <div className="flex items-center gap-2">
+                  <Users className="h-4.5 w-4.5 text-primary" />
+                  <span className="text-sm font-semibold">{BRANDS_ENRICHED.length} brand accounts</span>
+                </div>
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider bg-surface-3 border border-border px-2.5 py-1 rounded-lg">
+                  Model graduates at 200 samples
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[830px] table-fixed">
+                  <thead>
+                    <tr className="border-b border-border bg-surface-2/30 text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+                      <th className="w-[160px] px-6 py-5 text-left">Username</th>
+                      <th className="w-[180px] px-6 py-5 text-left">Display Name</th>
+                      <th className="w-[150px] px-6 py-5 text-left">Linked Niche</th>
+                      <th className="w-[100px] px-6 py-5 text-right">Followers</th>
+                      <th className="w-[240px] px-6 py-5 text-left">Model Maturity Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {BRANDS_ENRICHED.map((b) => {
+                      const pct = Math.min(100, Math.round((b.samples / 200) * 100));
+                      let barColor = "bg-amber-400";
+                      let label = "Niche Fallback Active (Cold Start)";
+                      let labelColor = "text-amber-600 dark:text-amber-400";
+                      let animated = false;
+                      let glowing = false;
+
+                      if (b.samples >= 200) {
+                        barColor = "bg-accent-lime";
+                        label = "Personal Dedicated Model Active";
+                        labelColor = "text-[oklch(0.42_0.18_130)] dark:text-[oklch(0.82_0.20_130)]";
+                        glowing = true;
+                      } else if (b.samples >= 100) {
+                        barColor = "bg-primary";
+                        label = "Learning — accumulating data";
+                        labelColor = "text-primary";
+                        animated = true;
+                      }
+
+                      return (
+                        <tr key={b.id} className="group transition-colors hover:bg-surface-2/40">
+                          {/* Username */}
+                          <td className="px-6 py-5 align-middle">
+                            <span className="font-mono text-xs text-primary font-semibold bg-primary/5 border border-primary/10 rounded-lg px-2.5 py-1.5 inline-flex max-w-full truncate" title={b.handle}>
+                              {b.handle}
+                            </span>
+                          </td>
+                          {/* Display Name */}
+                          <td className="px-6 py-5 align-middle">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-xs font-bold text-primary">
+                                {b.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                              </div>
+                              <span className="text-sm font-bold text-foreground truncate" title={b.name}>{b.name}</span>
+                            </div>
+                          </td>
+                          {/* Linked Niche */}
+                          <td className="px-6 py-5 align-middle">
+                            <span className="inline-flex items-center rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[10px] font-semibold text-muted-foreground max-w-full truncate" title={b.niche}>
+                              {b.niche}
+                            </span>
+                          </td>
+                          {/* Followers */}
+                          <td className="px-6 py-5 align-middle text-right">
+                            <span className="font-mono text-xs font-bold tabular-nums text-foreground truncate">
+                              {b.followers}
+                            </span>
+                          </td>
+                          {/* Model Maturity progress bar */}
+                          <td className="px-6 py-5 align-middle">
+                            <div className="w-full space-y-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className={cn("inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider leading-tight min-w-0", labelColor)}>
+                                  <span className={cn("h-1.5 w-1.5 rounded-full shrink-0",
+                                    b.samples >= 200 ? "bg-accent-lime animate-pulse" :
+                                    b.samples >= 100 ? "bg-primary" : "bg-amber-400"
+                                  )} />
+                                  <span className="truncate" title={label}>{label}</span>
+                                </span>
+                                <span className="shrink-0 font-mono text-[10px] font-bold tabular-nums text-muted-foreground">
+                                  {b.samples}
+                                  <span className="opacity-50">/200</span>
+                                </span>
+                              </div>
+                              <div className="h-2 overflow-hidden rounded-full bg-surface-3">
+                                <div
+                                  className={cn(
+                                    "h-full rounded-full transition-all duration-700",
+                                    barColor,
+                                    animated && "relative overflow-hidden",
+                                    glowing && "shadow-[0_0_8px_2px_color-mix(in_oklab,hsl(var(--accent-lime))_60%,transparent)]"
+                                  )}
+                                  style={{ width: `${pct}%` }}
+                                >
+                                  {animated && (
+                                    <span
+                                      className="absolute inset-0 -translate-x-full animate-[shimmer_2s_linear_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent"
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Add Brand Dialog ── */}
-      {showAddBrand && <AddBrandDialog onClose={() => setShowAddBrand(false)} />}
+      <AnimatePresence>
+        {showAddBrand && <AddBrandDialog onClose={() => setShowAddBrand(false)} />}
+      </AnimatePresence>
 
       {/* ── Toast ── */}
       {toast && (
         <Toast message={toast} onDone={() => setToast(null)} />
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -357,6 +428,16 @@ function AddBrandDialog({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   const classify = async () => {
     if (bio.trim().length < 10) return;
@@ -389,16 +470,21 @@ function AddBrandDialog({ onClose }: { onClose: () => void }) {
   const topMatch = suggestions[0];
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-end justify-center bg-background/60 p-4 backdrop-blur-sm sm:items-center"
-      style={{ animation: "fade-in 0.18s ease-out" }}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-background/75 p-4 backdrop-blur-sm sm:items-center"
       onClick={onClose}
     >
-      <div
-        className="relative flex w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border-strong bg-surface shadow-[var(--shadow-elevated)]"
-        style={{ animation: "page-enter 0.18s ease-out" }}
+      <motion.div
+        initial={{ scale: 0.95, y: 15 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95, y: 15 }}
+        transition={{ type: "spring", stiffness: 350, damping: 25 }}
+        className="relative flex w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-border bg-surface/95 backdrop-blur-xl shadow-[var(--shadow-elevated)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -416,7 +502,7 @@ function AddBrandDialog({ onClose }: { onClose: () => void }) {
           </div>
           <button
             onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-surface-2 hover:text-foreground active:scale-95"
+            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-surface-2 hover:text-foreground active:scale-95 transition-all"
           >
             <X className="h-4 w-4" />
           </button>
@@ -461,6 +547,13 @@ function AddBrandDialog({ onClose }: { onClose: () => void }) {
                 placeholder="Describe the business core, products, and who they sell to..."
                 className="w-full resize-none rounded-lg border border-border bg-surface p-3 text-sm leading-relaxed outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_color-mix(in_oklab,hsl(var(--ring))_16%,transparent)]"
               />
+              <div className="text-[10px] text-muted-foreground">
+                {bio.trim().length < 10 ? (
+                  <span className="text-warning font-medium">Requires at least 10 characters to analyze ({bio.trim().length}/10)</span>
+                ) : (
+                  <span className="text-success font-semibold">Valid profile ({bio.trim().length} characters)</span>
+                )}
+              </div>
             </div>
 
             <button
@@ -615,7 +708,7 @@ function AddBrandDialog({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-end gap-2 border-t border-border bg-surface-2/30 px-7 py-4">
           <button
             onClick={onClose}
-            className="rounded-lg border border-border bg-surface px-4 py-2 text-xs font-semibold text-foreground hover:bg-surface-2 active:scale-95"
+            className="rounded-lg border border-border bg-surface px-4 py-2 text-xs font-semibold text-foreground hover:bg-surface-2 active:scale-95 transition-all"
           >
             Cancel
           </button>
@@ -640,7 +733,77 @@ function AddBrandDialog({ onClose }: { onClose: () => void }) {
             )}
           </button>
         </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  tone,
+  icon: Icon
+}: {
+  label: string;
+  value: string;
+  tone: "primary" | "lime" | "violet";
+  icon: any;
+}) {
+  const bg =
+    tone === "primary"
+      ? "color-mix(in oklab, hsl(var(--primary)) 6%, hsl(var(--surface)))"
+      : tone === "lime"
+      ? "color-mix(in oklab, hsl(var(--accent-lime)) 8%, hsl(var(--surface)))"
+      : "color-mix(in oklab, hsl(var(--secondary-glow)) 6%, hsl(var(--surface)))";
+  const border =
+    tone === "primary"
+      ? "border-primary/20 hover:border-primary/45"
+      : tone === "lime"
+      ? "border-accent-lime/35 hover:border-accent-lime-strong/50"
+      : "border-secondary-glow/20 hover:border-secondary-glow/45";
+  const text =
+    tone === "primary"
+      ? "text-primary"
+      : tone === "lime"
+      ? "text-[oklch(0.42_0.18_130)] dark:text-[oklch(0.82_0.20_130)]"
+      : "text-secondary-glow";
+  const glowColor =
+    tone === "primary"
+      ? "rgba(139, 92, 246, 0.15)"
+      : tone === "lime"
+      ? "rgba(132, 204, 22, 0.15)"
+      : "rgba(168, 85, 247, 0.15)";
+
+  return (
+    <motion.div
+      whileHover={{ y: -4, scale: 1.01 }}
+      transition={{ type: "spring", stiffness: 350, damping: 25 }}
+      className={cn(
+        "group relative overflow-hidden rounded-2xl border p-6 backdrop-blur-xl transition-all duration-300 shadow-[var(--shadow-soft)] hover:shadow-md flex items-start justify-between gap-4",
+        border
+      )}
+      style={{ background: bg }}
+    >
+      {/* Radial glow follow */}
+      <div
+        aria-hidden
+        className="absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-0 transition-opacity duration-500 group-hover:opacity-100 pointer-events-none"
+        style={{
+          background: `radial-gradient(circle, ${glowColor}, transparent 70%)`,
+          filter: "blur(24px)",
+        }}
+      />
+      <div className="relative z-10 space-y-3">
+        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/80 leading-none">
+          {label}
+        </div>
+        <div className="font-display text-2xl font-extrabold text-foreground tracking-tight leading-none">
+          {value}
+        </div>
       </div>
-    </div>
+      <div className={cn("relative z-10 grid h-10 w-10 place-items-center rounded-xl bg-surface/80 border border-border/40 shrink-0 shadow-sm group-hover:bg-primary group-hover:text-primary-foreground group-hover:border-primary/10 transition-all duration-300", text)}>
+        <Icon className="h-5 w-5" />
+      </div>
+    </motion.div>
   );
 }

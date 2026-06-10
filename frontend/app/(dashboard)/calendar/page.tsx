@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
 import { BRANDS, type Tier, type ContentFormat } from "@/lib/mock-data";
@@ -576,14 +576,14 @@ export default function CalendarPage() {
               <table className="w-full text-sm text-left">
                 <thead>
                   <tr className="border-b border-border bg-surface-2/60 text-[9px] uppercase tracking-wider text-muted-foreground font-bold">
-                    <th className="px-6 py-4.5 font-semibold">Date</th>
-                    <th className="px-6 py-4.5 font-semibold">Time</th>
-                    <th className="px-6 py-4.5 font-semibold">Account</th>
-                    <th className="px-6 py-4.5 font-semibold">Format</th>
-                    <th className="px-6 py-4.5 font-semibold">PIC</th>
-                    <th className="px-6 py-4.5 font-semibold">Caption Preview</th>
-                    <th className="px-6 py-4.5 font-semibold">Status</th>
-                    <th className="px-6 py-4.5 font-semibold">Tier</th>
+                    <th className="px-6 py-5 font-semibold">Date</th>
+                    <th className="px-6 py-5 font-semibold">Time</th>
+                    <th className="px-6 py-5 font-semibold">Account</th>
+                    <th className="px-6 py-5 font-semibold">Format</th>
+                    <th className="px-6 py-5 font-semibold">PIC</th>
+                    <th className="px-6 py-5 font-semibold">Caption Preview</th>
+                    <th className="px-6 py-5 font-semibold">Status</th>
+                    <th className="px-6 py-5 font-semibold">Tier</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -603,7 +603,7 @@ export default function CalendarPage() {
                           onClick={() => setEditing(r)}
                           className="cursor-pointer hover:bg-surface-2/40 transition-colors group/row"
                         >
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-5 align-middle">
                             <div className="flex items-center gap-3">
                               <div className="flex flex-col items-center justify-center shrink-0 w-11 h-11 rounded-lg bg-surface-2 border border-border transition-colors group-hover/row:border-primary/30 group-hover/row:bg-primary/[0.02]">
                                 <span className="text-[9px] uppercase font-extrabold text-muted-foreground/80 tracking-wider leading-none">
@@ -623,31 +623,31 @@ export default function CalendarPage() {
                               </div>
                             </div>
                           </td>
-                          <td className="px-6 py-4 font-mono text-xs font-semibold">{r.time}</td>
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-5 align-middle font-mono text-xs font-semibold">{r.time}</td>
+                          <td className="px-6 py-5 align-middle">
                             <div className="max-w-[120px] md:max-w-[140px] truncate font-bold text-foreground" title={r.account}>
                               {r.account}
                             </div>
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-5 align-middle">
                             <span className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-muted-foreground font-mono font-semibold">
                               {r.format}
                             </span>
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-5 align-middle">
                             <div className="max-w-[80px] md:max-w-[100px] truncate font-semibold" title={r.picName}>
                               {r.picName}
                             </div>
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-5 align-middle">
                             <div className="max-w-[200px] md:max-w-[280px] truncate text-xs text-muted-foreground italic" title={r.caption}>
                               &quot;{r.caption}&quot;
                             </div>
                           </td>
-                          <td className="px-6 py-4 capitalize text-xs text-foreground/80 font-bold">
+                          <td className="px-6 py-5 align-middle capitalize text-xs text-foreground/80 font-bold">
                             {r.status.replace(/_/g, " ")}
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-5 align-middle">
                             <TierBadge tier={r.tier} />
                           </td>
                         </tr>
@@ -716,6 +716,16 @@ function EntryModal({
 }) {
   const [draft, setDraft] = useState<CalendarEntry>(initial);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-background/60 p-4 backdrop-blur-sm"
@@ -771,8 +781,11 @@ function EntryModal({
                 onChange={(e) => setDraft({ ...draft, account: e.target.value })}
                 className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
               >
-                <option value="@lasence.bakeshop">@lasence.bakeshop</option>
-                <option value="@bisongym.mdn">@bisongym.mdn</option>
+                {BRANDS.map((b) => (
+                  <option key={b.id} value={b.handle}>
+                    {b.handle} ({b.name})
+                  </option>
+                ))}
               </select>
             </ModalField>
             <ModalField label="PIC Owner">

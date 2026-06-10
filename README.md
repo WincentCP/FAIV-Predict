@@ -1,6 +1,6 @@
 # FAIV Predict — Performance OS for Creative Work
 
-> AI-powered content performance prediction for creative agencies and SMB social media managers. 
+> AI-powered content performance prediction for creative agencies and SMB social media specialists. 
 > A premium, minimalist SaaS dashboard for forecasting engagement, diagnosing weak signals, and optimizing post configurations before posting.
 
 ![Status](https://img.shields.io/badge/status-full--stack-7c3aed) ![Stack](https://img.shields.io/badge/stack-Next.js_15_+_FastAPI_+_Supabase-000) ![Theme](https://img.shields.io/badge/theme-Notion_clean-c3f73a)
@@ -9,7 +9,7 @@
 
 ## 1. Project Overview & Scope
 
-**FAIV Predict** is a professional Machine Learning dashboard designed to help creators, content strategists, and small brands classify the **performance tier** (`HIGH`, `AVERAGE`, `LOW`) of Instagram posts *before* they publish them. 
+**FAIV Predict** is a professional Machine Learning dashboard designed to help creators, content writers, and small brands classify the **performance tier** (`HIGH`, `AVERAGE`, `LOW`) of Instagram posts *before* they publish them. 
 
 ### What it is
 * **A real-time predictive classifier** powered by a hierarchical Machine Learning model (Random Forest) trained per niche.

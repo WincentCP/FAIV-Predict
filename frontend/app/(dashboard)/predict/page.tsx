@@ -64,10 +64,7 @@ const FORMATS: { id: ContentFormat; label: string; icon: typeof Film; hint: stri
   { id: "Single Image", label: "Single Image", icon: ImageIcon, hint: "Static feed post" },
 ];
 
-const ACCOUNTS = [
-  { handle: "@lasence.bakeshop", name: "Lasence Bakeshop", samples: 412 },
-  { handle: "@bisongym.mdn", name: "Bison Gym", samples: 35 },
-];
+const ACCOUNTS = BRANDS;
 
 const CLASS_PROBS = [
   { tier: "High" as const, prob: 0.71 },
@@ -125,6 +122,15 @@ export default function PredictPage() {
   const [accountIdx, setAccountIdx] = useState(0);
   const account = ACCOUNTS[accountIdx];
   const [contentFormat, setContentFormat] = useState<ContentFormat>("Reels");
+
+  // Real ML Prediction States
+  const [predictedTier, setPredictedTier] = useState<Tier>("Average");
+  const [predictedConfidence, setPredictedConfidence] = useState<number>(71);
+  const [predictedProbs, setPredictedProbs] = useState<Array<{ tier: Tier; prob: number }>>([
+    { tier: "High", prob: 0.22 },
+    { tier: "Average", prob: 0.71 },
+    { tier: "Low", prob: 0.07 },
+  ]);
 
   const [scheduledAt, setScheduledAt] = useState<Date>(() => {
     const d = new Date();
@@ -196,6 +202,45 @@ export default function PredictPage() {
       has_cta: false,
       hashtag_count: false
     });
+
+    try {
+      const is_carousel = contentFormat === "Carousel" ? 1.0 : 0.0;
+      const is_reels = contentFormat === "Reels" ? 1.0 : 0.0;
+      const has_cta_val = stats.hasCTA ? 1.0 : 0.0;
+
+      const res = await fetch("/api/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          is_carousel,
+          is_reels,
+          post_hour: scheduledAt.getHours(),
+          caption_length: parseFloat(liveStats.charCount.toString()),
+          hashtag_count: parseFloat(stats.hashtags.length.toString()),
+          has_cta: has_cta_val,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === "success" || data.predicted_class) {
+          const predClass = data.predicted_class as Tier;
+          const conf = Math.round(data.confidence);
+          const rawProbs = data.probabilities;
+          const mappedProbs = [
+            { tier: "High" as const, prob: (rawProbs.High || 0) / 100 },
+            { tier: "Average" as const, prob: (rawProbs.Average || 0) / 100 },
+            { tier: "Low" as const, prob: (rawProbs.Low || 0) / 100 },
+          ];
+          
+          setPredictedTier(predClass);
+          setPredictedConfidence(conf);
+          setPredictedProbs(mappedProbs);
+        }
+      }
+    } catch (err) {
+      console.error("Error connecting to BFF predict API: ", err);
+    }
     
     setTimeout(() => {
       setSubmitting(false);
@@ -292,9 +337,9 @@ export default function PredictPage() {
   }, [appliedRecs]);
 
   // Current states dynamically mapped
-  const top = anyRecsApplied ? { tier: simulatedTier } : CLASS_PROBS[0]; // High base potential
-  const confidence = anyRecsApplied ? simulatedConfidence : Math.round(CLASS_PROBS[0].prob * 100);
-  const activeProbs = anyRecsApplied ? simulatedProbs : CLASS_PROBS;
+  const top = anyRecsApplied ? { tier: simulatedTier } : { tier: predictedTier };
+  const confidence = anyRecsApplied ? simulatedConfidence : predictedConfidence;
+  const activeProbs = anyRecsApplied ? simulatedProbs : predictedProbs;
 
   // Recalibrate simulated delay
   const handleToggleRec = (key: string) => {
@@ -1181,6 +1226,14 @@ export default function PredictPage() {
                           d.setHours(20, 15, 0, 0);
                           setScheduledAt(d);
                         }
+                        let nextCaption = caption;
+                        if (appliedRecs.has_cta && !stats.hasCTA) {
+                          nextCaption += "\n\nSave this for later!";
+                        }
+                        if (appliedRecs.hashtag_count && stats.hashtags.length < 3) {
+                          nextCaption += " #explore #niche #momentum";
+                        }
+                        setCaption(nextCaption);
                         setActiveStep(1);
                       }}
                       className="flex-1 flex h-11 items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.98]"
@@ -1246,8 +1299,8 @@ function MetricBox({
 }) {
   const statusColor = 
     status === "success" 
-      ? "text-emerald-500 dark:text-emerald-400 bg-emerald-500/5 border-emerald-500/20" 
-      : "text-amber-500 dark:text-amber-400 bg-amber-500/5 border-amber-500/20";
+      ? "text-success bg-success/5 border-success/20" 
+      : "text-warning bg-warning/5 border-warning/20";
 
   return (
     <div className="rounded-xl border border-border bg-surface-2/40 p-3.5 text-center flex flex-col justify-between">
