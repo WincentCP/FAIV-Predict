@@ -8,7 +8,7 @@
 ## 1. Project Overview
 
 ### Purpose
-FAIV Predict is a full-stack Machine Learning system that predicts the **performance tier** (`HIGH` / `AVERAGE` / `LOW`) of an Instagram post **before** it is published, so creators and small brands can iterate on content with **data-driven recommendations** (with optional AI narrative enrichment via Gemini).
+FAIV Predict is a full-stack Machine Learning system that predicts the **performance tier** (`HIGH` / `AVERAGE` / `LOW`) of an Instagram post **before** it is published, so creators and small brands can iterate on content with **data-driven recommendations** (with optional AI narrative enrichment via LLM).
 
 > ⚠️ The system is **not** a generative-AI tool. It does **not** rewrite captions and does **not** predict absolute reach numbers (no "+14% reach" claims). It outputs a **classification** (`predicted_class`) with a **confidence score** (0–100%) and recommends **parameter adjustments** (posting hour, hashtag count, CTA presence).
 
@@ -21,7 +21,7 @@ FAIV Predict is a full-stack Machine Learning system that predicts the **perform
 1. Communicate that this is a real, full-stack ML system — not a prototype.
 2. Make hierarchical RF behavior (Niche fallback ↔ Personal model at `n=200`) visible and trustable.
 3. Make recommendations explainable via **MDI feature importance**.
-4. Resilient under FastAPI cold-starts and Gemini failures.
+4. Resilient under FastAPI cold-starts and LLM failures.
 
 ---
 
@@ -79,7 +79,7 @@ Base 4px. Page max-width `1280px`. App shell = 240px sidebar + topbar + main. Mo
 | `/predict` | Input form (caption, format, schedule) |
 | `/result` | Predicted tier + confidence + "Why this score" |
 | `/diagnose` | MDI feature-importance bar chart |
-| `/suggest` | TRE parameter recommendations + optional Gemini enrichment |
+| `/suggest` | TRE parameter recommendations + optional LLM enrichment |
 | `/calendar` | **Content Calendar** — monthly grid, batch prediction, Excel upload |
 | `/admin` | Brand management + Model Health (rolling accuracy, drift, manual retrain) |
 
@@ -127,7 +127,7 @@ A persistent `<FlowStepper>` at the top of inference pages makes this linear flo
   - Parameter recommendations only — examples: *"Post between 19:00–21:00"*, *"Use 10–14 hashtags"*, *"Add a CTA"*.
   - Card structure: **Suggestion cards (TRE parameter recommendation: hour / hashtag / CTA) + AI Reasoning slot** (empty until enriched).
   - Each card has an *Apply* action that updates the draft post — it does **not** alter a numeric reach forecast.
-- **Optional enrichment layer: Gemini** — triggered manually by a *"Perkaya dengan AI"* button.
+- **Optional enrichment layer: LLM** — triggered manually by a *"Perkaya dengan AI"* button.
   - Adds a short narrative *why* into each card's "AI Reasoning" slot.
   - Falls back silently to TRE-only on timeout (>8s) / error, with a small `"Standard recommendations"` info pill.
 
@@ -152,7 +152,7 @@ A persistent `<FlowStepper>` at the top of inference pages makes this linear flo
 - **Export Diperkaya** — download enriched `.xlsx` (original columns + `predicted_class`, `confidence_score`, `top_feature`, `tre_recommendation`).
 
 ### 4.8 `/admin` — Brand & Model Health
-- **AI Brand Classifier modal** — admin enters business description + target audience; Gemini returns a niche suggestion (admin confirms/overrides).
+- **AI Brand Classifier modal** — admin enters business description + target audience; LLM returns a niche suggestion (admin confirms/overrides).
 - **Model Maturity table** per brand (`n/200`).
 - **Model Health dashboard:**
   - Recharts line chart: rolling 7d / 30d accuracy.
@@ -199,8 +199,8 @@ A persistent `<FlowStepper>` at the top of inference pages makes this linear flo
 | Tier prediction | Hierarchical Random Forest | Returns `predicted_class` + `confidence_score`. Never an absolute reach number. |
 | Personalization | Niche fallback → Personal model at `n=200` | Surface via `<ModelMaturity>` `n/200`. |
 | Explainability | **MDI** (Mean Decrease in Impurity) | Horizontal bar chart, positive % only, ~100% total. |
-| Recommendations | **TRE (data-driven)** + **Gemini (optional enrichment)** | Parameter cards always render from TRE; Gemini adds reasoning on demand. |
-| Brand classification | Gemini one-shot | Admin-confirmed; not auto-applied. |
+| Recommendations | **TRE (data-driven)** + **LLM (optional enrichment)** | Parameter cards always render from TRE; LLM adds reasoning on demand. |
+| Brand classification | LLM one-shot | Admin-confirmed; not auto-applied. |
 | Drift monitoring | Rolling accuracy vs baseline | Drift Badge + manual retrain CTA. |
 
 ### Forbidden UX patterns (model truthfulness)
@@ -217,10 +217,10 @@ A persistent `<FlowStepper>` at the top of inference pages makes this linear flo
 - **Next.js** frontend → REST calls to **FastAPI** inference service.
 - **FastAPI** loads the trained Random Forest models from object storage and serves `/predict`, `/diagnose`, `/suggest`.
 - **Supabase** — Postgres (predictions, brands, samples, accuracy snapshots), Auth, Storage (Excel uploads, model artifacts).
-- **Gemini API** — invoked from a server function, only for AI Brand Classifier and `/suggest` enrichment. Always wrapped in TRE fallback.
+- **LLM API** — invoked from a server function, only for AI Brand Classifier and `/suggest` enrichment. Always wrapped in TRE fallback.
 - **GitHub Actions** — invoked by *Trigger Retrain Manual*.
 
-Resiliency rules (see `DESIGN.md §10`): Global Error Boundary, per-surface *Service Unavailable* state with auto-retry (1s → 2s → 4s), Gemini → TRE silent fallback.
+Resiliency rules (see `DESIGN.md §10`): Global Error Boundary, per-surface *Service Unavailable* state with auto-retry (1s → 2s → 4s), LLM → TRE silent fallback.
 
 ---
 

@@ -14,7 +14,7 @@
 ### What it is
 * **A real-time predictive classifier** powered by a hierarchical Machine Learning model (Random Forest) trained per niche.
 * **A calibration workspace** to test parameters (media types, scheduled time, character lengths, hashtag density, and call-to-actions) to see what shapes a post's score.
-* **A content intelligence center** with structured heuristics, Mean Decrease in Impurity (MDI) explainability charts, and optional Gemini-based narrative reasoning fallbacks.
+* **A content intelligence center** with structured heuristics, Mean Decrease in Impurity (MDI) explainability charts, and optional LLM-based narrative reasoning fallbacks.
 
 ### What it is NOT
 * **🚫 Not a generative AI copywriter:** It does not automatically generate or rewrite captions.
@@ -115,8 +115,8 @@ Located at [diagnose/page.tsx](./frontend/app/(dashboard)/diagnose/page.tsx).
 #### 4.1.4 Suggest Page
 Located at [suggest/page.tsx](./frontend/app/(dashboard)/suggest/page.tsx).
 * **Template Recommendation Engine (TRE)**: The baseline layer. Generates instant, heuristic recommendations from historical niche baselines (e.g., optimal hashtag counts or posting windows).
-* **Optional AI Enrichment**: A *"Perkaya dengan AI"* button triggers a call to Gemini, overlaying narrative reasoning onto the default TRE advice.
-* **AI Fallback States**: If Gemini fails, rate-limits, or times out (>8s), the UI displays a `"Standard recommendations"` info badge and continues serving the TRE results. The page remains fully operational.
+* **Optional AI Enrichment**: A *"Perkaya dengan AI"* button triggers a call to LLM, overlaying narrative reasoning onto the default TRE advice.
+* **AI Fallback States**: If LLM fails, rate-limits, or times out (>8s), the UI displays a `"Standard recommendations"` info badge and continues serving the TRE results. The page remains fully operational.
 * **Forbidden Pattern**: Suggest suggestions are strictly parameter-oriented (hour, CTA, length). No reach multipliers (e.g., "+20% reach") are shown, as the Random Forest model cannot output absolute estimates.
 
 ---
@@ -138,7 +138,7 @@ Located at [calendar/page.tsx](./frontend/app/(dashboard)/calendar/page.tsx).
 #### 4.3.1 Niche & Brand Management
 Located at [niches/page.tsx](./frontend/app/(dashboard)/niches/page.tsx).
 * **Model Graduation Mechanism**: Shows each brand's sample count. Brands with samples $< 200$ run on the Niche model. Once the account collects $\ge 200$ samples, it graduates to a Personal Model, tracked using [ModelMaturity.tsx](./frontend/components/ModelMaturity.tsx).
-* **AI Brand Classifier Dialog**: A modal prompting the administrator for a business description and target audience. Gemini classifies the brand and suggests a matching niche, which the admin can override before finalizing.
+* **AI Brand Classifier Dialog**: A modal prompting the administrator for a business description and target audience. LLM classifies the brand and suggests a matching niche, which the admin can override before finalizing.
 
 #### 4.3.2 Model Health & Concept Drift
 Located at [model-health/page.tsx](./frontend/app/(dashboard)/model-health/page.tsx).
@@ -254,7 +254,7 @@ FAIV Predict is a full-stack Machine Learning system with decoupled components.
 * **Client**: Next.js (App Router, Tailwind CSS, TypeScript, framer-motion, Recharts).
 * **Inference Engine**: FastAPI backend hosting Random Forest classifiers per niche.
 * **Storage & Auth**: Supabase Postgres for credentials, predictions, and model health stats. Supabase Buckets store trained `.joblib` model binaries.
-* **Enrichment API**: Gemini API bridge for brand classification and suggestion rationale.
+* **Enrichment API**: LLM API bridge for brand classification and suggestion rationale.
 
 ---
 

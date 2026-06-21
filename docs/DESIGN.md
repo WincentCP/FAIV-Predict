@@ -222,14 +222,14 @@ These libraries are **mandatory** — do not introduce alternatives without an a
 
 ## 10. Graceful Degradation & Error States
 
-The product talks to two external services that **can fail or sleep**: the FastAPI inference API (Railway free tier sleeps after inactivity) and the Gemini suggestions API (rate limits / timeouts). The UI must never crash or render blank — every async surface has a defined fallback.
+The product talks to two external services that **can fail or sleep**: the FastAPI inference API (Railway free tier sleeps after inactivity) and the LLM suggestions API (rate limits / timeouts). The UI must never crash or render blank — every async surface has a defined fallback.
 
-### Suggest — Gemini fallback to TRE
+### Suggest — LLM fallback to TRE
 
-When the Gemini call errors, times out (>8s), or returns an unusable response, the **Suggest** view must automatically fall back to the **Template Recommendation Engine (TRE)** and render "Standard Recommendations" without flashing a blank state.
+When the LLM call errors, times out (>8s), or returns an unusable response, the **Suggest** view must automatically fall back to the **Template Recommendation Engine (TRE)** and render "Standard Recommendations" without flashing a blank state.
 
 Required UX:
-- Render TRE recommendations in the **same card layout** as Gemini suggestions — same typography, same apply button, same lift preview.
+- Render TRE recommendations in the **same card layout** as LLM suggestions — same typography, same apply button, same lift preview.
 - Show a small inline pill above the list: `"Standard recommendations"` in `--muted-foreground`, with an `Info` icon and tooltip explaining that AI suggestions are temporarily unavailable.
 - The "Apply" / optimistic-lift interaction must work identically — TRE-applied suggestions still animate the projected lift number.
 - Never block the page or show a destructive error. The fallback is the success state.
@@ -301,7 +301,7 @@ A status pill showing the current model's accuracy delta vs. its baseline.
 | Keep motion under 300ms | Use 500ms+ "fancy" easings |
 | One bold accent per view | Rainbow every metric chip |
 | Debounce caption input by 500ms before re-predicting | Fire a request on every keystroke |
-| Fall back to TRE when Gemini fails | Show a blank suggestions panel |
+| Fall back to TRE when LLM fails | Show a blank suggestions panel |
 | Use `lucide-react` + `recharts` | Mix in Heroicons / Chart.js |
 
 ---
