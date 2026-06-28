@@ -139,9 +139,7 @@ export default function PredictPage() {
     return d;
   });
 
-  const [caption, setCaption] = useState(
-    "Behind every drop is a 4am sketch. Save this if you've ever doubted a 2am idea.\n\nWhat's the one project that almost didn't make it?",
-  );
+  const [caption, setCaption] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [loadingPhase, setLoadingPhase] = useState(0);
