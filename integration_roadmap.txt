@@ -1,0 +1,103 @@
+ROADMAP INTEGRASI SISTEM FAIV PREDICT
+
+Legenda:
+[x] = Selesai dikerjakan
+[ ] = Belum dikerjakan
+
+================================================================================
+FASE 0: FONDASI PROYEK & LINGKUNGAN PENGEMBANGAN (100% Selesai)
+================================================================================
+[x] Struktur folder monorepo (frontend, ml-service, ml-training, docs)
+[x] Git configuration (.gitignore, .env.example)
+[x] Dokumentasi README.md dan DESIGN.md
+[x] Buku panduan teknis implementasi (implementation_guide.md)
+[x] Node.js 18+ & Python 3.10+ setup lokal
+
+================================================================================
+FASE 1: DATABASE LAYER - SUPABASE POSTGRESQL (29% Selesai)
+================================================================================
+[x] DDL SQL Script pembuat 5 tabel (brands, posts, predictions, models, model_retrain_jobs)
+[x] Indeks optimasi database PostgreSQL
+[ ] Eksekusi DDL script di editor SQL Supabase
+[ ] Input data awal brand klien agensi
+[ ] Input data awal postingan historis target training
+[ ] Konfigurasi keamanan Row Level Security (RLS)
+[ ] Pembuatan Storage Bucket "models" untuk file joblib
+
+================================================================================
+FASE 2: ML SERVICE BACKEND - FASTAPI PYTHON (94% Selesai)
+================================================================================
+[x] preprocessing.py: Ekstraksi 7 fitur caption/format & batas persentil ER
+[x] model_loader.py: Caching dan pengunduhan model dari Supabase Storage
+[x] train_pipeline.py: Pelatihan Random Forest dengan batas max_depth=4 & min_samples=5
+[x] requirements.txt: Daftar pustaka data science Python
+[x] main.py POST /predict: API klasifikasi ER konten (High/Average/Low)
+[x] main.py POST /train: API pemicu retraining model
+[x] main.py POST /suggest: API rekomendasi jam posting dan tagar optimal
+[x] main.py GET /train/{job_id}: API cek status antrean latihan model
+[x] Konfigurasi CORS middleware ke asal frontend localhost:3000
+[x] Pydantic request/response data schemas
+[x] Unit testing tests/test_api.py (pytest lulus 100%)
+[x] Swagger UI dokumentasi API otomatis (/docs)
+[x] Dockerfile pembungkus kontainer ML Service
+
+================================================================================
+FASE 3: BFF LAYER - NEXT.JS API ROUTES (73% Selesai)
+================================================================================
+[x] POST /api/predict: Handler prediksi & saran asisten Gemini AI
+[x] POST /api/train: Handler pemicu retraining backend Python
+[x] GET /api/train: Handler polling status retraining
+[x] POST /api/classify: Handler analisis niche brand via Gemini AI
+[x] POST /api/brands: Handler CRUD pendaftaran brand ke Supabase
+[x] Supabase client helpers (browser client, server client, & middleware)
+[x] Next.js root middleware auth guard
+[ ] GET /api/history: Query log prediksi di Supabase
+[ ] GET /api/dashboard: Query akumulasi performa KPI di Supabase
+[ ] Setup environment variables lokal (.env.local & ml-service/.env)
+
+================================================================================
+FASE 4: ANTARMUKA WORKSPACE & WIRING (94% Selesai)
+================================================================================
+[x] AppShell: Sidebar, Topbar, & mobile drawer responsive
+[x] Halaman Login (root page.tsx) terhubung ke Supabase Auth & fallback
+[x] Halaman Dashboard (dashboard/page.tsx) terhubung ke API /api/dashboard
+[x] Halaman Predict (predict/page.tsx) terhubung ke API /api/predict
+[x] Halaman Calendar (calendar/page.tsx) terhubung ke shortcut prediction
+[x] Halaman Niches (niches/page.tsx) terhubung ke API /api/brands & /api/classify
+[x] Halaman Model Health (model-health/page.tsx) terhubung ke API /api/train
+[x] Visualisasi komponen reusable (ConfidenceMeter, ModelMaturity, PostingHeatmap)
+[x] Desain global globals.css menggunakan skema warna oklch tokens
+[x] Integrasi sign-out/logout di AppShell menggunakan client helper
+[ ] Wiring database direct query untuk dashboard & logs history
+
+================================================================================
+FASE 5: OTENTIKASI & KEAMANAN - SUPABASE AUTH (83% Selesai)
+================================================================================
+[x] Instalasi pustaka @supabase/supabase-js & @supabase/ssr di frontend
+[x] Konfigurasi client/server/middleware helper files
+[x] Integrasi signInWithPassword pada form login page.tsx
+[x] Rute proteksi dengan auth guard di root middleware.ts
+[x] Cookie-based token session refresher
+[ ] Fitur logout & refresh sesi manual
+
+================================================================================
+FASE 9: DEPLOYMENT & DEVOPS (33% Selesai)
+================================================================================
+[x] Dockerfile untuk FastAPI ML Service
+[x] docker-compose.yml untuk orkestrasi local frontend + backend
+[ ] Deploy backend Python ke Railway / Render
+[ ] Deploy Next.js frontend ke Vercel
+
+================================================================================
+FASE 10: PENGUJIAN & DOKUMENTASI (43% Selesai)
+================================================================================
+[x] Unit test FastAPI endpoints (pytest)
+[x] Swagger UI manual test
+[x] Naskah skripsi Bab 3 (Perancangan) selesai
+[ ] Blackbox testing use case UC-01 s.d UC-10
+[ ] Screenshot & rekaman demo sistem untuk Bab 4
+[ ] Penulisan naskah skripsi Bab 4 (Implementasi & Pengujian)
+
+================================================================================
+📊 RINGKASAN PROGRESS: ~75% SELESAI (71 dari 95 Item Selesai)
+================================================================================
