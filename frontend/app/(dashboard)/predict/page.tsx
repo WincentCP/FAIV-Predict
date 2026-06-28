@@ -218,6 +218,9 @@ export default function PredictPage() {
           caption_length: parseFloat(liveStats.charCount.toString()),
           hashtag_count: parseFloat(stats.hashtags.length.toString()),
           has_cta: has_cta_val,
+          brand_id: account?.id,
+          niche: account?.niche,
+          caption: caption,
         }),
       });
 
@@ -255,28 +258,66 @@ export default function PredictPage() {
     }
   };
 
-  // AI suggestions typewriter simulation
+  // AI suggestions from Google Gemini API via Next.js BFF proxy
   const enrichWithAI = async () => {
     setAiState("loading");
     setTypewriterText("");
     setIsTyping(true);
     
-    await new Promise((r) => setTimeout(r, 1400));
-    
-    const suggestedText = "Behind every project launch is a 4am sketch. 🛠️ Here is the story of the project that almost didn't make it. Comment below with your 2am ideas and save this for your next creative sprint!";
-    setAiState("enriched");
-    
-    // Simulate typewriter effect for premium feel
-    let currentIdx = 0;
-    const interval = setInterval(() => {
-      if (currentIdx < suggestedText.length) {
-        setTypewriterText((prev) => prev + suggestedText.charAt(currentIdx));
-        currentIdx++;
-      } else {
-        clearInterval(interval);
-        setIsTyping(false);
+    try {
+      const is_carousel = contentFormat === "Carousel" ? 1.0 : 0.0;
+      const is_reels = contentFormat === "Reels" ? 1.0 : 0.0;
+      const has_cta_val = stats.hasCTA ? 1.0 : 0.0;
+
+      const res = await fetch("/api/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          is_carousel,
+          is_reels,
+          post_hour: scheduledAt.getHours(),
+          caption_length: parseFloat(liveStats.charCount.toString()),
+          hashtag_count: parseFloat(stats.hashtags.length.toString()),
+          has_cta: has_cta_val,
+          brand_id: account?.id,
+          niche: account?.niche,
+          caption: caption,
+          enrich: true
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === "success" && data.suggestions) {
+          setAiState("enriched");
+          const suggestedText = data.suggestions;
+          
+          // Simulate typewriter effect for premium feel
+          let currentIdx = 0;
+          const interval = setInterval(() => {
+            if (currentIdx < suggestedText.length) {
+              setTypewriterText((prev) => prev + suggestedText.charAt(currentIdx));
+              currentIdx++;
+            } else {
+              clearInterval(interval);
+              setIsTyping(false);
+            }
+          }, 10);
+          return;
+        }
       }
-    }, 15);
+      
+      // Fallback if API fails or Gemini is not configured
+      setAiState("fallback");
+      const fallbackText = "Optimasi Gagal: Silakan periksa koneksi internet atau API Key Google Gemini Anda. Coba gunakan saran parameter dari TRE.";
+      setTypewriterText(fallbackText);
+      setIsTyping(false);
+    } catch (err) {
+      console.error("AI Enrichment fetch error:", err);
+      setAiState("fallback");
+      setTypewriterText("Koneksi gagal menghubungi BFF.");
+      setIsTyping(false);
+    }
   };
 
   const applyAiTextToCaption = () => {

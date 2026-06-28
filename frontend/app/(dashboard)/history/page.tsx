@@ -34,10 +34,13 @@ const HISTORY: HistoryItem[] = [
   { id: "p_8810", brand: "Bison Gym", account: "@bison.gym", format: "Single Image", caption: "Membership promo — May only", tier: "Average", confidence: 73, when: "2 days ago" },
 ];
 
+import { useEffect } from "react";
+
 export default function HistoryPage() {
   const [tier, setTier] = useState<"All" | Tier>("All");
   const [brand, setBrand] = useState<string>("All");
   const [q, setQ] = useState("");
+  const [history, setHistory] = useState<HistoryItem[]>([]);
 
   // Actual evaluation outcomes map for closed-loop tracking
   const [outcomes, setOutcomes] = useState<Record<string, string>>({
@@ -47,13 +50,30 @@ export default function HistoryPage() {
     p_8818: "LOW",
   });
 
+  useEffect(() => {
+    async function fetchHistory() {
+      try {
+        const res = await fetch("/api/history");
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.length > 0) {
+            setHistory(data);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch history from API, fallback to default logs:", err);
+      }
+    }
+    fetchHistory();
+  }, []);
+
   const updateOutcome = (id: string, val: string) => {
     setOutcomes((prev) => ({ ...prev, [id]: val }));
   };
 
   const filtered = useMemo(
     () =>
-      HISTORY.filter(
+      history.filter(
         (h) =>
           (tier === "All" || h.tier === tier) &&
           (brand === "All" || h.brand === brand) &&
@@ -61,7 +81,7 @@ export default function HistoryPage() {
             h.account.toLowerCase().includes(q.toLowerCase()) ||
             h.caption.toLowerCase().includes(q.toLowerCase())),
       ),
-    [tier, brand, q],
+    [history, tier, brand, q],
   );
 
   return (

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
@@ -38,10 +39,10 @@ const LOCAL_KPIS = [
   {
     id: "predictions",
     label: "Total Predictions",
-    value: "12,847",
-    delta: "+12%",
+    value: "0",
+    delta: "0%",
     trend: "up" as const,
-    sub: "from last month",
+    sub: "No predictions recorded",
     colorClass: "text-success bg-success/10 border-success/20",
     iconColor: "text-success",
     glowColor: "hsl(var(--success) / 0.2)",
@@ -50,10 +51,10 @@ const LOCAL_KPIS = [
   {
     id: "accounts",
     label: "Active Accounts",
-    value: "2",
-    delta: "Active",
+    value: "0",
+    delta: "Inactive",
     trend: "up" as const,
-    sub: "Lasence & Bison Gym",
+    sub: "No brands registered",
     colorClass: "text-chart-3 bg-chart-3/10 border-chart-3/20",
     iconColor: "text-chart-3",
     glowColor: "hsl(var(--chart-3) / 0.2)",
@@ -62,10 +63,10 @@ const LOCAL_KPIS = [
   {
     id: "models",
     label: "Active Models",
-    value: "4",
-    delta: "Live",
+    value: "0",
+    delta: "Offline",
     trend: "up" as const,
-    sub: "2 General + 2 Dedicated",
+    sub: "No models deployed",
     colorClass: "text-primary bg-primary/10 border-primary/20",
     iconColor: "text-primary",
     glowColor: "hsl(var(--primary) / 0.2)",
@@ -74,10 +75,10 @@ const LOCAL_KPIS = [
   {
     id: "confidence",
     label: "Average Confidence",
-    value: "85.4%",
-    delta: "High",
+    value: "0%",
+    delta: "N/A",
     trend: "up" as const,
-    sub: "Average AI certainty rating",
+    sub: "No metrics evaluated",
     colorClass: "text-warning bg-warning/10 border-warning/20",
     iconColor: "text-warning",
     glowColor: "hsl(var(--warning) / 0.2)",
@@ -85,44 +86,7 @@ const LOCAL_KPIS = [
   },
 ];
 
-const LOCAL_RECENT_PREDICTIONS = [
-  {
-    id: "pred_1",
-    account: "@lasence.bakeshop",
-    format: "Single Image" as const,
-    caption: "Start your morning with our freshly baked, buttery croissants! 🥐 Pair it with our signature dark roast espresso for the ultimate cozy vibe. ✨ #bakerylove #freshpastry #coffeeshop",
-    tier: "High" as Tier,
-    confidence: 87.5,
-    when: "5 min ago",
-  },
-  {
-    id: "pred_2",
-    account: "@bisongym.mdn",
-    format: "Reels" as const,
-    caption: "No excuses. Crush your high-intensity interval training session today with Coach Sarah. Let's make every rep count! 💪🔥 #workoutmotivation #hiit #fitnessgoals",
-    tier: "High" as Tier,
-    confidence: 91.2,
-    when: "2 hours ago",
-  },
-  {
-    id: "pred_3",
-    account: "@lasence.bakeshop",
-    format: "Carousel" as const,
-    caption: "Weekend preview: Here's a sneak peek of our new artisanal sourdough loaves and sweet tarts coming this Saturday. Pre-order link in bio! 🍰🍞 #sourdough #pastries",
-    tier: "Average" as Tier,
-    confidence: 76.4,
-    when: "1 day ago",
-  },
-  {
-    id: "pred_4",
-    account: "@bisongym.mdn",
-    format: "Single Image" as const,
-    caption: "Did you drink enough water today? Hydration is key to keeping your energy levels high and recovery times low. 💧 #healthytips #fitnesslife",
-    tier: "Low" as Tier,
-    confidence: 62.1,
-    when: "2 days ago",
-  },
-];
+const LOCAL_RECENT_PREDICTIONS: any[] = [];
 
 const ACCURACY_TREND = [
   { day: "05/01", accuracy: 82.5 },
@@ -157,6 +121,48 @@ const ACCURACY_TREND = [
 export default function DashboardPage() {
   const personalCount = BRANDS.filter((b) => b.stage === "Personal").length;
   const driftCount = BRANDS.filter((b) => b.drift).length;
+
+  const [kpis, setKpis] = useState(LOCAL_KPIS);
+  const [recentPredictions, setRecentPredictions] = useState(LOCAL_RECENT_PREDICTIONS);
+
+  useEffect(() => {
+    async function fetchDashboard() {
+      try {
+        const res = await fetch("/api/dashboard");
+        if (res.ok) {
+          const data = await res.json();
+          
+          setKpis((prev) =>
+            prev.map((kpi) => {
+              if (kpi.id === "predictions" && data.totalPredictions !== undefined) {
+                return { ...kpi, value: data.totalPredictions.toLocaleString() };
+              }
+              if (kpi.id === "models" && data.totalModels !== undefined) {
+                return { ...kpi, value: `${data.totalModels} Live` };
+              }
+              return kpi;
+            })
+          );
+
+          if (data.recent && data.recent.length > 0) {
+            const mappedRecent = data.recent.map((r: any) => ({
+              id: r.id,
+              account: r.brand ? `@${r.brand.toLowerCase().replace(/\s+/g, "")}` : "@unknown",
+              format: "Single Image" as const,
+              caption: r.caption,
+              tier: r.tier as any,
+              confidence: 85.0,
+              when: new Date(r.when).toLocaleDateString()
+            }));
+            setRecentPredictions(mappedRecent);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch dashboard metrics, using local mock data:", err);
+      }
+    }
+    fetchDashboard();
+  }, []);
 
   const containerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -330,7 +336,7 @@ export default function DashboardPage() {
         variants={itemVariants}
         className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
       >
-        {LOCAL_KPIS.map((kpi) => {
+        {kpis.map((kpi) => {
           const KpiIcon = kpi.icon;
           return (
             <motion.div
@@ -405,7 +411,7 @@ export default function DashboardPage() {
               </Link>
             </div>
             <ul className="divide-y divide-border/60">
-              {LOCAL_RECENT_PREDICTIONS.map((r) => (
+              {recentPredictions.map((r) => (
                 <li
                   key={r.id}
                   className="group flex flex-col justify-between py-3 transition-all duration-300"

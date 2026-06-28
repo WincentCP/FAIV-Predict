@@ -50,18 +50,7 @@ const mm = today.getMonth();
 const ymd = (y: number, m: number, d: number) =>
   `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
-const SEED_ENTRIES: CalendarEntry[] = [
-  { id: "e1", date: ymd(yyyy, mm, 3), time: "09:00", account: "@lasence.bakeshop", format: "Reels", caption: "Behind the scenes — week 17 shoot day", tier: "High", confidence: 91, status: "ready_to_post", picName: "Alice", platform: "IG" },
-  { id: "e2", date: ymd(yyyy, mm, 5), time: "19:30", account: "@lasence.bakeshop", format: "Carousel", caption: "Spring menu lineup, 6 new pastries arriving", tier: "High", confidence: 87, status: "screening", picName: "Bob", platform: "IG" },
-  { id: "e3", date: ymd(yyyy, mm, 8), time: "12:15", account: "@bisongym.mdn", format: "Single Image", caption: "New drop · linen series 02 now live", tier: "Average", confidence: 74, status: "draft", picName: "Alice", platform: "FB" },
-  { id: "e4", date: ymd(yyyy, mm, 10), time: "20:00", account: "@lasence.bakeshop", format: "Reels", caption: "Morning mobility flow, 6 minutes flat", tier: "Average", confidence: 68, status: "published", picName: "Dave", platform: "IG" },
-  { id: "e5", date: ymd(yyyy, mm, 12), time: "18:45", account: "@lasence.bakeshop", format: "Carousel", caption: "Editor's picks — 5 reads to close the week", tier: "Low", confidence: 61, status: "screening", picName: "Bob", platform: "IG" },
-  { id: "e6", date: ymd(yyyy, mm, 15), time: "20:15", account: "@bisongym.mdn", format: "Reels", caption: "Atelier walkthrough · the cutting room", tier: "High", confidence: 93, status: "ready_to_post", picName: "Charlie", platform: "IG" },
-  { id: "e7", date: ymd(yyyy, mm, 17), time: "11:30", account: "@lasence.bakeshop", format: "Single Image", caption: "Soft launch poster, comment what you see", tier: "Average", confidence: 76, status: "ready_to_post", picName: "Alice", platform: "IG" },
-  { id: "e8", date: ymd(yyyy, mm, 17), time: "21:00", account: "@lasence.bakeshop", format: "Reels", caption: "Croissant lamination, slow motion", tier: "High", confidence: 89, status: "screening", picName: "Bob", platform: "IG" },
-  { id: "e9", date: ymd(yyyy, mm, 22), time: "10:00", account: "@bisongym.mdn", format: "Reels", caption: "Studio tour — SS25 launch details", tier: "High", confidence: 90, status: "draft", picName: "Charlie", platform: "IG" },
-  { id: "e10", date: ymd(yyyy, mm, 24), time: "19:00", account: "@lasence.bakeshop", format: "Single Image", caption: "Coach spotlight — meet Mia", tier: "Average", confidence: 72, status: "published", picName: "Dave", platform: "FB" },
-];
+const SEED_ENTRIES: CalendarEntry[] = [];
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -193,21 +182,60 @@ export default function CalendarPage() {
   const runPredictShortcut = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     setRunningPredictId(id);
-    await new Promise((r) => setTimeout(r, 700));
-    setEntries((prev) =>
-      prev.map((entry) => {
-        if (entry.id === id) {
-          return {
-            ...entry,
-            tier: "High",
-            confidence: 89,
-            postingNote: "Best Time: 19:00"
-          };
+    
+    const entry = entries.find((x) => x.id === id);
+    if (!entry) {
+      setRunningPredictId(null);
+      return;
+    }
+
+    try {
+      const is_carousel = entry.format === "Carousel" ? 1.0 : 0.0;
+      const is_reels = entry.format === "Reels" ? 1.0 : 0.0;
+      
+      const words = /(beli|dapatkan|pesan|kunjungi|klik|daftar|hubungi|contact|order|yuk|promo|diskon|check|checkout|tonton|baca|share|follow)/i;
+      const has_cta_val = words.test(entry.caption) ? 1.0 : 0.0;
+      const hashtags = (entry.caption.match(/#\w+/g) || []).length;
+
+      const res = await fetch("/api/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          is_carousel,
+          is_reels,
+          post_hour: parseInt(entry.time.split(":")[0]) || 19,
+          caption_length: parseFloat(entry.caption.length.toString()),
+          hashtag_count: parseFloat(hashtags.toString()),
+          has_cta: has_cta_val,
+          caption: entry.caption,
+          brand_id: entry.account === "@lasence.bakeshop" ? "bfd6dbca-613d-4950-8b1e-45ad7dcf1088" : "bfd6dbca-613d-4950-8b1e-45ad7dcf1089",
+          niche: entry.account === "@lasence.bakeshop" ? "Bakery & Café" : "Gym & Fitness"
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === "success" || data.predicted_class) {
+          setEntries((prev) =>
+            prev.map((item) => {
+              if (item.id === id) {
+                return {
+                  ...item,
+                  tier: data.predicted_class as any,
+                  confidence: Math.round(data.confidence),
+                  postingNote: `Model: ${data.model_metadata?.is_personal_model_active ? "Personal" : "Niche"}`
+                };
+              }
+              return item;
+            })
+          );
         }
-        return entry;
-      })
-    );
-    setRunningPredictId(null);
+      }
+    } catch (err) {
+      console.error("Error executing shortcut prediction:", err);
+    } finally {
+      setRunningPredictId(null);
+    }
   };
 
   return (

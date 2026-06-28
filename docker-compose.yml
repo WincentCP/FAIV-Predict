@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - PORT=8000
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - FASTAPI_URL=http://ml-service:8000
+      - LLM_API_KEY=${LLM_API_KEY}
+    depends_on:
+      - ml-service
+    restart: always

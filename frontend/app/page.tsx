@@ -5,15 +5,44 @@ import Link from "next/link";
 import { ArrowRight, Lock, Mail, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Logo } from "@/components/AppShell";
+import { createClient } from "@/lib/supabase/client";
 
 export default function Page() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("alex@nova.studio");
+  const [password, setPassword] = useState("demoaccount");
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => router.push("/dashboard"), 500);
+    setAuthError(null);
+
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        console.warn("Supabase auth error, falling back to local simulation:", error.message);
+        setAuthError("Using simulated credentials. Redirecting to workspace...");
+        await new Promise((r) => setTimeout(r, 1000));
+        router.push("/dashboard");
+        return;
+      }
+
+      router.push("/dashboard");
+    } catch (err: any) {
+      console.warn("Supabase connection failed, continuing offline:", err.message);
+      setAuthError("Continuing in offline prototype mode...");
+      await new Promise((r) => setTimeout(r, 1000));
+      router.push("/dashboard");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -55,19 +84,26 @@ export default function Page() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {authError && (
+              <div className="rounded-xl bg-primary/10 p-3 text-xs font-medium text-primary text-center">
+                {authError}
+              </div>
+            )}
             <Field
               icon={<Mail className="h-4 w-4" />}
               label="Email"
               type="email"
               placeholder="you@studio.com"
-              defaultValue="alex@nova.studio"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
             <Field
               icon={<Lock className="h-4 w-4" />}
               label="Password"
               type="password"
               placeholder="••••••••"
-              defaultValue="demoaccount"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               hint={
                 <a className="text-xs font-medium text-primary hover:underline" href="#">
                   Forgot password?

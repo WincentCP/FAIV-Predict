@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import {
   LayoutDashboard,
   Sparkles,
@@ -50,6 +51,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isSidebarMenuOpen, setIsSidebarMenuOpen] = React.useState(false);
   const [isTopbarMenuOpen, setIsTopbarMenuOpen] = React.useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+
+  const handleLogout = async () => {
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      router.push("/");
+    } catch (err) {
+      console.warn("Failed to sign out via Supabase:", err);
+      router.push("/");
+    }
+  };
 
   const sidebarRef = React.useRef<HTMLDivElement>(null);
   const topbarRef = React.useRef<HTMLDivElement>(null);
@@ -243,7 +255,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <button
                     onClick={() => {
                       setIsSidebarMenuOpen(false);
-                      router.push("/");
+                      handleLogout();
                     }}
                     className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-semibold text-destructive hover:bg-destructive/10 transition-colors"
                   >
@@ -356,7 +368,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       <button
                         onClick={() => {
                           setIsTopbarMenuOpen(false);
-                          router.push("/");
+                          handleLogout();
                         }}
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-semibold text-destructive hover:bg-destructive/10 transition-colors"
                       >
