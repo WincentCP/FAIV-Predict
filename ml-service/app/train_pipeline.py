@@ -2,6 +2,7 @@ import os
 import re
 import datetime
 import logging
+import json
 import joblib
 import httpx
 import numpy as np
@@ -34,6 +35,35 @@ class ModelTrainer:
         if not db_url:
             raise ValueError("DATABASE_URL environment variable is not set.")
         return psycopg2.connect(db_url)
+
+    @classmethod
+    def _cleanup_old_cached_models(cls, model_type: str, identifier: str, keep_limit: int = 2):
+        """
+        Removes older cached model files of the same type and brand/niche to prevent disk bloat.
+        Only keeps the newest `keep_limit` files.
+        """
+        try:
+            files = []
+            prefix = f"model_{model_type}_{identifier}_"
+            for f in os.listdir(CACHE_DIR):
+                if f.startswith(prefix) and f.endswith(".joblib"):
+                    full_path = os.path.join(CACHE_DIR, f)
+                    files.append((full_path, os.path.getmtime(full_path)))
+            
+            # Sort files by modification time descending (newest first)
+            files.sort(key=lambda x: x[1], reverse=True)
+            
+            # Remove files beyond the keep_limit
+            if len(files) > keep_limit:
+                for old_file, _ in files[keep_limit:]:
+                    try:
+                        os.remove(old_file)
+                        logger.info(f"Cleaned up old cached model file: {old_file}")
+                    except Exception as fe:
+                        logger.warning(f"Could not remove old cached model file {old_file}: {fe}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up old cached models: {e}")
+
 
     @classmethod
     def fetch_historical_data(cls, brand_id: Optional[str] = None, niche: Optional[str] = None) -> pd.DataFrame:
@@ -192,7 +222,7 @@ class ModelTrainer:
         
         # 2. Extract features
         X_df, feature_cols = DataPreprocessor.process_dataframe(df)
-        y_er = df["er"]
+        y_er = df["er"].astype(float)
         
         # 3. Train-Test Split (80:20)
         X_train, X_test, y_er_train, y_er_test = train_test_split(
@@ -251,6 +281,9 @@ class ModelTrainer:
         joblib.dump(model_bundle, local_path)
         logger.info(f"Saved local model bundle to {local_path}")
         
+        # Clean up older cached models to prevent disk space leaks (Fix 4.2)
+        cls._cleanup_old_cached_models(model_type, str(brand_id or niche))
+        
         # 8. Upload to Supabase Storage
         storage_path = f"{model_type}/{model_filename}"
         storage_url = cls.upload_to_supabase_storage(local_path, storage_path)
@@ -278,7 +311,7 @@ class ModelTrainer:
                         storage_url, 
                         version_str, 
                         accuracy, 
-                        joblib.json.dumps(metrics)
+                        json.dumps(metrics)
                     )
                 )
                 model_db_id = cur.fetchone()[0]

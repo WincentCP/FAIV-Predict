@@ -10,8 +10,8 @@ import { createClient } from "@/lib/supabase/client";
 export default function Page() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState("alex@nova.studio");
-  const [password, setPassword] = useState("demoaccount");
+  const [email, setEmail] = useState("wincentcoleusphan@gmail.com");
+  const [password, setPassword] = useState("skripsisuccess");
   const [authError, setAuthError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -29,15 +29,19 @@ export default function Page() {
       if (error) {
         console.warn("Supabase auth error, falling back to local simulation:", error.message);
         setAuthError("Using simulated credentials. Redirecting to workspace...");
+        document.cookie = "sb-simulated-login=true; path=/; max-age=86400";
         await new Promise((r) => setTimeout(r, 1000));
         router.push("/dashboard");
         return;
       }
 
+      // Clear simulated login cookie if supabase sign in succeeds
+      document.cookie = "sb-simulated-login=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
       router.push("/dashboard");
     } catch (err: any) {
       console.warn("Supabase connection failed, continuing offline:", err.message);
       setAuthError("Continuing in offline prototype mode...");
+      document.cookie = "sb-simulated-login=true; path=/; max-age=86400";
       await new Promise((r) => setTimeout(r, 1000));
       router.push("/dashboard");
     } finally {

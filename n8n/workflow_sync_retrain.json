@@ -1,0 +1,146 @@
+{
+  "name": "FAIV Predict - Auto Sync & Retrain Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Weekly Schedule (Senin 06:00 WIB)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/sync/now",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "sync-retrain",
+      "name": "Sync Instagram + Retrain Models",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-success",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "success",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-status",
+      "name": "Pipeline Berhasil?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "faivpredict@gmail.com",
+        "toEmail": "wincentcoleusphan@gmail.com",
+        "subject": "=✅ FAIV Predict - Sync & Retrain Berhasil ({{ $now.format('dd/MM/yyyy HH:mm') }})",
+        "emailType": "html",
+        "html": "=<div style=\"font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f1117; color: #e0e0e0; border-radius: 16px; overflow: hidden;\">\n  <div style=\"background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 32px 24px; text-align: center;\">\n    <h1 style=\"color: white; margin: 0; font-size: 24px;\">FAIV Predict</h1>\n    <p style=\"color: rgba(255,255,255,0.8); margin: 8px 0 0;\">Pipeline Sync & Retrain Selesai</p>\n  </div>\n  <div style=\"padding: 24px;\">\n    <p>Halo Wincent,</p>\n    <p>Pipeline otomatis n8n telah selesai dijalankan pada <strong>{{ $now.format('dd MMMM yyyy, HH:mm') }} WIB</strong>.</p>\n    <h3 style=\"color: #8b5cf6;\">📊 Hasil Sinkronisasi & Pelatihan Model:</h3>\n    <table style=\"width: 100%; border-collapse: collapse; margin: 16px 0;\">\n      <tr style=\"background: #1a1d2e;\">\n        <th style=\"padding: 12px; text-align: left; border-bottom: 1px solid #2d3348;\">Brand</th>\n        <th style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">Posts</th>\n        <th style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">Status</th>\n      </tr>\n      {{ $json.results.map(r => '<tr><td style=\"padding: 12px; border-bottom: 1px solid #2d3348;\">' + r.brand + '</td><td style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">' + (r.sync.posts_synced || 'N/A') + '</td><td style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">' + (r.train.status === 'success' ? '✅ ' + (r.train.accuracy * 100).toFixed(1) + '%' : '❌ Failed') + '</td></tr>').join('') }}\n    </table>\n    <p style=\"color: #9ca3af; font-size: 13px;\">Email ini dikirim secara otomatis oleh sistem FAIV Predict via n8n.</p>\n  </div>\n</div>",
+        "options": {}
+      },
+      "id": "email-success",
+      "name": "Email Notifikasi Sukses",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [960, 220]
+    },
+    {
+      "parameters": {
+        "fromEmail": "faivpredict@gmail.com",
+        "toEmail": "wincentcoleusphan@gmail.com",
+        "subject": "=❌ FAIV Predict - Pipeline Gagal ({{ $now.format('dd/MM/yyyy HH:mm') }})",
+        "emailType": "html",
+        "html": "=<div style=\"font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f1117; color: #e0e0e0; border-radius: 16px; overflow: hidden;\">\n  <div style=\"background: linear-gradient(135deg, #ef4444, #dc2626); padding: 32px 24px; text-align: center;\">\n    <h1 style=\"color: white; margin: 0; font-size: 24px;\">FAIV Predict</h1>\n    <p style=\"color: rgba(255,255,255,0.8); margin: 8px 0 0;\">Pipeline Error Alert</p>\n  </div>\n  <div style=\"padding: 24px;\">\n    <p>Halo Wincent,</p>\n    <p>Pipeline sync & retrain mengalami <strong>kegagalan</strong> pada {{ $now.format('dd MMMM yyyy, HH:mm') }} WIB.</p>\n    <h3 style=\"color: #ef4444;\">⚠️ Detail Error:</h3>\n    <pre style=\"background: #1a1d2e; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px;\">{{ JSON.stringify($json, null, 2) }}</pre>\n    <p>Silakan periksa token Instagram Graph API atau koneksi database Supabase Anda.</p>\n    <p style=\"color: #9ca3af; font-size: 13px;\">Email ini dikirim secara otomatis oleh sistem FAIV Predict via n8n.</p>\n  </div>\n  <div style=\"padding: 24px;\">",
+        "options": {}
+      },
+      "id": "email-failure",
+      "name": "Email Notifikasi Gagal",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [960, 420]
+    }
+  ],
+  "connections": {
+    "Weekly Schedule (Senin 06:00 WIB)": {
+      "main": [
+        [
+          {
+            "node": "Sync Instagram + Retrain Models",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Instagram + Retrain Models": {
+      "main": [
+        [
+          {
+            "node": "Pipeline Berhasil?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pipeline Berhasil?": {
+      "main": [
+        [
+          {
+            "node": "Email Notifikasi Sukses",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email Notifikasi Gagal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "FAIV Predict",
+      "id": "faiv-predict"
+    }
+  ]
+}

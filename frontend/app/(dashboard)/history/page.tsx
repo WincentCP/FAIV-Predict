@@ -58,10 +58,16 @@ export default function HistoryPage() {
           const data = await res.json();
           if (data && data.length > 0) {
             setHistory(data);
+          } else {
+            setHistory(HISTORY);
           }
+        } else {
+          console.warn("API returned non-ok status, falling back to default logs.");
+          setHistory(HISTORY);
         }
       } catch (err) {
         console.warn("Could not fetch history from API, fallback to default logs:", err);
+        setHistory(HISTORY);
       }
     }
     fetchHistory();

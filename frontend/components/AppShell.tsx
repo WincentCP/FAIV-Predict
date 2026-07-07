@@ -56,9 +56,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     try {
       const supabase = createClient();
       await supabase.auth.signOut();
+      document.cookie = "sb-simulated-login=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
       router.push("/");
     } catch (err) {
       console.warn("Failed to sign out via Supabase:", err);
+      document.cookie = "sb-simulated-login=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
       router.push("/");
     }
   };
