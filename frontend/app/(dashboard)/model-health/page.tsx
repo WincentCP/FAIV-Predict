@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { MODELS, type MlModel } from "@/lib/mock-data";
 import {
@@ -45,9 +45,27 @@ const itemVariants = {
 };
 
 export default function ModelHealthPage() {
+  const [models, setModels] = useState<MlModel[]>(MODELS);
   const [retrainingModel, setRetrainingModel] = useState<MlModel | null>(null);
   const [logsOutput, setLogsOutput] = useState<any[] | null>(null);
   const [isTraining, setIsTraining] = useState(false);
+
+  useEffect(() => {
+    async function fetchModels() {
+      try {
+        const res = await fetch("/api/models");
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.length > 0) {
+            setModels(data);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load real models from BFF API, using static fallbacks:", err);
+      }
+    }
+    fetchModels();
+  }, []);
 
   const startRetrain = async (model: MlModel) => {
     setRetrainingModel(model);
@@ -72,7 +90,7 @@ export default function ModelHealthPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          brand_id: model.scope === "Personal" ? "bfd6dbca-613d-4950-8b1e-45ad7dcf1088" : undefined,
+          brand_id: model.scope === "Personal" ? model.brandId : undefined,
           niche: model.niche
         }),
       });
@@ -149,7 +167,7 @@ export default function ModelHealthPage() {
 
   const handleGlobalRetrain = () => {
     // Find the first drifted or active model to retrain
-    const target = MODELS.find(m => m.baselineAccuracy - m.rollingAccuracy > 15) || MODELS[0];
+    const target = models.find(m => m.baselineAccuracy - m.rollingAccuracy > 15) || models[0];
     startRetrain(target);
   };
 
@@ -188,19 +206,19 @@ export default function ModelHealthPage() {
       <motion.section variants={itemVariants} className="grid gap-4 sm:grid-cols-3">
         <SummaryCard
           label="Active Models"
-          value={MODELS.filter((m) => m.is_active).length.toString()}
+          value={models.filter((m) => m.is_active).length.toString()}
           tone="primary"
         />
         <SummaryCard
           label="Average Rolling Accuracy"
           value={`${(
-            MODELS.reduce((s, m) => s + m.rollingAccuracy, 0) / MODELS.length
+            models.reduce((s, m) => s + m.rollingAccuracy, 0) / models.length
           ).toFixed(1)}%`}
           tone="lime"
         />
         <SummaryCard
           label="Accuracy Alerts"
-          value={MODELS.filter((m) => m.baselineAccuracy - m.rollingAccuracy > 15).length.toString()}
+          value={models.filter((m) => m.baselineAccuracy - m.rollingAccuracy > 15).length.toString()}
           tone="destructive"
         />
       </motion.section>
@@ -221,11 +239,11 @@ export default function ModelHealthPage() {
                 <th className="w-[140px] px-6 py-5">30d Rolling Acc.</th>
                 <th className="w-[90px] px-6 py-5">Historical Trend</th>
                 <th className="w-[110px] px-6 py-5">Health Status</th>
-                <th className="w-[100px] px-6 py-5 text-right" />
+                <th className="w-[140px] px-6 py-5 text-right" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {MODELS.map((m, i) => {
+              {models.map((m, i) => {
                 const drop = m.baselineAccuracy - m.rollingAccuracy;
                 const isPersonal = m.scope === "Personal";
 
@@ -296,11 +314,11 @@ export default function ModelHealthPage() {
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-5 align-middle">
+                    <td className="px-6 py-5 align-middle whitespace-nowrap">
                       <Sparkline values={m.rolling30d} isDrift={drop > 15} />
                     </td>
-                    <td className="px-6 py-5 align-middle">{driftBadge}</td>
-                    <td className="px-6 py-5 align-middle text-right">
+                    <td className="px-6 py-5 align-middle whitespace-nowrap">{driftBadge}</td>
+                    <td className="px-6 py-5 align-middle text-right whitespace-nowrap">
                       <button
                         type="button"
                         onClick={() => startRetrain(m)}
