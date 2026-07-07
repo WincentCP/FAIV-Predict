@@ -28,9 +28,13 @@ export async function updateSession(request: NextRequest) {
   );
 
   // This updates the session and cookie. Do not remove.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data?.user || null;
+  } catch (err) {
+    console.warn("Middleware failed to retrieve user session:", err);
+  }
 
   const isDashboardRoute =
     request.nextUrl.pathname.startsWith("/dashboard") ||

@@ -24,7 +24,7 @@
 
 ## 2. Design System & UX Philosophy
 
-Our UI/UX centers around a **minimalist, productivity-focused, and premium SaaS approach**. Detailed specifications are maintained in [DESIGN.md](./docs/DESIGN.md) and [FAIV_Predict_Design_Documentation.md](./docs/FAIV_Predict_Design_Documentation.md).
+Our UI/UX centers around a **minimalist, productivity-focused, and premium SaaS approach** using a modern, unified design system.
 
 ### 2.1 Color System (OKLCH Tokens)
 We use a curated, HSL/OKLCH color system defined in [globals.css](./frontend/app/globals.css). Hardcoded hex or standard Tailwind values are forbidden.

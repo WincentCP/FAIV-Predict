@@ -31,19 +31,19 @@ export default function Page() {
         setAuthError("Using simulated credentials. Redirecting to workspace...");
         document.cookie = "sb-simulated-login=true; path=/; max-age=86400";
         await new Promise((r) => setTimeout(r, 1000));
-        router.push("/dashboard");
+        window.location.href = "/dashboard";
         return;
       }
 
       // Clear simulated login cookie if supabase sign in succeeds
       document.cookie = "sb-simulated-login=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-      router.push("/dashboard");
+      window.location.href = "/dashboard";
     } catch (err: any) {
       console.warn("Supabase connection failed, continuing offline:", err.message);
       setAuthError("Continuing in offline prototype mode...");
       document.cookie = "sb-simulated-login=true; path=/; max-age=86400";
       await new Promise((r) => setTimeout(r, 1000));
-      router.push("/dashboard");
+      window.location.href = "/dashboard";
     } finally {
       setLoading(false);
     }
