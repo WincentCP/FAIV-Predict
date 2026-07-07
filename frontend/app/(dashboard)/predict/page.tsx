@@ -622,14 +622,15 @@ export default function PredictPage() {
                           <div>
                             <Label>Brand Account</Label>
                             <select
-                              value={account.handle}
-                              onChange={(e) =>
-                                setAccountIdx(ACCOUNTS.findIndex((a) => a.handle === e.target.value))
-                              }
+                              value={account?.handle || ""}
+                              onChange={(e) => {
+                                const idx = ACCOUNTS.findIndex((a) => a.handle === e.target.value);
+                                if (idx !== -1) setAccountIdx(idx);
+                              }}
                               className="mt-1.5 h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs font-semibold outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20"
                             >
                               {ACCOUNTS.map((a) => (
-                                <option key={a.handle}>{a.handle} ({a.name})</option>
+                                <option key={a.handle} value={a.handle}>{a.handle} ({a.name})</option>
                               ))}
                             </select>
                           </div>

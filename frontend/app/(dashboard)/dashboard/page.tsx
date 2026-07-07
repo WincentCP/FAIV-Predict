@@ -51,10 +51,10 @@ const LOCAL_KPIS = [
   {
     id: "accounts",
     label: "Active Accounts",
-    value: "0",
-    delta: "Inactive",
+    value: BRANDS.length.toString(),
+    delta: "Active",
     trend: "up" as const,
-    sub: "No brands registered",
+    sub: `${BRANDS.length} brands connected`,
     colorClass: "text-chart-3 bg-chart-3/10 border-chart-3/20",
     iconColor: "text-chart-3",
     glowColor: "hsl(var(--chart-3) / 0.2)",
@@ -139,6 +139,9 @@ export default function DashboardPage() {
               }
               if (kpi.id === "models" && data.totalModels !== undefined) {
                 return { ...kpi, value: `${data.totalModels} Live` };
+              }
+              if (kpi.id === "accounts") {
+                return { ...kpi, value: BRANDS.length.toString(), sub: `${BRANDS.length} brands connected` };
               }
               return kpi;
             })
