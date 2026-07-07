@@ -17,7 +17,7 @@ type FeatureAttributionChartProps = {
 
 export default function FeatureAttributionChart({ data }: FeatureAttributionChartProps) {
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height={220} minHeight={220}>
       <BarChart
         layout="vertical"
         data={data}

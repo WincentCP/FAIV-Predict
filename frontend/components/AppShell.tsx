@@ -280,7 +280,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                   <span className="h-1.5 w-1.5 rounded-full bg-[oklch(0.72_0.16_150)]" />
-                  Administrator · Nova
+                  Administrator
                 </div>
               </div>
               <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-200", isSidebarMenuOpen && "rotate-180")} />
@@ -347,7 +347,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <div className="flex flex-col gap-0.5">
                       <div className="px-2.5 py-1.5 border-b border-border/40 mb-1">
                         <div className="text-xs font-semibold text-foreground">Wincent</div>
-                        <div className="text-[10px] text-muted-foreground">alex@nova.studio</div>
+                        <div className="text-[10px] text-muted-foreground">wincentcoleusphan@gmail.com</div>
                       </div>
                       <button
                         onClick={() => {

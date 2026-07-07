@@ -414,6 +414,49 @@ export default function PredictPage() {
     }));
   }, []);
 
+  const dynamicReasons = useMemo(() => {
+    const currentNiche = account?.niche || "this category";
+    const postHour = scheduledAt.getHours();
+    const isCTA = stats.hasCTA;
+    const isOptimalHour = postHour >= 19 && postHour <= 21;
+    const isOptimalHashtags = stats.hashtags.length >= 3 && stats.hashtags.length <= 8;
+
+    return [
+      {
+        label: `Content Type (${contentFormat}) aligns with top-performing formats`,
+        detail: `${contentFormat} perform exceptionally well for ${currentNiche} brands.`,
+        weight: 0.28,
+        direction: "positive" as const,
+      },
+      {
+        label: isOptimalHour 
+          ? "Posting time is within the peak audience window" 
+          : "Posting time is outside the peak audience window",
+        detail: isOptimalHour
+          ? `${postHour}:00 is during the optimal 19:00–21:00 engagement window for ${currentNiche}.`
+          : `${postHour}:00 is outside the optimal 19:00–21:00 engagement window for ${currentNiche}.`,
+        weight: 0.22,
+        direction: isOptimalHour ? ("positive" as const) : ("negative" as const),
+      },
+      {
+        label: isCTA ? "Explicit Call-to-Action detected" : "No explicit Call-to-Action detected",
+        detail: isCTA
+          ? `Adding a prompt ("${stats.ctaTerms[0] || 'CTA'}") to save or comment increases overall post performance.`
+          : "Adding a prompt to save or comment (like 'Save this' or 'Comment below') can increase reach by 8%.",
+        weight: 0.08,
+        direction: isCTA ? ("positive" as const) : ("negative" as const),
+      },
+      {
+        label: isOptimalHashtags ? "Optimal hashtag count detected" : "Suboptimal hashtag count",
+        detail: isOptimalHashtags
+          ? `Using ${stats.hashtags.length} hashtags aligns perfectly with the optimal 3-8 range for discovery.`
+          : `Using ${stats.hashtags.length} hashtags is outside the optimal 3-8 hashtag range for ${currentNiche}.`,
+        weight: 0.15,
+        direction: isOptimalHashtags ? ("positive" as const) : ("negative" as const),
+      }
+    ];
+  }, [account, scheduledAt, stats, contentFormat]);
+
   const friendlySuggestions = useMemo(() => {
     return SUGGESTIONS.map((s) => {
       if (s.feature === "caption_length") {
@@ -514,7 +557,7 @@ export default function PredictPage() {
                   Running ML Classifier
                 </div>
                 <h3 className="text-xl font-bold font-display text-foreground">Analyzing Post Impact</h3>
-                <p className="text-xs text-muted-foreground max-w-sm mx-auto">Evaluating caption copy against {account.samples} niche historical interaction samples</p>
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto">Evaluating caption copy against {account?.samples || 0} niche historical interaction samples</p>
               </div>
 
               {/* Checklist Progress Timeline */}
@@ -774,7 +817,7 @@ export default function PredictPage() {
                     <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground font-bold">Model Input:</span>
                     <div className="flex items-center gap-1.5 text-foreground font-bold">
                       <FileText className="h-3.5 w-3.5 text-primary" />
-                      <span>{account.handle}</span>
+                      <span>{account?.handle || ""}</span>
                     </div>
                     <span className="text-muted-foreground/30">•</span>
                     <div className="flex items-center gap-1.5 text-foreground font-semibold">
@@ -924,8 +967,8 @@ export default function PredictPage() {
                   </div>
 
                   <div className="grid gap-6 md:grid-cols-2">
-                    <WhyThisScore reasons={REASONS} context="Key performance indicators shaped by your account history." />
-                    <ModelMaturity samples={account.samples} />
+                    <WhyThisScore reasons={dynamicReasons} context="Key performance indicators shaped by your account history." />
+                    <ModelMaturity samples={account?.samples || 0} />
                   </div>
 
                   {/* Recharts chart panel */}
