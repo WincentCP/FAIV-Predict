@@ -198,12 +198,8 @@ const SAMPLE_TARGET = 200;
 const stageOf = (s: number): ModelStage => (s >= SAMPLE_TARGET ? "Personal" : "Niche");
 
 export const BRANDS: Brand[] = [
-  { id: "b1", name: "Lasence Bakeshop", handle: "@lasence.bakeshop", niche: "Bakery & Café", samples: 412, stage: stageOf(412), accuracy: 81.0, drift: false, status: "active", lastRun: "2h ago" },
-  { id: "b2", name: "Bison Gym", handle: "@bison.gym", niche: "Fitness & Wellness", samples: 35, stage: stageOf(35), accuracy: 73.0, drift: true, status: "active", lastRun: "12m ago" },
-  { id: "b3", name: "Nova Studio", handle: "@nova.studio", niche: "Creative Agency", samples: 247, stage: stageOf(247), accuracy: 86.4, drift: false, status: "active", lastRun: "8m ago" },
-  { id: "b4", name: "Kindred", handle: "@kindred.brand", niche: "Lifestyle Retail", samples: 124, stage: stageOf(124), accuracy: 78.5, drift: false, status: "active", lastRun: "1h ago" },
-  { id: "b5", name: "Orbit Media", handle: "@orbit.media", niche: "Media & Publishing", samples: 198, stage: stageOf(198), accuracy: 75.2, drift: false, status: "paused", lastRun: "1d ago" },
-  { id: "b6", name: "Solène Atelier", handle: "@solene.atelier", niche: "Fashion Atelier", samples: 144, stage: stageOf(144), accuracy: 76.1, drift: false, status: "active", lastRun: "30m ago" },
+  { id: "d2850e10-2788-4833-be1b-cbbb782b68e9", name: "Lasence Bakeshop", handle: "@lasence.bakeshop", niche: "Bakery & Café", samples: 210, stage: stageOf(210), accuracy: 70.0, drift: false, status: "active", lastRun: "2h ago" },
+  { id: "7c8316af-6692-481d-b6f7-2e5483afa5e1", name: "Bison Gym", handle: "@bison.gym", niche: "Fitness & Wellness", samples: 215, stage: stageOf(215), accuracy: 58.3, drift: false, status: "active", lastRun: "12m ago" },
 ];
 
 // ---------------------------------------------------------------------------

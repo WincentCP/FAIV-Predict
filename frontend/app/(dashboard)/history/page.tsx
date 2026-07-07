@@ -20,17 +20,17 @@ type HistoryItem = {
 };
 
 const HISTORY: HistoryItem[] = [
-  { id: "p_8821", brand: "Nova Studio", account: "@nova.studio", format: "Reels", caption: "Behind the scenes — week 17 shoot day", tier: "High", confidence: 94, when: "2 min ago" },
-  { id: "p_8820", brand: "Kindred", account: "@kindred.brand", format: "Carousel", caption: "New drop · linen series 02 now live", tier: "High", confidence: 88, when: "6 min ago" },
-  { id: "p_8819", brand: "Orbit Media", account: "@orbit.media", format: "Single Image", caption: "Editor's picks for the long weekend", tier: "Average", confidence: 71, when: "11 min ago" },
-  { id: "p_8818", brand: "Solène Atelier", account: "@solene.atelier", format: "Reels", caption: "Atelier walkthrough · the cutting room", tier: "Low", confidence: 64, when: "18 min ago" },
+  { id: "p_8821", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Reels", caption: "Behind the scenes — week 17 baking prep", tier: "High", confidence: 94, when: "2 min ago" },
+  { id: "p_8820", brand: "Bison Gym", account: "@bison.gym", format: "Carousel", caption: "New routines · high intensity cardio series now live", tier: "High", confidence: 88, when: "6 min ago" },
+  { id: "p_8819", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Single Image", caption: "Editor's picks for the long weekend sweet treats", tier: "Average", confidence: 71, when: "11 min ago" },
+  { id: "p_8818", brand: "Bison Gym", account: "@bison.gym", format: "Reels", caption: "Gym walkthrough · our strength training floor", tier: "Low", confidence: 64, when: "18 min ago" },
   { id: "p_8817", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Carousel", caption: "Spring menu lineup, 6 new pastries", tier: "Average", confidence: 82, when: "24 min ago" },
   { id: "p_8816", brand: "Bison Gym", account: "@bison.gym", format: "Reels", caption: "Morning mobility flow, 6 minutes flat", tier: "Average", confidence: 76, when: "1 hour ago" },
-  { id: "p_8815", brand: "Nova Studio", account: "@nova.studio", format: "Single Image", caption: "Soft launch poster, comment what you see", tier: "High", confidence: 90, when: "2 hours ago" },
-  { id: "p_8814", brand: "Kindred", account: "@kindred.brand", format: "Reels", caption: "Day-in-the-life — store opening", tier: "Low", confidence: 58, when: "3 hours ago" },
-  { id: "p_8813", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Reels", caption: "Croissant lamination, slow motion", tier: "High", confidence: 92, when: "Yesterday" },
-  { id: "p_8812", brand: "Solène Atelier", account: "@solene.atelier", format: "Carousel", caption: "Lookbook spring 25 — sneak peek", tier: "Average", confidence: 79, when: "Yesterday" },
-  { id: "p_8811", brand: "Orbit Media", account: "@orbit.media", format: "Reels", caption: "Studio tour with the new hires", tier: "Low", confidence: 62, when: "2 days ago" },
+  { id: "p_8815", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Single Image", caption: "Soft launch poster, comment what pastry you want", tier: "High", confidence: 90, when: "2 hours ago" },
+  { id: "p_8814", brand: "Bison Gym", account: "@bison.gym", format: "Reels", caption: "Day-in-the-life — personal trainer shifts", tier: "Low", confidence: 58, when: "3 hours ago" },
+  { id: "p_8813", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Reels", caption: "Croissant lamination, slow motion folding", tier: "High", confidence: 92, when: "Yesterday" },
+  { id: "p_8812", brand: "Bison Gym", account: "@bison.gym", format: "Carousel", caption: "Gym schedule spring 25 — sneak peek", tier: "Average", confidence: 79, when: "Yesterday" },
+  { id: "p_8811", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Reels", caption: "Bakery tour with our head pastry chef", tier: "Low", confidence: 62, when: "2 days ago" },
   { id: "p_8810", brand: "Bison Gym", account: "@bison.gym", format: "Single Image", caption: "Membership promo — May only", tier: "Average", confidence: 73, when: "2 days ago" },
 ];
 

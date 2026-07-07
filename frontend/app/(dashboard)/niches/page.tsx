@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/SectionHeader";
 import { ModelMaturity } from "@/components/ModelMaturity";
-import { BRANDS, NICHES, type Brand } from "@/lib/mock-data";
+import { NICHES, type Brand } from "@/lib/mock-data";
 import {
   Loader2,
   X,
@@ -35,16 +35,6 @@ const INITIAL_NICHES: NicheRow[] = [
   { id: "n4", name: "Lifestyle Retail", description: "Fashion-adjacent retail, home goods, and curated lifestyle", p33: "42%", p67: "70%" },
   { id: "n5", name: "Media & Publishing", description: "Editorial content, media brands, and online publishing", p33: "35%", p67: "65%" },
   { id: "n6", name: "Fashion Atelier", description: "Luxury and independent fashion labels and ateliers", p33: "48%", p67: "76%" },
-];
-
-// ─── Brand accounts enriched ─────────────────────────────────────────────────
-const BRANDS_ENRICHED = [
-  { ...BRANDS[0], followers: "15.4K" },
-  { ...BRANDS[1], followers: "5.2K" },
-  { ...BRANDS[2], followers: "8.7K" },
-  { ...BRANDS[3], followers: "11.2K" },
-  { ...BRANDS[4], followers: "4.8K" },
-  { ...BRANDS[5], followers: "6.9K" },
 ];
 
 const containerVariants = {
