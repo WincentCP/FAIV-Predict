@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import numpy as np
 import psycopg2
+import psycopg2.extras
 
 from app.preprocessing import DataPreprocessor
 from app.model_loader import ModelLoader
@@ -157,8 +158,9 @@ def predict(req: PredictionRequest):
             try:
                 conn = psycopg2.connect(db_url)
                 with conn.cursor() as cur:
-                    # Clean features for JSON storage
+                    # Clean features for JSON storage — include confidence so history can display it
                     json_features = {k: float(v) for k, v in features.items()}
+                    json_features["confidence"] = confidence
                     cur.execute(
                         """
                         INSERT INTO predictions (brand_id, title, caption, features, pred_class, created_at, scheduled_date)
@@ -182,6 +184,18 @@ def predict(req: PredictionRequest):
         # Determine if personal model or shared niche was active
         is_personal_model_active = metadata.get("model_type") == "account"
 
+        # 5. Extract real MDI (Mean Decrease in Impurity) feature importances from RF model
+        feature_names = bundle.get("features", [
+            "is_single_image", "is_carousel", "is_reels",
+            "post_hour", "caption_length", "hashtag_count", "has_cta"
+        ])
+        feature_importances = {}
+        if hasattr(model, "feature_importances_"):
+            mdi_raw = model.feature_importances_
+            for i, name in enumerate(feature_names):
+                if i < len(mdi_raw):
+                    feature_importances[name] = round(float(mdi_raw[i]), 4)
+
         return {
             "status": "success",
             "predicted_class": predicted_class,
@@ -192,7 +206,8 @@ def predict(req: PredictionRequest):
                 "model_type": metadata.get("model_type"),
                 "version": metadata.get("version"),
                 "is_personal_model_active": is_personal_model_active
-            }
+            },
+            "feature_importances": feature_importances
         }
     except Exception as e:
         logger.error(f"Prediction failed: {e}")

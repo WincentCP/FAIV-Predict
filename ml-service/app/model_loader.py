@@ -21,6 +21,8 @@ class ModelLoader:
     Includes robust fallbacks for offline or unconfigured environments.
     """
     
+    _model_cache = {}
+    
     @staticmethod
     def _get_db_connection():
         """Creates a PostgreSQL connection to Supabase using DATABASE_URL."""
@@ -98,8 +100,6 @@ class ModelLoader:
         download_url = storage_url
         
         if supabase_url and supabase_key and storage_path:
-            # Construct authenticated storage endpoint
-            # E.g. https://<project>.supabase.co/storage/v1/object/authenticated/<bucket>/<path>
             if not storage_url or "supabase" in supabase_url:
                 bucket_name = "models"
                 download_url = f"{supabase_url.rstrip('/')}/storage/v1/object/authenticated/{bucket_name}/{storage_path.lstrip('/')}"
@@ -139,21 +139,40 @@ class ModelLoader:
             model_type = metadata.get("model_type", "niche")
             
             filename = f"model_{model_type}_{brand_id or niche}_{version}.joblib"
+            cache_key = f"{brand_id or niche}_{version}"
+            
+            # Check RAM cache first
+            if cache_key in cls._model_cache:
+                logger.info(f"Model {filename} loaded from memory cache.")
+                return cls._model_cache[cache_key], metadata
+
             try:
                 local_path = cls.download_model(storage_url, storage_path, filename)
                 model = joblib.load(local_path)
-                logger.info(f"Successfully loaded model {filename}")
+                cls._model_cache[cache_key] = model
+                logger.info(f"Successfully loaded model {filename} and cached in memory.")
                 return model, metadata
             except Exception as e:
                 logger.warning(f"Error loading model from storage: {e}. Falling back to default baseline.")
 
         # Fallback to local default model or generate a mock model (cold-start resilience)
         default_path = os.path.join(CACHE_DIR, "default_rf_model.joblib")
+        cache_key = "default_baseline"
+        if cache_key in cls._model_cache:
+            return cls._model_cache[cache_key], {
+                "id": "00000000-0000-0000-0000-000000000000",
+                "model_type": "niche" if not brand_id else "account",
+                "niche": niche or "Fashion",
+                "version": "fallback-baseline",
+                "metrics": {"accuracy": 0.81, "f1_score": 0.80}
+            }
+
         if not os.path.exists(default_path):
             logger.info("Default model not found. Generating a mock RandomForest model for fallback.")
             cls.generate_fallback_model(default_path)
             
         model = joblib.load(default_path)
+        cls._model_cache[cache_key] = model
         fallback_metadata = {
             "id": "00000000-0000-0000-0000-000000000000",
             "model_type": "niche" if not brand_id else "account",

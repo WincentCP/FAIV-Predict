@@ -1,44 +1,23 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-
 import { cookies } from "next/headers";
 import { BRANDS } from "@/lib/mock-data";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
-    const cookieStore = await cookies();
-    const isSimulated = cookieStore.get("sb-simulated-login")?.value === "true";
-
-    if (isSimulated) {
-      const mapped = BRANDS.map(b => ({
-        id: b.id,
-        name: b.name,
-        niche: b.niche.split(" & ")[0],
-        followers: b.id === "d2850e10-2788-4833-be1b-cbbb782b68e9" ? 17416 : 1256,
-        model_type: "personal"
-      }));
-      return NextResponse.json(mapped);
-    }
-
     const supabase = createClient();
     const { data: brands, error } = await supabase
       .from("brands")
       .select("*")
       .order("name", { ascending: true });
 
-    if (error || !brands || brands.length === 0) {
-      console.warn("[BFF Brands] Supabase empty or error, falling back to static active brands:", error);
-      const mapped = BRANDS.map(b => ({
-        id: b.id,
-        name: b.name,
-        niche: b.niche.split(" & ")[0],
-        followers: b.id === "d2850e10-2788-4833-be1b-cbbb782b68e9" ? 17416 : 1256,
-        model_type: "personal"
-      }));
-      return NextResponse.json(mapped);
+    if (error) {
+      throw error;
     }
 
-    return NextResponse.json(brands);
+    return NextResponse.json(brands || []);
   } catch (error: any) {
     console.error("[BFF Brands] Failed to fetch brands:", error);
     return NextResponse.json(

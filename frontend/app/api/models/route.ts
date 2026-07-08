@@ -3,15 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { cookies } from "next/headers";
 import { MODELS } from "@/lib/mock-data";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
-    const cookieStore = await cookies();
-    const isSimulated = cookieStore.get("sb-simulated-login")?.value === "true";
-
-    if (isSimulated) {
-      return NextResponse.json(MODELS);
-    }
-
     const supabase = createClient();
     const { data: dbModels, error } = await supabase
       .from("models")
@@ -29,9 +24,12 @@ export async function GET() {
       `)
       .order("created_at", { ascending: false });
 
-    if (error || !dbModels || dbModels.length === 0) {
-      console.warn("[BFF Models] Supabase models empty or error, falling back to static:", error);
-      return NextResponse.json(MODELS);
+    if (error) {
+      throw error;
+    }
+
+    if (!dbModels || dbModels.length === 0) {
+      return NextResponse.json([]);
     }
 
     // Map database models to match the frontend MlModel schema

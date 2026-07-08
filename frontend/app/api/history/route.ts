@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const supabase = createClient();
@@ -35,13 +37,15 @@ export async function GET() {
       
       return {
         id: p.id,
+        title: p.title || `Prediksi ${format}`,
         brand: p.brands?.name || "Unknown Brand",
         account: `@${(p.brands?.name || "brand").toLowerCase().replace(/\s+/g, "")}`,
         format,
         caption: p.caption || "",
-        tier: p.pred_class.charAt(0).toUpperCase() + p.pred_class.slice(1).toLowerCase(), // Normalize casing ('High', 'Average', 'Low')
-        confidence: p.features?.confidence || 85,
-        when: p.created_at
+        tier: p.pred_class.charAt(0).toUpperCase() + p.pred_class.slice(1).toLowerCase(),
+        confidence: p.features?.confidence ? Math.round(p.features.confidence) : 85,
+        when: p.created_at,
+        scheduled_date: p.scheduled_date || null
       };
     });
 
@@ -50,6 +54,42 @@ export async function GET() {
     console.error("[BFF History] Failed to fetch history logs:", error);
     return NextResponse.json(
       { status: "error", message: error.message || "Failed to fetch prediction history" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const supabase = createClient();
+    const { id, scheduled_date, title, caption } = await request.json();
+
+    if (!id) {
+      return NextResponse.json(
+        { status: "error", message: "Prediction ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const updates: any = {};
+    if (scheduled_date !== undefined) updates.scheduled_date = scheduled_date;
+    if (title !== undefined) updates.title = title;
+    if (caption !== undefined) updates.caption = caption;
+
+    const { error } = await supabase
+      .from("predictions")
+      .update(updates)
+      .eq("id", id);
+
+    if (error) {
+      throw error;
+    }
+
+    return NextResponse.json({ status: "success", message: "Prediction updated successfully" });
+  } catch (error: any) {
+    console.error("[BFF History] Failed to update prediction:", error);
+    return NextResponse.json(
+      { status: "error", message: error.message || "Failed to update prediction" },
       { status: 500 }
     );
   }

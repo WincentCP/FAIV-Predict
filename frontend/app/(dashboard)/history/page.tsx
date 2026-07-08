@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
-import { BRANDS, type Tier, type ContentFormat } from "@/lib/mock-data";
+import { type Tier, type ContentFormat } from "@/lib/mock-data";
 import { Search, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -19,20 +19,6 @@ type HistoryItem = {
   when: string;
 };
 
-const HISTORY: HistoryItem[] = [
-  { id: "p_8821", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Reels", caption: "Behind the scenes — week 17 baking prep", tier: "High", confidence: 94, when: "2 min ago" },
-  { id: "p_8820", brand: "Bison Gym", account: "@bison.gym", format: "Carousel", caption: "New routines · high intensity cardio series now live", tier: "High", confidence: 88, when: "6 min ago" },
-  { id: "p_8819", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Single Image", caption: "Editor's picks for the long weekend sweet treats", tier: "Average", confidence: 71, when: "11 min ago" },
-  { id: "p_8818", brand: "Bison Gym", account: "@bison.gym", format: "Reels", caption: "Gym walkthrough · our strength training floor", tier: "Low", confidence: 64, when: "18 min ago" },
-  { id: "p_8817", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Carousel", caption: "Spring menu lineup, 6 new pastries", tier: "Average", confidence: 82, when: "24 min ago" },
-  { id: "p_8816", brand: "Bison Gym", account: "@bison.gym", format: "Reels", caption: "Morning mobility flow, 6 minutes flat", tier: "Average", confidence: 76, when: "1 hour ago" },
-  { id: "p_8815", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Single Image", caption: "Soft launch poster, comment what pastry you want", tier: "High", confidence: 90, when: "2 hours ago" },
-  { id: "p_8814", brand: "Bison Gym", account: "@bison.gym", format: "Reels", caption: "Day-in-the-life — personal trainer shifts", tier: "Low", confidence: 58, when: "3 hours ago" },
-  { id: "p_8813", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Reels", caption: "Croissant lamination, slow motion folding", tier: "High", confidence: 92, when: "Yesterday" },
-  { id: "p_8812", brand: "Bison Gym", account: "@bison.gym", format: "Carousel", caption: "Gym schedule spring 25 — sneak peek", tier: "Average", confidence: 79, when: "Yesterday" },
-  { id: "p_8811", brand: "Lasence Bakeshop", account: "@lasence.bakeshop", format: "Reels", caption: "Bakery tour with our head pastry chef", tier: "Low", confidence: 62, when: "2 days ago" },
-  { id: "p_8810", brand: "Bison Gym", account: "@bison.gym", format: "Single Image", caption: "Membership promo — May only", tier: "Average", confidence: 73, when: "2 days ago" },
-];
 
 import { useEffect } from "react";
 
@@ -42,13 +28,8 @@ export default function HistoryPage() {
   const [q, setQ] = useState("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
-  // Actual evaluation outcomes map for closed-loop tracking
-  const [outcomes, setOutcomes] = useState<Record<string, string>>({
-    p_8821: "HIGH",
-    p_8820: "HIGH",
-    p_8819: "AVERAGE",
-    p_8818: "LOW",
-  });
+  // Actual evaluation outcomes map for closed-loop tracking (in-memory)
+  const [outcomes, setOutcomes] = useState<Record<string, string>>({});
 
   useEffect(() => {
     async function fetchHistory() {
@@ -59,15 +40,15 @@ export default function HistoryPage() {
           if (data && data.length > 0) {
             setHistory(data);
           } else {
-            setHistory(HISTORY);
+            setHistory([]);
           }
         } else {
-          console.warn("API returned non-ok status, falling back to default logs.");
-          setHistory(HISTORY);
+          console.warn("API returned non-ok status for history.");
+          setHistory([]);
         }
       } catch (err) {
-        console.warn("Could not fetch history from API, fallback to default logs:", err);
-        setHistory(HISTORY);
+        console.warn("Could not fetch history from API:", err);
+        setHistory([]);
       }
     }
     fetchHistory();
@@ -76,6 +57,11 @@ export default function HistoryPage() {
   const updateOutcome = (id: string, val: string) => {
     setOutcomes((prev) => ({ ...prev, [id]: val }));
   };
+
+  const uniqueBrandsInHistory = useMemo(() => {
+    const list = new Set(history.map((h) => h.brand));
+    return Array.from(list).sort();
+  }, [history]);
 
   const filtered = useMemo(
     () =>
@@ -118,9 +104,9 @@ export default function HistoryPage() {
           className="h-10 shrink-0 rounded-xl border border-border bg-surface/60 px-3 text-sm outline-none focus:border-ring sm:w-44"
         >
           <option value="All">All brands</option>
-          {BRANDS.map((b) => (
-            <option key={b.id} value={b.name}>
-              {b.name}
+          {uniqueBrandsInHistory.map((bName) => (
+            <option key={bName} value={bName}>
+              {bName}
             </option>
           ))}
         </select>

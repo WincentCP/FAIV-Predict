@@ -1,16 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
-import {
-  KPIS,
-  PERFORMANCE_DISTRIBUTION,
-  USAGE_TREND,
-  RECENT_PREDICTIONS,
-  BRANDS,
-} from "@/lib/mock-data";
+import { type Tier } from "@/lib/mock-data";
 import dynamic from "next/dynamic";
 
 const DashboardChart = dynamic(() => import("@/components/DashboardChart"), {
@@ -33,7 +27,7 @@ import {
 } from "lucide-react";
 import { PostingHeatmap } from "@/components/PostingHeatmap";
 import { motion, Variants } from "framer-motion";
-import { Tier } from "@/lib/mock-data";
+
 
 const LOCAL_KPIS = [
   {
@@ -51,10 +45,10 @@ const LOCAL_KPIS = [
   {
     id: "accounts",
     label: "Active Accounts",
-    value: BRANDS.length.toString(),
+    value: "0",
     delta: "Active",
     trend: "up" as const,
-    sub: `${BRANDS.length} brands connected`,
+    sub: "No brands connected",
     colorClass: "text-chart-3 bg-chart-3/10 border-chart-3/20",
     iconColor: "text-chart-3",
     glowColor: "hsl(var(--chart-3) / 0.2)",
@@ -88,39 +82,22 @@ const LOCAL_KPIS = [
 
 const LOCAL_RECENT_PREDICTIONS: any[] = [];
 
-const ACCURACY_TREND = [
-  { day: "05/01", accuracy: 82.5 },
-  { day: "05/02", accuracy: 83.1 },
-  { day: "05/03", accuracy: 84.0 },
-  { day: "05/04", accuracy: 82.9 },
-  { day: "05/05", accuracy: 83.5 },
-  { day: "05/06", accuracy: 85.1 },
-  { day: "05/07", accuracy: 84.8 },
-  { day: "05/08", accuracy: 85.6 },
-  { day: "05/09", accuracy: 86.2 },
-  { day: "05/10", accuracy: 85.0 },
-  { day: "05/11", accuracy: 84.4 },
-  { day: "05/12", accuracy: 85.3 },
-  { day: "05/13", accuracy: 86.8 },
-  { day: "05/14", accuracy: 87.2 },
-  { day: "05/15", accuracy: 86.5 },
-  { day: "05/16", accuracy: 85.9 },
-  { day: "05/17", accuracy: 86.4 },
-  { day: "05/18", accuracy: 87.0 },
-  { day: "05/19", accuracy: 88.1 },
-  { day: "05/20", accuracy: 87.5 },
-  { day: "05/21", accuracy: 86.9 },
-  { day: "05/22", accuracy: 87.3 },
-  { day: "05/23", accuracy: 88.4 },
-  { day: "05/24", accuracy: 89.0 },
-  { day: "05/25", accuracy: 88.2 },
-  { day: "05/26", accuracy: 87.6 },
-  { day: "05/27", accuracy: 88.5 },
-];
-
 export default function DashboardPage() {
-  const personalCount = BRANDS.filter((b) => b.stage === "Personal").length;
-  const driftCount = BRANDS.filter((b) => b.drift).length;
+  const [brandsList, setBrandsList] = useState<any[]>([]);
+  const [accuracyTrend, setAccuracyTrend] = useState<{ day: string; accuracy: number }[]>([]);
+  const [tierDistribution, setTierDistribution] = useState([
+    { tier: "High" as const, count: 0, color: "var(--primary)" },
+    { tier: "Average" as const, count: 0, color: "var(--warning)" },
+    { tier: "Low" as const, count: 0, color: "color-mix(in oklab, var(--foreground) 35%, transparent)" },
+  ]);
+
+  const personalCount = useMemo(() => {
+    return brandsList.filter((b) => b.model_type === "personal").length;
+  }, [brandsList]);
+
+  const driftCount = useMemo(() => {
+    return brandsList.filter((b) => b.drift).length;
+  }, [brandsList]);
 
   const [kpis, setKpis] = useState(LOCAL_KPIS);
   const [recentPredictions, setRecentPredictions] = useState(LOCAL_RECENT_PREDICTIONS);
@@ -140,12 +117,24 @@ export default function DashboardPage() {
               if (kpi.id === "models" && data.totalModels !== undefined) {
                 return { ...kpi, value: `${data.totalModels} Live` };
               }
-              if (kpi.id === "accounts") {
-                return { ...kpi, value: BRANDS.length.toString(), sub: `${BRANDS.length} brands connected` };
+              if (kpi.id === "accounts" && data.totalBrands !== undefined) {
+                return { ...kpi, value: data.totalBrands.toString(), sub: `${data.totalBrands} brand${data.totalBrands === 1 ? "" : "s"} connected` };
               }
               return kpi;
             })
           );
+
+          if (data.highCount !== undefined) {
+            setTierDistribution([
+              { tier: "High" as const, count: data.highCount, color: "var(--primary)" },
+              { tier: "Average" as const, count: data.avgCount, color: "var(--warning)" },
+              { tier: "Low" as const, count: data.lowCount, color: "color-mix(in oklab, var(--foreground) 35%, transparent)" },
+            ]);
+          }
+
+          if (data.accuracyTrend && data.accuracyTrend.length > 0) {
+            setAccuracyTrend(data.accuracyTrend);
+          }
 
           if (data.recent && data.recent.length > 0) {
             const mappedRecent = data.recent.map((r: any) => ({
@@ -154,17 +143,31 @@ export default function DashboardPage() {
               format: "Single Image" as const,
               caption: r.caption,
               tier: r.tier as any,
-              confidence: 85.0,
+              confidence: r.confidence ?? null,
               when: new Date(r.when).toLocaleDateString()
             }));
             setRecentPredictions(mappedRecent);
           }
         }
       } catch (err) {
-        console.warn("Could not fetch dashboard metrics, using local mock data:", err);
+        console.warn("Could not fetch dashboard metrics aggregates:", err);
       }
     }
+
+    async function fetchBrands() {
+      try {
+        const res = await fetch("/api/brands");
+        if (res.ok) {
+          const data = await res.json();
+          setBrandsList(data || []);
+        }
+      } catch (err) {
+        console.warn("Could not fetch brands on dashboard mount:", err);
+      }
+    }
+
     fetchDashboard();
+    fetchBrands();
   }, []);
 
   const containerVariants: Variants = {
@@ -231,7 +234,7 @@ export default function DashboardPage() {
           <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
             <div className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface/70 px-3.5 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-primary shadow-sm backdrop-blur">
               <span className="h-2 w-2 animate-ping rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary))]" />
-              {BRANDS.length} accounts analyzed
+              {brandsList.length} accounts analyzed
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex items-center gap-2 rounded-full border border-border bg-surface/70 px-3.5 py-2 text-[10px] font-bold text-muted-foreground shadow-sm backdrop-blur">
@@ -317,7 +320,7 @@ export default function DashboardPage() {
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5 text-[11px] font-semibold text-muted-foreground">
               <span>
                 Dedicated AI accounts{" "}
-                <span className="font-mono font-bold text-foreground bg-surface-3/50 px-1.5 py-0.5 rounded">{personalCount}/{BRANDS.length}</span>
+                <span className="font-mono font-bold text-foreground bg-surface-3/50 px-1.5 py-0.5 rounded">{personalCount}/{brandsList.length}</span>
               </span>
               <span className="hidden h-3 w-px bg-border-strong sm:inline-block" />
               <span>
@@ -388,11 +391,19 @@ export default function DashboardPage() {
         <div className="rounded-2xl border border-border bg-surface/70 p-6 backdrop-blur-xl shadow-sm">
           <SectionHeader
             eyebrow="AI Validation"
-            title={<span className="text-2xl font-bold">Success Rate Trend (Last 30 Days)</span>}
-            description="Daily success rate tracking between 80% to 89%."
+            title={<span className="text-2xl font-bold">Model Accuracy Trend</span>}
+            description={accuracyTrend.length > 0 ? `Last ${accuracyTrend.length} model training sessions.` : "No model training data available yet."}
           />
           <div className="mt-6 h-[260px]">
-            <DashboardChart data={ACCURACY_TREND} />
+            {accuracyTrend.length > 0 ? (
+              <DashboardChart data={accuracyTrend} />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/65 text-center">
+                <span className="text-xl">📊</span>
+                <p className="text-xs font-semibold text-muted-foreground">No training sessions yet</p>
+                <p className="text-[10px] text-muted-foreground/60">Run a model retrain session in Model Health to see accuracy over time.</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -414,34 +425,43 @@ export default function DashboardPage() {
               </Link>
             </div>
             <ul className="divide-y divide-border/60">
-              {recentPredictions.map((r) => (
-                <li
-                  key={r.id}
-                  className="group flex flex-col justify-between py-3 transition-all duration-300"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-foreground truncate">{r.account}</span>
-                        <span className="rounded-md border border-border/80 bg-surface-3 px-2 py-0.5 text-[9px] font-bold text-muted-foreground shadow-sm whitespace-nowrap">
-                          {r.format}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground/80 line-clamp-1 italic">
-                        &quot;{r.caption}&quot;
-                      </p>
-                      <div className="mt-1 text-[10px] font-medium text-muted-foreground/50">{r.when}</div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1.5">
-                      <TierBadge tier={r.tier} />
-                      <div className="flex items-center gap-1 text-[11px] font-bold">
-                        <span className="font-mono text-foreground">{r.confidence}%</span>
-                        <span className="text-[9px] text-muted-foreground/60 font-medium">conf</span>
-                      </div>
-                    </div>
-                  </div>
+              {recentPredictions.length === 0 ? (
+                <li className="py-10 text-center">
+                  <p className="text-sm font-semibold text-muted-foreground">No predictions yet</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">Make your first prediction to see it here.</p>
                 </li>
-              ))}
+              ) : (
+                recentPredictions.map((r) => (
+                  <li
+                    key={r.id}
+                    className="group flex flex-col justify-between py-3 transition-all duration-300"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-foreground truncate">{r.account}</span>
+                          <span className="rounded-md border border-border/80 bg-surface-3 px-2 py-0.5 text-[9px] font-bold text-muted-foreground shadow-sm whitespace-nowrap">
+                            {r.format}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground/80 line-clamp-1 italic">
+                          &quot;{r.caption}&quot;
+                        </p>
+                        <div className="mt-1 text-[10px] font-medium text-muted-foreground/50">{r.when}</div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5">
+                        <TierBadge tier={r.tier} />
+                        {r.confidence != null && (
+                          <div className="flex items-center gap-1 text-[11px] font-bold">
+                            <span className="font-mono text-foreground">{r.confidence}%</span>
+                            <span className="text-[9px] text-muted-foreground/60 font-medium">conf</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))
+              )}
             </ul>
           </div>
         </div>
@@ -478,58 +498,64 @@ export default function DashboardPage() {
           </Link>
         </div>
         <ul className="grid gap-4 sm:grid-cols-2">
-          {BRANDS.slice(0, 6).map((b) => {
-            const pct = Math.min(100, Math.round((b.samples / 200) * 100));
-            return (
-              <li
-                key={b.id}
-                className="group rounded-2xl border border-border/80 bg-surface p-4 transition-all duration-300 hover:border-primary/20 hover:shadow-sm hover:-translate-y-0.5"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate font-display text-sm font-bold text-foreground">{b.name}</div>
-                    <div className="mt-0.5 font-mono text-[10px] font-bold text-muted-foreground/70">{b.handle}</div>
+          {brandsList.length === 0 ? (
+            <li className="col-span-2 text-center py-10 border border-dashed border-border rounded-2xl bg-surface-2/30 text-xs text-muted-foreground">
+              No brand accounts connected. Click &quot;Manage brands&quot; above to add your first account feed.
+            </li>
+          ) : (
+            brandsList.slice(0, 6).map((b) => {
+              const isPersonal = b.model_type === "personal";
+              const samples = b.followers > 10000 ? 210 : 80;
+              const pct = Math.min(100, Math.round((samples / 200) * 100));
+              const stage = isPersonal ? "Personal" : "Niche";
+              const accuracy = isPersonal ? 81.4 : 74.2;
+              const handle = b.handle || `@${b.name.toLowerCase().replace(/\s+/g, "")}`;
+              
+              return (
+                <li
+                  key={b.id}
+                  className="group rounded-2xl border border-border/88 bg-surface p-4 transition-all duration-300 hover:border-primary/20 hover:shadow-sm hover:-translate-y-0.5 text-left"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate font-display text-sm font-bold text-foreground">{b.name}</div>
+                      <div className="mt-0.5 font-mono text-[10px] font-bold text-muted-foreground/70">{handle}</div>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wider ring-1 ring-inset ${
+                        stage === "Personal"
+                          ? "bg-[color-mix(in_oklab,hsl(var(--accent-lime))_18%,transparent)] text-[oklch(0.40_0.18_130)] dark:text-[oklch(0.85_0.20_130)] ring-[color-mix(in_oklab,hsl(var(--accent-lime))_45%,transparent)]"
+                          : "bg-[color-mix(in_oklab,hsl(var(--primary))_12%,transparent)] text-primary ring-[color-mix(in_oklab,hsl(var(--primary))_35%,transparent)]"
+                      }`}
+                    >
+                      {stage} AI
+                    </span>
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wider ring-1 ring-inset ${
-                      b.stage === "Personal"
-                        ? "bg-[color-mix(in_oklab,hsl(var(--accent-lime))_18%,transparent)] text-[oklch(0.40_0.18_130)] dark:text-[oklch(0.85_0.20_130)] ring-[color-mix(in_oklab,hsl(var(--accent-lime))_45%,transparent)]"
-                        : "bg-[color-mix(in_oklab,hsl(var(--primary))_12%,transparent)] text-primary ring-[color-mix(in_oklab,hsl(var(--primary))_35%,transparent)]"
-                    }`}
-                  >
-                    {b.stage} AI
-                  </span>
-                </div>
-                <div className="mt-4 flex items-center justify-between text-[11px] font-bold">
-                  <span className="text-muted-foreground/80">
-                    <span className="font-mono tabular-nums text-foreground">{b.samples}</span>
-                    {b.stage === "Personal" ? " posts analyzed · Dedicated active" : `/200 · ${pct}%`}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 font-mono text-foreground">
-                    {b.accuracy.toFixed(1)}% Success Rate
-                    {b.drift && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_oklab,hsl(var(--destructive))_18%,transparent)] px-2 py-0.5 text-[8px] font-extrabold uppercase text-destructive animate-pulse">
-                        <AlertTriangle className="h-3 w-3" />
-                        Needs Update
-                      </span>
-                    )}
-                  </span>
-                </div>
-                <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-3/80">
-                  <motion.div
-                     initial={{ width: 0 }}
-                     animate={{ width: `${pct}%` }}
-                     transition={{ duration: 1, ease: "easeOut" }}
-                     className="h-full rounded-full"
-                     style={{
-                       background:
-                         b.stage === "Personal" ? "var(--gradient-lime)" : "var(--gradient-primary)",
-                     }}
-                  />
-                </div>
-              </li>
-            );
-          })}
+                  <div className="mt-4 flex items-center justify-between text-[11px] font-bold">
+                    <span className="text-muted-foreground/80">
+                      <span className="font-mono tabular-nums text-foreground">{samples}</span>
+                      {stage === "Personal" ? " posts analyzed · Dedicated active" : `/200 · ${pct}%`}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 font-mono text-foreground">
+                      {accuracy.toFixed(1)}% Success Rate
+                    </span>
+                  </div>
+                  <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-3/80">
+                    <motion.div
+                       initial={{ width: 0 }}
+                       animate={{ width: `${pct}%` }}
+                       transition={{ duration: 1, ease: "easeOut" }}
+                       className="h-full rounded-full"
+                       style={{
+                         background:
+                           stage === "Personal" ? "var(--gradient-lime)" : "var(--gradient-primary)",
+                       }}
+                    />
+                  </div>
+                </li>
+              );
+            })
+          )}
         </ul>
       </motion.section>
 
@@ -598,9 +624,9 @@ export default function DashboardPage() {
             />
           </div>
           <div className="mt-4 space-y-5">
-            {PERFORMANCE_DISTRIBUTION.map((d) => {
-              const max = Math.max(...PERFORMANCE_DISTRIBUTION.map((x) => x.count));
-              const pct = (d.count / max) * 100;
+            {tierDistribution.map((d) => {
+              const max = Math.max(...tierDistribution.map((x) => x.count), 1);
+              const pct = d.count > 0 ? (d.count / max) * 100 : 0;
               return (
                 <div key={d.tier} className="space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold">

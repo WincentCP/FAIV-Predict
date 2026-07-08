@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
-import { MODELS, type MlModel } from "@/lib/mock-data";
+import { type MlModel } from "@/lib/mock-data";
 import {
   Cpu,
   CheckCircle2,
@@ -17,17 +17,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-
-const MOCK_TRAINING_LOGS = [
-  { timestamp: "2026-05-28T15:30:00Z", step: "load_dataset", status: "success", rows_loaded: 412 },
-  { timestamp: "2026-05-28T15:30:05Z", step: "validate_schema", status: "success", features: ["media_type", "posting_hour", "caption_length", "hashtag_count", "posting_day", "has_cta"] },
-  { timestamp: "2026-05-28T15:30:08Z", step: "split_train_test", status: "success", train_size: 329, test_size: 83 },
-  { timestamp: "2026-05-28T15:30:10Z", step: "initialize_random_forest", status: "success", n_estimators: 150, max_depth: 12 },
-  { timestamp: "2026-05-28T15:30:15Z", step: "fit_niche_estimator", status: "success", oob_score: 0.824 },
-  { timestamp: "2026-05-28T15:30:20Z", step: "evaluate_metrics", status: "success", baseline_accuracy: 0.81, new_accuracy: 0.852 },
-  { timestamp: "2026-05-28T15:30:22Z", step: "export_onnx_model", status: "success", path: "s3://faiv-models/lasence-bakeshop/v2.5.4.onnx" },
-  { timestamp: "2026-05-28T15:30:23Z", step: "concept_drift_check", status: "resolved", drift_pct: 2.1 }
-];
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -45,7 +34,7 @@ const itemVariants = {
 };
 
 export default function ModelHealthPage() {
-  const [models, setModels] = useState<MlModel[]>(MODELS);
+  const [models, setModels] = useState<MlModel[]>([]);
   const [retrainingModel, setRetrainingModel] = useState<MlModel | null>(null);
   const [logsOutput, setLogsOutput] = useState<any[] | null>(null);
   const [isTraining, setIsTraining] = useState(false);
@@ -56,12 +45,10 @@ export default function ModelHealthPage() {
         const res = await fetch("/api/models");
         if (res.ok) {
           const data = await res.json();
-          if (data && data.length > 0) {
-            setModels(data);
-          }
+          setModels(data || []);
         }
       } catch (err) {
-        console.warn("Could not load real models from BFF API, using static fallbacks:", err);
+        console.error("Could not load real models from BFF API:", err);
       }
     }
     fetchModels();
@@ -142,24 +129,12 @@ export default function ModelHealthPage() {
       }
 
       if (!completed) {
-        // Timeout simulation fallback
-        log("timeout_fallback", "Polling timed out. Running offline simulation fallback...", "resolved");
-        for (let i = 0; i < MOCK_TRAINING_LOGS.length; i++) {
-          await new Promise((r) => setTimeout(r, 400));
-          setLogsOutput((prev) => [...(prev || []), MOCK_TRAINING_LOGS[i]]);
-        }
+        log("timeout_error", "Retraining job status polling timed out. Please check back later.", "failed");
       }
 
     } catch (err: any) {
-      console.warn("Retraining API connection error, running simulation fallback...", err);
-      log("connection_warning", "FastAPI offline. Running presentation fallback logs...", "failed");
-      await new Promise((r) => setTimeout(r, 1000));
-      
-      // Full simulation fallback stream
-      for (let i = 0; i < MOCK_TRAINING_LOGS.length; i++) {
-        await new Promise((r) => setTimeout(r, 300));
-        setLogsOutput((prev) => [...(prev || []), MOCK_TRAINING_LOGS[i]]);
-      }
+      console.error("Retraining API connection error:", err);
+      log("connection_error", `Failed to complete retraining: ${err.message || "BFF or backend server unreachable"}`, "failed");
     } finally {
       setIsTraining(false);
     }
@@ -232,14 +207,12 @@ export default function ModelHealthPage() {
           <table className="w-full min-w-[970px] table-fixed text-sm text-left">
             <thead>
               <tr className="border-b border-border bg-surface-2/30 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
-                <th className="w-[220px] px-6 py-5">Model ID</th>
-                <th className="w-[130px] px-6 py-5">Niche Scope</th>
-                <th className="w-[80px] px-6 py-5">Version</th>
-                <th className="w-[100px] px-6 py-5">Baseline Acc.</th>
-                <th className="w-[140px] px-6 py-5">30d Rolling Acc.</th>
-                <th className="w-[90px] px-6 py-5">Historical Trend</th>
-                <th className="w-[110px] px-6 py-5">Health Status</th>
-                <th className="w-[140px] px-6 py-5 text-right" />
+                <th className="w-[240px] px-6 py-5">Model ID</th>
+                <th className="w-[140px] px-6 py-5">Niche Scope</th>
+                <th className="w-[100px] px-6 py-5">Version</th>
+                <th className="w-[180px] px-6 py-5">Model Accuracy</th>
+                <th className="w-[120px] px-6 py-5">Health Status</th>
+                <th className="w-[170px] px-6 py-5 text-right" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
@@ -300,22 +273,11 @@ export default function ModelHealthPage() {
                         {m.version}
                       </span>
                     </td>
-                    <td className="px-6 py-5 align-middle font-mono text-xs font-bold tabular-nums text-foreground">{m.baselineAccuracy.toFixed(1)}%</td>
-                    <td className="px-6 py-5 align-middle">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-2 w-12 overflow-hidden rounded-full bg-surface-3 border border-border/40 shrink-0">
-                          <div
-                            className={cn("h-full rounded-full transition-all duration-500", drop > 15 ? "bg-red-500" : "bg-primary")}
-                            style={{ width: `${m.rollingAccuracy}%` }}
-                          />
-                        </div>
-                        <span className="font-mono text-xs font-bold tabular-nums text-foreground shrink-0">
-                          {m.rollingAccuracy.toFixed(1)}%
-                        </span>
+                    <td className="px-6 py-5 align-middle font-mono text-xs font-bold tabular-nums text-foreground">
+                      <div>
+                        <span className="text-sm font-black text-foreground">{m.baselineAccuracy.toFixed(1)}%</span>
+                        <div className="text-[9px] text-muted-foreground font-semibold leading-none mt-1">Validated on latest train</div>
                       </div>
-                    </td>
-                    <td className="px-6 py-5 align-middle whitespace-nowrap">
-                      <Sparkline values={m.rolling30d} isDrift={drop > 15} />
                     </td>
                     <td className="px-6 py-5 align-middle whitespace-nowrap">{driftBadge}</td>
                     <td className="px-6 py-5 align-middle text-right whitespace-nowrap">
@@ -476,33 +438,7 @@ export default function ModelHealthPage() {
   );
 }
 
-function Sparkline({ values, isDrift }: { values: number[]; isDrift: boolean }) {
-  const w = 80;
-  const h = 24;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = Math.max(1, max - min);
-  const pts = values
-    .map((v, i) => {
-      const x = (i / (values.length - 1)) * w;
-      const y = h - ((v - min) / range) * h;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const stroke = isDrift ? "hsl(var(--destructive))" : "hsl(var(--primary))";
-  return (
-    <svg width={w} height={h} className="overflow-visible">
-      <polyline
-        fill="none"
-        stroke={stroke}
-        strokeWidth={1.5}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        points={pts}
-      />
-    </svg>
-  );
-}
+
 
 function SummaryCard({
   label,

@@ -9,7 +9,7 @@ const STEPS = [
   { to: "/predict", label: "Predict", icon: PenTool },
   { to: "/result", label: "Result", icon: Gauge },
   { to: "/diagnose", label: "Diagnose", icon: Activity },
-  { to: "/suggest", label: "Suggest", icon: Lightbulb },
+  { to: "/suggest", label: "Optimize", icon: Lightbulb },
 ] as const;
 
 export function FlowStepper({

@@ -27,11 +27,8 @@ export default function Page() {
       });
 
       if (error) {
-        console.warn("Supabase auth error, falling back to local simulation:", error.message);
-        setAuthError("Using simulated credentials. Redirecting to workspace...");
-        document.cookie = "sb-simulated-login=true; path=/; max-age=86400";
-        await new Promise((r) => setTimeout(r, 1000));
-        window.location.href = "/dashboard";
+        console.error("Supabase auth error:", error.message);
+        setAuthError(error.message);
         return;
       }
 
@@ -39,11 +36,8 @@ export default function Page() {
       document.cookie = "sb-simulated-login=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
       window.location.href = "/dashboard";
     } catch (err: any) {
-      console.warn("Supabase connection failed, continuing offline:", err.message);
-      setAuthError("Continuing in offline prototype mode...");
-      document.cookie = "sb-simulated-login=true; path=/; max-age=86400";
-      await new Promise((r) => setTimeout(r, 1000));
-      window.location.href = "/dashboard";
+      console.error("Supabase connection failed:", err.message);
+      setAuthError(err.message || "Failed to connect to authentication server");
     } finally {
       setLoading(false);
     }

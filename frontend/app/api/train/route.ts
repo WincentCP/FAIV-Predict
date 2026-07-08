@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
+export const dynamic = "force-dynamic";
+
 const FASTAPI_URL = process.env.FASTAPI_URL || "http://127.0.0.1:8000";
 
 // GET Handler to query retrain status

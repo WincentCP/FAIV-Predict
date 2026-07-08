@@ -39,7 +39,8 @@ import {
   Info,
   Activity,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Sparkles
 } from "lucide-react";
 import dynamic from "next/dynamic";
 
@@ -120,7 +121,11 @@ function useDebounced<T>(value: T, delay = 500): T {
 export default function PredictPage() {
   const [activeStep, setActiveStep] = useState(1);
   const [accountIdx, setAccountIdx] = useState(0);
-  const account = ACCOUNTS[accountIdx];
+
+  // Real DB Brands dynamic list
+  const [brandsList, setBrandsList] = useState<any[]>([]);
+  const account = brandsList[accountIdx] || null;
+
   const [contentFormat, setContentFormat] = useState<ContentFormat>("Reels");
 
   // Real ML Prediction States
@@ -131,6 +136,9 @@ export default function PredictPage() {
     { tier: "Average", prob: 0.71 },
     { tier: "Low", prob: 0.07 },
   ]);
+  const [featureImportances, setFeatureImportances] = useState<Record<string, number> | null>(null);
+  const [modelMetadata, setModelMetadata] = useState<any>(null);
+  const [optimizationsApplied, setOptimizationsApplied] = useState(false);
 
   const [scheduledAt, setScheduledAt] = useState<Date>(() => {
     const d = new Date();
@@ -140,6 +148,7 @@ export default function PredictPage() {
   });
 
   const [caption, setCaption] = useState("");
+  const [visualConcept, setVisualConcept] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [loadingPhase, setLoadingPhase] = useState(0);
@@ -161,6 +170,39 @@ export default function PredictPage() {
   });
   const [isCalibrating, setIsCalibrating] = useState(false);
 
+  // Snapshot tracker for prediction inputs to check staleness
+  const [predictionSnapshot, setPredictionSnapshot] = useState<{
+    caption: string;
+    contentFormat: ContentFormat;
+    scheduledAt: number;
+    accountIdx: number;
+    predictedTier: Tier;
+    predictedConfidence: number;
+  } | null>(null);
+
+  // Form validation checks
+  const isFormValid = useMemo(() => {
+    return (
+      caption.trim() !== "" &&
+      account !== undefined &&
+      account !== null &&
+      contentFormat !== undefined &&
+      contentFormat !== null &&
+      scheduledAt instanceof Date &&
+      !isNaN(scheduledAt.getTime())
+    );
+  }, [caption, account, contentFormat, scheduledAt]);
+
+  const isPredictionStale = useMemo(() => {
+    if (!predictionSnapshot) return false;
+    return (
+      predictionSnapshot.caption !== caption ||
+      predictionSnapshot.contentFormat !== contentFormat ||
+      predictionSnapshot.scheduledAt !== scheduledAt.getTime() ||
+      predictionSnapshot.accountIdx !== accountIdx
+    );
+  }, [predictionSnapshot, caption, contentFormat, scheduledAt, accountIdx]);
+
   // Live text check (instant) for characters count and visual limit warnings.
   const liveStats = useMemo(() => analyzeCaption(caption), [caption]);
   // Debounced checks (500ms) for heavy analysis (Section 4).
@@ -168,6 +210,33 @@ export default function PredictPage() {
   const stats = useMemo(() => analyzeCaption(debouncedCaption), [debouncedCaption]);
 
   const tooLong = liveStats.charCount > CAPTION_MAX;
+
+  // Load dynamic brands list on mount
+  useEffect(() => {
+    const fetchBrands = async () => {
+      try {
+        const res = await fetch("/api/brands");
+        if (res.ok) {
+          const data = await res.json();
+          setBrandsList(data || []);
+          if (data && data.length > 0) {
+            setAccountIdx(0);
+          }
+        } else {
+          setBrandsList([]);
+        }
+      } catch (err) {
+        console.error("Failed to load brands from BFF:", err);
+        setBrandsList([]);
+      }
+    };
+    fetchBrands();
+  }, []);
+
+  // Clear optimizationsApplied banner if inputs are manually edited
+  useEffect(() => {
+    setOptimizationsApplied(false);
+  }, [caption, contentFormat, scheduledAt, accountIdx]);
 
   // Loading phases text representing real ML telemetry
   const LOADING_PHASES = [
@@ -221,7 +290,6 @@ export default function PredictPage() {
           caption: caption,
         }),
       });
-
       if (res.ok) {
         const data = await res.json();
         if (data.status === "success" || data.predicted_class) {
@@ -237,17 +305,36 @@ export default function PredictPage() {
           setPredictedTier(predClass);
           setPredictedConfidence(conf);
           setPredictedProbs(mappedProbs);
+          if (data.feature_importances) {
+            setFeatureImportances(data.feature_importances);
+          }
+          if (data.model_metadata) {
+            setModelMetadata(data.model_metadata);
+          }
+
+          // Save snapshot of inputs used for prediction
+          setPredictionSnapshot({
+            caption,
+            contentFormat,
+            scheduledAt: scheduledAt.getTime(),
+            accountIdx,
+            predictedTier: predClass,
+            predictedConfidence: conf
+          });
+
+          // Smooth fast transition once we have the real prediction
+          setTimeout(() => {
+            setSubmitting(false);
+            setHasPredicted(true);
+            setActiveStep(2);
+          }, 500);
+          return;
         }
       }
     } catch (err) {
       console.error("Error connecting to BFF predict API: ", err);
     }
-    
-    setTimeout(() => {
-      setSubmitting(false);
-      setHasPredicted(true);
-      setActiveStep(2);
-    }, 3200);
+    setSubmitting(false);
   };
 
   const handleStepClick = (stepNum: number) => {
@@ -255,7 +342,6 @@ export default function PredictPage() {
       setActiveStep(stepNum);
     }
   };
-
   // AI suggestions from Google Gemini API via Next.js BFF proxy
   const enrichWithAI = async () => {
     setAiState("loading");
@@ -263,24 +349,14 @@ export default function PredictPage() {
     setIsTyping(true);
     
     try {
-      const is_carousel = contentFormat === "Carousel" ? 1.0 : 0.0;
-      const is_reels = contentFormat === "Reels" ? 1.0 : 0.0;
-      const has_cta_val = stats.hasCTA ? 1.0 : 0.0;
-
-      const res = await fetch("/api/predict", {
+      const res = await fetch("/api/suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          is_carousel,
-          is_reels,
-          post_hour: scheduledAt.getHours(),
-          caption_length: parseFloat(liveStats.charCount.toString()),
-          hashtag_count: parseFloat(stats.hashtags.length.toString()),
-          has_cta: has_cta_val,
-          brand_id: account?.id,
-          niche: account?.niche,
+          visual_concept: visualConcept,
           caption: caption,
-          enrich: true
+          brand: account?.name || "Fitness",
+          format: contentFormat
         }),
       });
 
@@ -307,13 +383,13 @@ export default function PredictPage() {
       
       // Fallback if API fails or Gemini is not configured
       setAiState("fallback");
-      const fallbackText = "Optimasi Gagal: Silakan periksa koneksi internet atau API Key Google Gemini Anda. Coba gunakan saran parameter dari TRE.";
+      const fallbackText = "AI suggestions are temporarily unavailable.";
       setTypewriterText(fallbackText);
       setIsTyping(false);
     } catch (err) {
       console.error("AI Enrichment fetch error:", err);
       setAiState("fallback");
-      setTypewriterText("Koneksi gagal menghubungi BFF.");
+      setTypewriterText("AI suggestions are temporarily unavailable.");
       setIsTyping(false);
     }
   };
@@ -406,13 +482,23 @@ export default function PredictPage() {
   };
 
   const mdiChartData = useMemo(() => {
-    const mdiMax = Math.max(...FEATURE_IMPORTANCE.map((f) => f.importance));
-    return FEATURE_IMPORTANCE.map((f) => ({
+    if (!featureImportances) {
+      return [];
+    }
+
+    const keys = Object.keys(featureImportances);
+    const items = keys.map(key => ({
+      key,
+      feature: key,
+      importance: featureImportances[key]
+    }));
+    const mdiMax = Math.max(...items.map((f) => f.importance), 0.001);
+    return items.map((f) => ({
       name: KEY_LABELS[f.key] || f.feature,
       importance: Math.round(f.importance * 100),
       rawPct: (f.importance / mdiMax) * 100
-    }));
-  }, []);
+    })).sort((a, b) => b.importance - a.importance);
+  }, [featureImportances]);
 
   const dynamicReasons = useMemo(() => {
     const currentNiche = account?.niche || "this category";
@@ -655,31 +741,95 @@ export default function PredictPage() {
                     </div>
                   </div>
 
+                  {optimizationsApplied && (
+                    <div className="rounded-xl border border-primary/20 bg-primary/[0.02] p-4 flex items-center gap-3 animate-[page-enter_0.2s_ease-out]">
+                      <Sparkles className="h-4.5 w-4.5 text-primary shrink-0 animate-pulse" />
+                      <div className="text-xs text-foreground font-semibold">
+                        Optimizations successfully applied to copy drafts. Click <strong className="text-primary">Analyze Post</strong> below to re-run predictions.
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid gap-6 md:grid-cols-12">
                     
-                    {/* Left Form: Scheduling Console */}
+                    {/* Left Column: Accounts and Post Settings */}
                     <div className="md:col-span-5 space-y-6">
-                      <Panel id="predict" title="Scheduling Console" subtitle="Set brand identity and publish slot.">
+                      
+                      {/* Brand selector Panel */}
+                      <Panel id="predict" title="Brand Account" subtitle="Set publishing brand account.">
+                        <div>
+                          <Label>Brand Account</Label>
+                          <select
+                             value={account?.handle || (account ? `@${account.name.toLowerCase().replace(/\s+/g, "")}` : "")}
+                             onChange={(e) => {
+                               const list = brandsList;
+                               const idx = list.findIndex((a) => {
+                                 const itemHandle = a.handle || `@${a.name.toLowerCase().replace(/\s+/g, "")}`;
+                                 return itemHandle === e.target.value;
+                               });
+                               if (idx !== -1) setAccountIdx(idx);
+                             }}
+                             disabled={brandsList.length === 0}
+                             className="mt-1.5 h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs font-semibold outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20 disabled:opacity-60"
+                           >
+                             {brandsList.length === 0 ? (
+                               <option value="">No brand accounts configured</option>
+                             ) : (
+                               brandsList.map((a) => {
+                                 const itemHandle = a.handle || `@${a.name.toLowerCase().replace(/\s+/g, "")}`;
+                                 return (
+                                   <option key={a.id || a.name} value={itemHandle}>
+                                     {itemHandle} ({a.name})
+                                   </option>
+                                 );
+                               })
+                             )}
+                           </select>
+                           {brandsList.length === 0 && (
+                             <p className="mt-2 text-xs text-rose-500 font-semibold leading-relaxed">
+                               ⚠️ No brand accounts configured. Please add a brand in the Niches & Brands dashboard page first.
+                             </p>
+                           )}
+                        </div>
+                      </Panel>
+
+                      {/* Post Configuration Panel */}
+                      <Panel title="Post Configuration" subtitle="Select standard format and publication slot.">
                         <div className="space-y-5">
-                          {/* Brand Account selector */}
+                          {/* Content format cards selector */}
                           <div>
-                            <Label>Brand Account</Label>
-                            <select
-                              value={account?.handle || ""}
-                              onChange={(e) => {
-                                const idx = ACCOUNTS.findIndex((a) => a.handle === e.target.value);
-                                if (idx !== -1) setAccountIdx(idx);
-                              }}
-                              className="mt-1.5 h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs font-semibold outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20"
-                            >
-                              {ACCOUNTS.map((a) => (
-                                <option key={a.handle} value={a.handle}>{a.handle} ({a.name})</option>
-                              ))}
-                            </select>
+                            <Label>Content Format</Label>
+                            <div className="grid grid-cols-1 gap-3 mt-1.5">
+                              {FORMATS.map((f) => {
+                                const active = contentFormat === f.id;
+                                return (
+                                  <button
+                                    key={f.id}
+                                    type="button"
+                                    onClick={() => setContentFormat(f.id)}
+                                    className={`group relative flex items-center gap-4 rounded-xl border p-4 text-left transition-all active:scale-[0.98] ${
+                                      active
+                                        ? "border-primary bg-gradient-to-r from-primary/10 to-primary-glow/5 text-primary shadow-[var(--shadow-glow-purple)]"
+                                        : "border-border bg-surface hover:border-border-strong hover:bg-surface-2/30"
+                                    }`}
+                                  >
+                                    <span className={`grid h-7 w-7 place-items-center rounded-lg transition-all ${
+                                      active ? "bg-primary text-primary-foreground shadow-[0_0_8px_rgba(168,85,247,0.3)]" : "bg-surface-2 text-muted-foreground group-hover:bg-surface-3"
+                                    }`}>
+                                      <f.icon className="h-3.5 w-3.5" />
+                                    </span>
+                                    <div className="flex-1">
+                                      <div className="text-[11px] font-bold text-foreground">{f.label}</div>
+                                      <div className="text-[9px] text-muted-foreground/80 leading-normal">{f.hint}</div>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
 
                           {/* Date and Time inputs */}
-                          <div className="space-y-4">
+                          <div className="space-y-4 pt-4 border-t border-border/40">
                             <div>
                               <Label>Post Date</Label>
                               <div className="mt-1.5">
@@ -695,97 +845,199 @@ export default function PredictPage() {
                           </div>
                         </div>
                       </Panel>
-
-                      {/* Content format cards selector */}
-                      <Panel title="Content Format" subtitle="Select standard classification type.">
-                        <div className="grid grid-cols-1 gap-4.5">
-                          {FORMATS.map((f) => {
-                            const active = contentFormat === f.id;
-                            return (
-                              <button
-                                key={f.id}
-                                type="button"
-                                onClick={() => setContentFormat(f.id)}
-                                className={`group relative flex items-center gap-5 rounded-xl border p-6 text-left transition-all active:scale-[0.98] ${
-                                  active
-                                    ? "border-primary bg-gradient-to-r from-primary/10 to-primary-glow/5 text-primary shadow-[var(--shadow-glow-purple)]"
-                                    : "border-border bg-surface hover:border-border-strong hover:bg-surface-2/30"
-                                }`}
-                              >
-                                <span className={`grid h-8 w-8 place-items-center rounded-xl transition-all ${
-                                  active ? "bg-primary text-primary-foreground shadow-[0_0_8px_rgba(168,85,247,0.3)]" : "bg-surface-2 text-muted-foreground group-hover:bg-surface-3"
-                                }`}>
-                                  <f.icon className="h-4.5 w-4.5" />
-                                </span>
-                                <div className="flex-1">
-                                  <div className="text-xs font-bold text-foreground">{f.label}</div>
-                                  <div className="mt-0.5 text-[9.5px] text-muted-foreground/85 leading-normal">{f.hint}</div>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </Panel>
                     </div>
 
-                    {/* Right Form: Caption workspace */}
+                    {/* Right Column: Planner & Drafting Workspace */}
                     <div className="md:col-span-7 space-y-6">
-                      <Panel title="Caption Drafting Workspace" subtitle="Write copy to test against niche benchmarks.">
-                        <div className="flex items-center justify-between mb-2.5">
-                          <Label>Caption Text</Label>
-                          <CaptionMeter count={liveStats.charCount} />
-                        </div>
-                        
-                        <div className="rounded-xl border border-border bg-surface transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 overflow-hidden shadow-inner">
-                          <textarea
-                            value={caption}
-                            onChange={(e) => setCaption(e.target.value)}
-                            rows={8}
-                            maxLength={CAPTION_MAX + 100}
-                            className="w-full resize-none bg-transparent p-4 text-xs font-mono leading-relaxed outline-none placeholder:text-muted-foreground/40 text-foreground/90"
-                            placeholder="Write your creative caption..."
-                          />
-                          <div className="border-t border-border px-4 py-3 bg-surface-2/40">
-                            <CaptionSignals stats={stats} />
+                      
+                      {/* Content Planner Panel */}
+                      <Panel title="Content Planner" subtitle="Plan visual concept ideas and draft caption copy copy.">
+                        <div className="space-y-5">
+                          
+                          {/* Visual Concept Textarea */}
+                          <div>
+                            <Label>Visual Concept</Label>
+                            <div className="rounded-xl border border-border bg-surface transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 overflow-hidden shadow-inner">
+                              <textarea
+                                value={visualConcept}
+                                onChange={(e) => setVisualConcept(e.target.value)}
+                                rows={4}
+                                className="w-full resize-none bg-transparent p-4 text-xs font-mono leading-relaxed outline-none placeholder:text-muted-foreground/45 text-foreground/90"
+                                placeholder={`Describe what will appear in the post.
+Example:
+• Carousel (5 slides)
+• First slide: "5 Kesalahan Marketing"
+• Slides 2–4 explain each point
+• Last slide contains CTA to follow the page
+• Bright blue background with minimal illustrations`}
+                              />
+                            </div>
+                            <p className="mt-1.5 text-[9.5px] text-muted-foreground/80 leading-normal px-0.5">
+                              Note: Performance predictions are based on the validated features used during model training (such as posting metadata and caption-derived features). Visual Concept is used only to generate AI suggestions and is not sent to the prediction model.
+                            </p>
                           </div>
-                        </div>
 
-                        <CaptionLimitWarning count={liveStats.charCount} />
+                          {/* Caption drafting box */}
+                          <div className="pt-4 border-t border-border/40">
+                            <div className="flex items-center justify-between mb-2">
+                              <Label>Caption Text</Label>
+                              <CaptionMeter count={liveStats.charCount} />
+                            </div>
+                            
+                            <div className="rounded-xl border border-border bg-surface transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 overflow-hidden shadow-inner">
+                              <textarea
+                                value={caption}
+                                onChange={(e) => setCaption(e.target.value)}
+                                rows={6}
+                                maxLength={CAPTION_MAX + 100}
+                                className="w-full resize-none bg-transparent p-4 text-xs font-mono leading-relaxed outline-none placeholder:text-muted-foreground/40 text-foreground/90"
+                                placeholder="Write your creative caption..."
+                              />
+                              <div className="border-t border-border px-4 py-3 bg-surface-2/40">
+                                <CaptionSignals stats={stats} />
+                              </div>
+                            </div>
 
-                        {/* Interactive Metric boxes */}
-                        <div className="mt-5 grid gap-3.5 grid-cols-3">
-                          <MetricBox
-                            label="Caption Length"
-                            value={`${stats.charCount}`}
-                            hint={stats.charCount >= 180 && stats.charCount <= 320 ? "Optimal Length" : "Niche optimal: 180-320"}
-                            status={stats.charCount >= 180 && stats.charCount <= 320 ? "success" : "warning"}
-                          />
-                          <MetricBox
-                            label="Hashtags"
-                            value={stats.hashtags.length.toString()}
-                            hint={stats.hashtags.length >= 3 && stats.hashtags.length <= 8 ? "Optimal count" : "Niche optimal: 3-8"}
-                            status={stats.hashtags.length >= 3 && stats.hashtags.length <= 8 ? "success" : "warning"}
-                          />
-                          <MetricBox
-                            label="Call-to-Action"
-                            value={stats.hasCTA ? "DETECTED" : "MISSING"}
-                            hint={stats.hasCTA ? `using: "${stats.ctaTerms[0]}"` : "CTA increases reach"}
-                            status={stats.hasCTA ? "success" : "warning"}
-                          />
+                            <CaptionLimitWarning count={liveStats.charCount} />
+
+                            {/* Interactive Metric boxes */}
+                            <div className="mt-4 grid gap-3 grid-cols-3">
+                              <MetricBox
+                                label="Caption Length"
+                                value={`${stats.charCount}`}
+                                hint={stats.charCount >= 180 && stats.charCount <= 320 ? "Optimal Length" : "Niche optimal: 180-320"}
+                                status={stats.charCount >= 180 && stats.charCount <= 320 ? "success" : "warning"}
+                              />
+                              <MetricBox
+                                label="Hashtags"
+                                value={stats.hashtags.length.toString()}
+                                hint={stats.hashtags.length >= 3 && stats.hashtags.length <= 8 ? "Optimal count" : "Niche optimal: 3-8"}
+                                status={stats.hashtags.length >= 3 && stats.hashtags.length <= 8 ? "success" : "warning"}
+                              />
+                              <MetricBox
+                                label="Call-to-Action"
+                                value={stats.hasCTA ? "DETECTED" : "MISSING"}
+                                hint={stats.hasCTA ? `using: "${stats.ctaTerms[0]}"` : "CTA increases reach"}
+                                status={stats.hasCTA ? "success" : "warning"}
+                              />
+                            </div>
+                          </div>
+
+                          {/* AI Action trigger */}
+                          <div className="flex items-center justify-between pt-3 border-t border-border/40 gap-4">
+                            <span className="text-[10px] text-muted-foreground/80 leading-normal">
+                              {caption.trim() === "" ? (
+                                <span className="text-warning font-semibold">⚠️ Draft a caption first to enable AI refinement.</span>
+                              ) : (
+                                <span>Visual Concept (optional) will enrich suggestions if provided.</span>
+                              )}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={enrichWithAI}
+                              disabled={aiState === "loading" || isTyping || caption.trim() === ""}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground transition-all hover:bg-primary/95 disabled:opacity-50 active:scale-[0.98] shadow-sm shrink-0"
+                            >
+                              {aiState === "loading" ? (
+                                <>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  Refining...
+                                </>
+                              ) : (
+                                <>
+                                  <PenTool className="h-3.5 w-3.5" />
+                                  AI Refine Caption
+                                </>
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Typewriter Output workspace inside Step 1 */}
+                          <AnimatePresence mode="wait">
+                            {aiState === "enriched" && (
+                              <motion.div
+                                key="enriched"
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0 }}
+                                className="rounded-2xl border border-border bg-surface-2/60 p-5 space-y-4 shadow-sm relative overflow-hidden text-left"
+                              >
+                                {isTyping && (
+                                  <div className="absolute inset-0 bg-primary/[0.01] pointer-events-none animate-pulse" />
+                                )}
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5">
+                                    <FileText className="h-3.5 w-3.5 text-primary" />
+                                    <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
+                                      AI Suggested Copy Draft
+                                    </span>
+                                  </div>
+                                  {!isTyping && typewriterText && (
+                                    <button
+                                      type="button"
+                                      onClick={applyAiTextToCaption}
+                                      className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 border border-primary/20 px-2.5 py-1 text-[10px] font-bold text-primary transition-all hover:bg-primary hover:text-white"
+                                    >
+                                      Replace Draft Caption
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="p-4 rounded-xl border border-border bg-surface text-xs font-medium leading-relaxed italic text-foreground/90 min-h-[60px] text-left relative shadow-inner">
+                                  <span className="text-foreground/15 absolute top-2 left-3 font-display text-4xl leading-none font-black select-none pointer-events-none">“</span>
+                                  <div className="pl-5 pr-2 pt-1">
+                                    <span className="relative z-10">{typewriterText}</span>
+                                    {isTyping && <span className="inline-block w-[2px] h-3.5 bg-primary animate-pulse ml-1 align-middle" />}
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )}
+
+                            {aiState === "fallback" && (
+                              <motion.div
+                                key="fallback"
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0 }}
+                                className="rounded-xl border border-warning/30 bg-warning/[0.02] p-4 text-left"
+                              >
+                                <div className="flex items-start gap-3">
+                                  <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                                  <div>
+                                    <div className="text-xs font-semibold text-foreground">
+                                      AI Service Notice
+                                    </div>
+                                    <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
+                                      AI suggestions are temporarily unavailable.
+                                    </p>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+
                         </div>
                       </Panel>
                     </div>
 
                   </div>
 
-                  <button
-                    onClick={handlePredict}
-                    disabled={submitting || tooLong}
-                    className="w-full flex h-12 items-center justify-center gap-2.5 rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
-                  >
-                    <Activity className="h-4.5 w-4.5" />
-                    Calculate Post Performance Potential
-                  </button>
+                  <div className="mt-6 flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div className="text-xs text-muted-foreground text-left">
+                      {!isFormValid ? (
+                        <span className="text-warning font-semibold">⚠️ A caption is required before running predictions.</span>
+                      ) : isPredictionStale ? (
+                        <span className="text-warning font-semibold">⚠️ Plan inputs modified. Re-analyze post to update predictions.</span>
+                      ) : null}
+                    </div>
+                    <button
+                      onClick={handlePredict}
+                      disabled={submitting || tooLong || !isFormValid}
+                      className="w-full md:w-auto px-8 flex h-12 items-center justify-center gap-2.5 rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+                    >
+                      <Activity className="h-4.5 w-4.5" />
+                      Analyze Post
+                    </button>
+                  </div>
                 </motion.div>
               )}
 
@@ -799,6 +1051,14 @@ export default function PredictPage() {
                   transition={{ type: "spring", stiffness: 350, damping: 25 }}
                   className="space-y-6"
                 >
+                  {isPredictionStale && (
+                    <div className="rounded-2xl border border-warning/30 bg-warning/[0.03] p-4 flex items-center gap-3 shadow-sm">
+                      <AlertTriangle className="h-4.5 w-4.5 text-warning shrink-0 animate-pulse" />
+                      <div className="text-xs font-semibold text-warning">
+                        Prediction out of date. Re-analyze to see updated results.
+                      </div>
+                    </div>
+                  )}
                   {/* Step Guide Banner */}
                   <div className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-5 flex items-start gap-4 shadow-sm backdrop-blur-md animate-[page-enter_0.2s_ease-out]">
                     <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
@@ -953,15 +1213,23 @@ export default function PredictPage() {
                   transition={{ type: "spring", stiffness: 350, damping: 25 }}
                   className="space-y-6"
                 >
+                  {isPredictionStale && (
+                    <div className="rounded-2xl border border-warning/30 bg-warning/[0.03] p-4 flex items-center gap-3 shadow-sm">
+                      <AlertTriangle className="h-4.5 w-4.5 text-warning shrink-0 animate-pulse" />
+                      <div className="text-xs font-semibold text-warning">
+                        Prediction out of date. Re-analyze to see updated results.
+                      </div>
+                    </div>
+                  )}
                   {/* Step Guide Banner */}
                   <div className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-5 flex items-start gap-4 shadow-sm backdrop-blur-md animate-[page-enter_0.2s_ease-out]">
                     <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
                       <Activity className="h-5 w-5 text-primary" />
                     </div>
                     <div>
-                      <h3 className="font-display text-sm font-bold text-foreground">Contributing Diagnostics</h3>
+                      <h3 className="font-display text-sm font-bold text-foreground">Global Model Significance</h3>
                       <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                        Attribution weights detail exactly which features contributed positively or negatively to the final Random Forest prediction.
+                        Feature weight ratios detail the global significance of each input parameter across the entire trained model.
                       </p>
                     </div>
                   </div>
@@ -974,16 +1242,24 @@ export default function PredictPage() {
                   {/* Recharts chart panel */}
                   <Panel
                     id="diagnose"
-                    title="Feature Attribution Analysis"
-                    subtitle="Attribution value (Mean Decrease in Impurity) representing feature weight impact."
+                    title="Overall Model Feature Significance"
+                    subtitle="Mean Decrease in Impurity (MDI) representing global dataset-wide feature weights."
                   >
                     <div className="h-56 w-full mt-2">
-                      <FeatureAttributionChart data={mdiChartData} />
+                      {mdiChartData.length === 0 ? (
+                        <div className="h-full w-full flex flex-col items-center justify-center border border-dashed border-border rounded-xl bg-surface-2/40 p-5 text-center">
+                          <Activity className="h-7 w-7 text-muted-foreground/50 mb-2" />
+                          <p className="text-xs font-semibold text-foreground">No active prediction weights loaded</p>
+                          <p className="text-[10px] text-muted-foreground mt-1 max-w-[280px]">Run a post performance analysis in Step 1 to calculate and load current model weights.</p>
+                        </div>
+                      ) : (
+                        <FeatureAttributionChart data={mdiChartData} />
+                      )}
                     </div>
 
                     <div className="mt-4 text-[10px] text-muted-foreground leading-relaxed flex items-start gap-1.5 p-3 rounded-lg bg-surface-2 border border-border/40">
                       <HelpCircle className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
-                      <span>Percentages represent the relative statistical feature importance coefficient utilized during validation.</span>
+                      <span>Percentages represent the relative global importance of each feature in the overall trained model, rather than explaining the specific local influence on this single prediction.</span>
                     </div>
                   </Panel>
 
@@ -1017,104 +1293,32 @@ export default function PredictPage() {
                   transition={{ type: "spring", stiffness: 350, damping: 25 }}
                   className="space-y-6"
                 >
+                  {isPredictionStale && (
+                    <div className="rounded-2xl border border-warning/30 bg-warning/[0.03] p-4 flex items-center gap-3 shadow-sm">
+                      <AlertTriangle className="h-4.5 w-4.5 text-warning shrink-0 animate-pulse" />
+                      <div className="text-xs font-semibold text-warning">
+                        Prediction out of date. Re-analyze to see updated results.
+                      </div>
+                    </div>
+                  )}
                   {/* Step Guide Banner */}
                   <div className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-5 flex items-start gap-4 shadow-sm backdrop-blur-md animate-[page-enter_0.2s_ease-out]">
                     <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
                       <Sliders className="h-5 w-5" />
                     </div>
                     <div>
-                      <h3 className="font-display text-sm font-bold text-foreground">Calibration & Recommendation Hub</h3>
+                      <h3 className="font-display text-sm font-bold text-foreground">Optimization Recommendations</h3>
                       <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                        Reschedule posts, configure CTA signals, or calibrate metrics using our interactive simulator below to visually preview how scores shift before publication.
+                        Select and apply recommendations to post details, timing, and copy signals to optimize performance before publishing.
                       </p>
-                    </div>
-                  </div>
-
-                  {/* ────────────────────────────────────────────────────────
-                      PREMIUM DYNAMIC SIDE-BY-SIDE SIMULATION DASHBOARD 
-                      ──────────────────────────────────────────────────────── */}
-                  <div className="grid gap-6 md:grid-cols-2">
-                    
-                    {/* Current Draft Profile */}
-                    <div className="rounded-2xl border border-border bg-surface/50 p-5 space-y-4 shadow-sm relative overflow-hidden flex flex-col justify-between">
-                      <div className="absolute inset-0 bg-muted-foreground/[0.01] pointer-events-none" />
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[9px] uppercase tracking-[0.2em] font-extrabold text-muted-foreground/80">Original Profile</span>
-                          <span className="rounded bg-surface-3 px-2 py-0.5 text-[8.5px] font-bold text-muted-foreground font-mono">UNOPTIMIZED</span>
-                        </div>
-                        <h4 className="font-display text-base font-extrabold text-foreground mt-3">Current Draft Post</h4>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">
-                          Draft is currently scheduled at a sub-optimal timing slot.
-                        </p>
-                      </div>
-
-                      <div className="space-y-3.5 pt-3 border-t border-border/40 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground font-medium">Posting Time</span>
-                          <span className="font-bold font-mono text-foreground">19:30 WIB (Sub-optimal)</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground font-medium">Predicted Potential</span>
-                          <TierBadge tier="Average" />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground font-medium">Model Confidence</span>
-                          <span className="font-extrabold font-mono text-foreground">89%</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Calibrated Simulator Profile */}
-                    <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.01] dark:bg-emerald-500/[0.01] p-5 space-y-4 shadow-[0_0_20px_rgba(16,185,129,0.05)] relative overflow-hidden flex flex-col justify-between transition-all duration-700">
-                      
-                      {/* Calibrated glow layer */}
-                      {anyRecsApplied && (
-                        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent animate-pulse pointer-events-none" />
-                      )}
-                      
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[9px] uppercase tracking-[0.2em] font-extrabold text-emerald-500">Calibrated Profile</span>
-                          <span className="rounded bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[8.5px] font-black text-emerald-500 font-mono tracking-wider uppercase">
-                            {anyRecsApplied ? "OPTIMIZED CORE" : "PENDING TOGGLES"}
-                          </span>
-                        </div>
-                        <h4 className="font-display text-base font-extrabold text-foreground mt-3 flex items-center gap-1.5">
-                          Simulation Output
-                          {isCalibrating && <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-ping" />}
-                        </h4>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">
-                          Simulated prediction output after toggle calibration is applied below.
-                        </p>
-                      </div>
-
-                      <div className="space-y-3.5 pt-3 border-t border-border/40 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground font-medium">Simulated Time</span>
-                          <span className={cn("font-bold font-mono transition-colors", appliedRecs.posting_hour ? "text-emerald-500" : "text-foreground")}>
-                            {appliedRecs.posting_hour ? "20:15 WIB (Peak Window)" : "19:30 WIB"}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground font-medium">Simulated Potential</span>
-                          <TierBadge tier={simulatedTier} className="transition-all" />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground font-medium">Simulated Confidence</span>
-                          <span className={cn("font-extrabold font-mono transition-colors", anyRecsApplied ? "text-emerald-500" : "text-foreground")}>
-                            {simulatedConfidence}%
-                          </span>
-                        </div>
-                      </div>
                     </div>
                   </div>
 
                   {/* Recommendations Toggles list */}
                   <Panel
                     id="suggest"
-                    title="Niche Recommendation Calibration Controls"
-                    subtitle="Toggle recommendation switches to see simulated score impact instantly."
+                    title="Available Recommendations"
+                    subtitle="Select which suggestions to apply to your copy and post settings."
                     actions={
                       <button
                         type="button"
@@ -1122,7 +1326,7 @@ export default function PredictPage() {
                         className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white transition-all hover:bg-emerald-500 active:scale-[0.98] shadow-[0_0_12px_rgba(16,185,129,0.3)]"
                       >
                         <Check className="h-3.5 w-3.5" />
-                        Apply All Optimizations
+                        Select All
                       </button>
                     }
                   >
@@ -1201,96 +1405,6 @@ export default function PredictPage() {
                     </div>
                   </Panel>
 
-                  {/* Premium AI Copilot section */}
-                  <Panel 
-                    title="AI Copilot Refiner" 
-                    subtitle="Let localized AI optimize your text style dynamically."
-                    actions={
-                      <button
-                        type="button"
-                        onClick={enrichWithAI}
-                        disabled={aiState === "loading" || isTyping}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground transition-all hover:bg-primary/95 disabled:opacity-50 active:scale-[0.98]"
-                      >
-                        {aiState === "loading" ? (
-                          <>
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            Optimizing...
-                          </>
-                        ) : (
-                          <>
-                            <PenTool className="h-3.5 w-3.5" />
-                            Refine with AI
-                          </>
-                        )}
-                      </button>
-                    }
-                  >
-                    <AnimatePresence mode="wait">
-                      {aiState === "enriched" && (
-                        <motion.div
-                          key="enriched"
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
-                          className="rounded-2xl border border-border bg-surface-2/60 p-5 space-y-4 shadow-sm relative overflow-hidden"
-                        >
-                          {isTyping && (
-                            <div className="absolute inset-0 bg-primary/[0.01] pointer-events-none animate-pulse" />
-                          )}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1.5">
-                              <FileText className="h-3.5 w-3.5 text-primary" />
-                              <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
-                                AI Suggested Copy Draft
-                              </span>
-                            </div>
-                            {!isTyping && typewriterText && (
-                              <button
-                                type="button"
-                                onClick={applyAiTextToCaption}
-                                className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 border border-primary/20 px-2.5 py-1 text-[10px] font-bold text-primary transition-all hover:bg-primary hover:text-white"
-                              >
-                                Replace Draft Caption
-                              </button>
-                            )}
-                          </div>
-                          <div className="p-4 rounded-xl border border-border bg-surface text-xs font-medium leading-relaxed italic text-foreground/90 min-h-[60px] text-left relative shadow-inner">
-                            <span className="text-foreground/15 absolute top-2 left-3 font-display text-4xl leading-none font-black select-none pointer-events-none">“</span>
-                            <div className="pl-5 pr-2 pt-1">
-                              <span className="relative z-10">{typewriterText}</span>
-                              {isTyping && <span className="inline-block w-[2px] h-3.5 bg-primary animate-pulse ml-1 align-middle" />}
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-
-                      {aiState === "fallback" && (
-                        <motion.div
-                          key="fallback"
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
-                          className="rounded-xl border border-warning/30 bg-warning/[0.02] p-4"
-                        >
-                          <div className="flex items-start gap-3">
-                            <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <div className="text-xs font-semibold text-foreground">
-                                  AI Offline
-                                </div>
-                              </div>
-                              <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
-                                Could not connect to AI service. Rely on the parameters toggles to calibrate values instead.
-                              </p>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </Panel>
-
                   <div className="flex gap-4">
                     <button
                       type="button"
@@ -1299,7 +1413,6 @@ export default function PredictPage() {
                     >
                       Back to Diagnostics
                     </button>
-                    {/* Try Re-Predict Action per Section 3.2.4 */}
                     <button
                       type="button"
                       onClick={() => {
@@ -1317,11 +1430,12 @@ export default function PredictPage() {
                           nextCaption += " #explore #niche #momentum";
                         }
                         setCaption(nextCaption);
+                        setOptimizationsApplied(true);
                         setActiveStep(1);
                       }}
                       className="flex-1 flex h-11 items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.98]"
                     >
-                      Re-Compose Draft
+                      Apply Changes & Re-Analyze
                     </button>
                   </div>
                 </motion.div>

@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
-import { BRANDS, type Tier, type ContentFormat } from "@/lib/mock-data";
+import { type Tier, type ContentFormat } from "@/lib/mock-data";
 import {
   UploadCloud,
   Download,
@@ -58,6 +58,7 @@ const MONTH_NAMES = [
 ];
 const WEEK_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+
 export default function CalendarPage() {
   const [entries, setEntries] = useState<CalendarEntry[]>(SEED_ENTRIES);
   const [cursor, setCursor] = useState<{ y: number; m: number }>({ y: yyyy, m: mm });
@@ -68,11 +69,65 @@ export default function CalendarPage() {
   const [exporting, setExporting] = useState(false);
   const [runningPredictId, setRunningPredictId] = useState<string | null>(null);
   
+  // Real DB Brands dynamic list
+  const [brandsList, setBrandsList] = useState<any[]>([]);
+
   // Drag over tracking
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Load predictions and brands from database
+  useEffect(() => {
+    async function loadPredictions() {
+      try {
+        const res = await fetch("/api/history");
+        if (res.ok) {
+          const data = await res.json();
+          const mapped: CalendarEntry[] = data.map((p: any) => {
+            const dateStr = p.scheduled_date 
+              ? p.scheduled_date 
+              : p.when.split("T")[0];
+            const timeStr = "19:30";
+            
+            return {
+              id: p.id,
+              date: dateStr,
+              time: timeStr,
+              account: p.account || "@unknown",
+              format: p.format as ContentFormat,
+              caption: p.caption,
+              tier: p.tier as Tier,
+              confidence: p.confidence,
+              status: p.scheduled_date ? "ready_to_post" : "draft",
+              picName: "Wincent",
+              platform: "Instagram",
+              postingNote: p.title || ""
+            };
+          });
+          setEntries(mapped);
+        }
+      } catch (err) {
+        console.warn("Could not load prediction history for content calendar:", err);
+      }
+    }
+
+    async function loadBrands() {
+      try {
+        const res = await fetch("/api/brands");
+        if (res.ok) {
+          const data = await res.json();
+          setBrandsList(data || []);
+        }
+      } catch (err) {
+        console.error("Failed to load brands in calendar:", err);
+      }
+    }
+
+    loadPredictions();
+    loadBrands();
+  }, []);
 
   const monthEntries = useMemo(
     () =>
@@ -131,7 +186,7 @@ export default function CalendarPage() {
     setExporting(false);
   };
 
-  const handleSave = (next: CalendarEntry) => {
+  const handleSave = async (next: CalendarEntry) => {
     setEntries((prev) =>
       prev.some((e) => e.id === next.id)
         ? prev.map((e) => (e.id === next.id ? next : e))
@@ -139,6 +194,24 @@ export default function CalendarPage() {
     );
     setEditing(null);
     setCreatingDate(null);
+
+    // Save scheduled date, title and caption modifications to the DB
+    if (!next.id.startsWith("imp-") && !next.id.startsWith("new-")) {
+      try {
+        await fetch("/api/history", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: next.id,
+            scheduled_date: next.date,
+            caption: next.caption,
+            title: next.postingNote
+          })
+        });
+      } catch (err) {
+        console.error("Failed to persist calendar edits in DB:", err);
+      }
+    }
   };
 
   const handleDelete = (id: string) => {
@@ -168,14 +241,32 @@ export default function CalendarPage() {
     );
   };
 
-  const handleDropOnDate = (e: React.DragEvent, targetDate: string) => {
+  const handleDropOnDate = async (e: React.DragEvent, targetDate: string) => {
     e.preventDefault();
     setDragOverDate(null);
     const id = e.dataTransfer.getData("text/plain");
     if (!id) return;
+
+    // Reschedule locally
     setEntries((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, date: targetDate } : item))
+      prev.map((item) => (item.id === id ? { ...item, date: targetDate, status: "ready_to_post" } : item))
     );
+
+    // Persist scheduled date update to DB
+    if (!id.startsWith("imp-") && !id.startsWith("new-")) {
+      try {
+        await fetch("/api/history", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id,
+            scheduled_date: targetDate
+          })
+        });
+      } catch (err) {
+        console.error("Failed to reschedule calendar date in DB:", err);
+      }
+    }
   };
 
   // Predict Shortcut Action for screening/ready_to_post cards
@@ -703,7 +794,7 @@ export default function CalendarPage() {
               id: `new-${Date.now()}`,
               date: creatingDate!,
               time: "19:00",
-              account: BRANDS[0]?.handle ?? "@lasence.bakeshop",
+              account: brandsList[0]?.handle || "@unknown",
               format: "Reels" as const,
               caption: "",
               tier: "Average",
@@ -720,6 +811,7 @@ export default function CalendarPage() {
           }}
           onSave={handleSave}
           onDelete={editing ? () => handleDelete(editing.id) : undefined}
+          brandsList={brandsList}
         />
       )}
     </div>
@@ -735,12 +827,14 @@ function EntryModal({
   onClose,
   onSave,
   onDelete,
+  brandsList,
 }: {
   initial: CalendarEntry;
   isNew: boolean;
   onClose: () => void;
   onSave: (next: CalendarEntry) => void;
   onDelete?: () => void;
+  brandsList: any[];
 }) {
   const [draft, setDraft] = useState<CalendarEntry>(initial);
 
@@ -807,13 +901,21 @@ function EntryModal({
               <select
                 value={draft.account}
                 onChange={(e) => setDraft({ ...draft, account: e.target.value })}
-                className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
+                className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary disabled:opacity-60"
+                disabled={brandsList.length === 0}
               >
-                {BRANDS.map((b) => (
-                  <option key={b.id} value={b.handle}>
-                    {b.handle} ({b.name})
-                  </option>
-                ))}
+                {brandsList.length === 0 ? (
+                  <option value="">No brand accounts configured</option>
+                ) : (
+                  brandsList.map((b) => {
+                    const itemHandle = b.handle || `@${b.name.toLowerCase().replace(/\s+/g, "")}`;
+                    return (
+                      <option key={b.id || b.name} value={itemHandle}>
+                        {itemHandle} ({b.name})
+                      </option>
+                    );
+                  })
+                )}
               </select>
             </ModalField>
             <ModalField label="PIC Owner">

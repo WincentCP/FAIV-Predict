@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/SectionHeader";
 import { ModelMaturity } from "@/components/ModelMaturity";
-import { NICHES, type Brand } from "@/lib/mock-data";
+
 import {
   Loader2,
   X,
@@ -15,7 +15,8 @@ import {
   ChevronDown,
   Check,
   Activity,
-  Cpu
+  Cpu,
+  AlertTriangle
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -425,21 +426,17 @@ export default function NichesPage() {
 }
 
 // ─── AI Brand Classifier Dialog ───────────────────────────────────────────────
-type AiState = "idle" | "loading" | "done";
+type AiState = "idle" | "loading" | "done" | "error";
 type NicheSuggestion = { niche: string; match: number; reason: string };
 
-const NICHE_REASONS: Record<string, string> = {
-  "Bakery & Café": "The business profile emphasizes artisan food products and café-style hospitality, which closely aligns with high-engagement Bakery & Café patterns in our training corpus.",
-  "Fitness & Wellness": "Strong signals around physical training, health routines, and community engagement match the Fitness & Wellness niche model.",
-  "Creative Agency": "The description indicates design-driven work and visual storytelling — hallmarks of Creative Agency content.",
-  "Lifestyle Retail": "The brand's focus on curated product discovery and aspirational lifestyle content maps to our Lifestyle Retail niche.",
-  "Media & Publishing": "Editorial voice, information density, and content-first positioning match the Media & Publishing niche.",
-  "Fashion Atelier": "Emphasis on craft, exclusivity, and visual identity aligns with Fashion Atelier category signals.",
-  "Food & Beverage": "Product-centric food content with a hospitality angle fits the Food & Beverage niche classification.",
-  "Beauty & Skincare": "Skin-focused, routine-driven content with tutorial potential maps strongly to Beauty & Skincare patterns.",
-  "Hospitality": "Service-oriented, experience-driven content aligns with the Hospitality niche performance model.",
-  "Tech & SaaS": "Problem-solution framing, audience of professionals, and product-focused copy match Tech & SaaS patterns.",
-};
+const NICHES = [
+  "Bakery & Café",
+  "Fitness & Wellness",
+  "Creative Agency",
+  "Lifestyle Retail",
+  "Media & Publishing",
+  "Fashion Atelier"
+];
 
 function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSaveSuccess: () => void }) {
   const [name, setName] = useState("");
@@ -450,6 +447,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
   const [picked, setPicked] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -480,27 +478,18 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
         setPicked(scored[0]?.niche ?? null);
         setAiState("done");
       } else {
-        throw new Error("Gagal memanggil API klasifikasi");
+        throw new Error("API classification response not ok");
       }
     } catch (err) {
-      console.warn("AI Classification connection failed, using fallback:", err);
-      // Local fallback rules
-      const seed = (name + bio).toLowerCase();
-      const scored = NICHES.map((n) => {
-        let s = 0.42 + Math.random() * 0.28;
-        if (seed.includes(n.split(" ")[0].toLowerCase())) s += 0.35;
-        return { niche: n, match: Math.min(0.98, s), reason: NICHE_REASONS[n] ?? "Strong contextual alignment with this category." };
-      }).sort((a, b) => b.match - a.match).slice(0, 3);
-
-      setSuggestions(scored);
-      setPicked(scored[0]?.niche ?? null);
-      setAiState("done");
+      console.error("AI Classification failed:", err);
+      setAiState("error");
     }
   };
 
   const handleSave = async () => {
     if (!name || !picked) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const res = await fetch("/api/brands", {
         method: "POST",
@@ -515,16 +504,16 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
       if (res.ok) {
         setSaved(true);
         onSaveSuccess();
+        setTimeout(onClose, 900);
       } else {
-        throw new Error("Gagal menyimpan brand");
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to persist brand account to database.");
       }
-    } catch (err) {
-      console.warn("Failed to persist brand to Supabase, fallback to simulation:", err);
-      setSaved(true);
-      onSaveSuccess();
+    } catch (err: any) {
+      console.error("Failed to register brand:", err);
+      setSaveError(err.message || "Unable to save brand account.");
     } finally {
       setSaving(false);
-      setTimeout(onClose, 900);
     }
   };
 
@@ -617,6 +606,12 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
               </div>
             </div>
 
+            {saveError && (
+              <div className="rounded-lg border border-destructive/25 bg-destructive/[0.03] p-3 text-xs font-semibold text-destructive leading-normal">
+                {saveError}
+              </div>
+            )}
+
             <button
               type="button"
               onClick={classify}
@@ -638,7 +633,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
           </div>
 
           {/* ── Right: AI Response panel ── */}
-          <div className="flex flex-col p-7">
+          <div className="flex flex-col p-7 justify-center">
             {/* IDLE state */}
             {aiState === "idle" && (
               <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border py-10">
@@ -650,6 +645,32 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                   <p className="mt-1 max-w-[200px] text-[11px] text-muted-foreground/70">
                     Fill in the business profile and click <em>Analyze with AI</em> to get niche suggestions.
                   </p>
+                </div>
+              </div>
+            )}
+
+            {/* ERROR state */}
+            {aiState === "error" && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-destructive/30 bg-destructive/[0.03] p-6 text-center">
+                <div className="grid h-12 w-12 place-items-center rounded-xl bg-destructive/10">
+                  <AlertTriangle className="h-5 w-5 text-destructive" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-destructive">Service Unavailable</p>
+                  <p className="mt-1.5 max-w-[240px] text-[11px] text-muted-foreground/80 leading-relaxed">
+                    AI classification server is currently offline. You can configure the brand category manually to continue.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSuggestions(NICHES.map(n => ({ niche: n, match: 0.5, reason: "Manual categorization override" })));
+                      setPicked(NICHES[0]);
+                      setAiState("done");
+                    }}
+                    className="mt-3.5 rounded-lg border border-border bg-surface px-4 py-1.5 text-xs font-bold text-foreground hover:bg-surface-2 active:scale-95 transition-all"
+                  >
+                    Select Manually
+                  </button>
                 </div>
               </div>
             )}

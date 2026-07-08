@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
+export const dynamic = "force-dynamic";
+
 // Retrieve private FastAPI service URL from environment variables
 const FASTAPI_URL = process.env.FASTAPI_URL || "http://127.0.0.1:8000";
 const LLM_API_KEY = process.env.LLM_API_KEY;
@@ -18,8 +20,7 @@ export async function POST(request: Request) {
       brand_id, 
       niche, 
       caption,
-      enrich 
-    } = body;
+      } = body;
 
     // 1. Session Capturing: Extract Supabase JWT token from cookies
     const cookieStore = await cookies();
@@ -79,50 +80,14 @@ export async function POST(request: Request) {
 
     const prediction = await mlResponse.json();
 
-    // 5. Google Gemini API Enrichment (Suggest Page Option)
-    let suggestions = "";
-    if (enrich && LLM_API_KEY) {
-      try {
-        console.log("[BFF Proxy] Requesting creative enrichment from Google Gemini API (gemini-1.5-flash)...");
-        const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${LLM_API_KEY}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{
-                parts: [{
-                  text: `You are a social media copywriter assistant. Generate a highly engaging alternative Instagram caption based on:
-                  - Current Caption: "${caption}"
-                  - Current predicted performance: "${prediction.predicted_class}" (Confidence: ${prediction.confidence}%)
-                  - Target Format: ${format_type}
-                  
-                  Tuliskan rekomendasi alternatif caption dalam Bahasa Indonesia yang ramah, persuasif, serta tambahkan CTA pemicu konversi dan tagar relevan. Harap batasi saran di bawah 300 karakter.`
-                }]
-              }]
-            })
-          }
-        );
-
-        if (geminiRes.ok) {
-          const geminiData = await geminiRes.json();
-          suggestions = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        } else {
-          console.warn("[BFF Proxy] Gemini API call failed, status:", geminiRes.status);
-        }
-      } catch (geminiErr: any) {
-        console.warn("[BFF Proxy] Gemini API call failed with exception:", geminiErr.message);
-      }
-    }
-
-    // Combine ML prediction results with LLM suggestions
+    // Return ML prediction results directly
     return NextResponse.json({
       status: "success",
       predicted_class: prediction.predicted_class,
       confidence: prediction.confidence,
       probabilities: prediction.probabilities,
       model_metadata: prediction.model_metadata,
-      suggestions: suggestions
+      feature_importances: prediction.feature_importances
     });
 
   } catch (error: any) {
