@@ -51,8 +51,6 @@ const FeatureAttributionChart = dynamic(() => import("@/components/FeatureAttrib
 
 import {
   SUGGESTIONS,
-  FEATURE_IMPORTANCE,
-  BRANDS,
   type ContentFormat,
   type Tier,
 } from "@/lib/mock-data";
@@ -63,35 +61,6 @@ const FORMATS: { id: ContentFormat; label: string; icon: typeof Film; hint: stri
   { id: "Reels", label: "Reels", icon: Film, hint: "Vertical video content" },
   { id: "Carousel", label: "Carousel", icon: LayoutGrid, hint: "Multiple images swipe" },
   { id: "Single Image", label: "Single Image", icon: ImageIcon, hint: "Static feed post" },
-];
-
-const ACCOUNTS = BRANDS;
-
-const CLASS_PROBS = [
-  { tier: "High" as const, prob: 0.71 },
-  { tier: "Average" as const, prob: 0.22 },
-  { tier: "Low" as const, prob: 0.07 },
-];
-
-const REASONS = [
-  {
-    label: "Content Type aligns with top-performing posts",
-    detail: "Reels perform exceptionally well for creative agencies in this niche.",
-    weight: 0.28,
-    direction: "positive" as const,
-  },
-  {
-    label: "Posting time is within the peak audience window",
-    detail: "19:30 is during the optimal 19:00–21:00 engagement window for this niche.",
-    weight: 0.22,
-    direction: "positive" as const,
-  },
-  {
-    label: "Explicit Call-to-Action detected",
-    detail: "Adding a prompt to save or comment increases overall post performance by 8%.",
-    weight: 0.08,
-    direction: "positive" as const,
-  },
 ];
 
 const KEY_LABELS: Record<string, string> = {
@@ -408,64 +377,22 @@ export default function PredictPage() {
     }
   };
 
-  // Check if any calibrations are toggled on
+  // Whether the user has selected any optimization to apply on re-analysis.
   const anyRecsApplied = Object.values(appliedRecs).some(Boolean);
 
-  // Compute live simulated tier and confidence based on calibration toggles
-  const { simulatedTier, simulatedConfidence, simulatedProbs } = useMemo(() => {
-    let baseConfidence = 71; // Base high probability
-    let activeRecsCount = Object.values(appliedRecs).filter(Boolean).length;
-    
-    if (activeRecsCount === 0) {
-      // Uncalibrated state matching original response
-      return {
-        simulatedTier: "Average" as Tier,
-        simulatedConfidence: 89,
-        simulatedProbs: [
-          { tier: "High" as const, prob: 0.22 },
-          { tier: "Average" as const, prob: 0.71 },
-          { tier: "Low" as const, prob: 0.07 },
-        ]
-      };
-    } else if (activeRecsCount === 1) {
-      return {
-        simulatedTier: "Average" as Tier,
-        simulatedConfidence: 94,
-        simulatedProbs: [
-          { tier: "High" as const, prob: 0.44 },
-          { tier: "Average" as const, prob: 0.52 },
-          { tier: "Low" as const, prob: 0.04 },
-        ]
-      };
-    } else {
-      // 2 or more recommendations applied raises the predicted tier to HIGH
-      return {
-        simulatedTier: "High" as Tier,
-        simulatedConfidence: 91 + (activeRecsCount * 2), // up to 99%
-        simulatedProbs: [
-          { tier: "High" as const, prob: 0.81 + (activeRecsCount * 0.04) },
-          { tier: "Average" as const, prob: 0.15 - (activeRecsCount * 0.03) },
-          { tier: "Low" as const, prob: 0.04 - (activeRecsCount * 0.01) },
-        ]
-      };
-    }
-  }, [appliedRecs]);
+  // Displayed result always reflects the real model prediction. Selecting
+  // recommendations only stages changes; the model is re-run when the user
+  // clicks "Apply Changes & Re-Analyze" (which re-calls /api/predict).
+  const top = { tier: predictedTier };
+  const confidence = predictedConfidence;
+  const activeProbs = predictedProbs;
 
-  // Current states dynamically mapped
-  const top = anyRecsApplied ? { tier: simulatedTier } : { tier: predictedTier };
-  const confidence = anyRecsApplied ? simulatedConfidence : predictedConfidence;
-  const activeProbs = anyRecsApplied ? simulatedProbs : predictedProbs;
-
-  // Recalibrate simulated delay
+  // Toggle which recommendations to apply on the next real re-analysis.
   const handleToggleRec = (key: string) => {
-    setIsCalibrating(true);
     setAppliedRecs(prev => ({
       ...prev,
       [key]: !prev[key]
     }));
-    setTimeout(() => {
-      setIsCalibrating(false);
-    }, 600);
   };
 
   const handleApplyAllCalibration = () => {
@@ -608,8 +535,8 @@ export default function PredictPage() {
           <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-foreground md:text-3xl flex items-center gap-2">
             Analyze Post Performance
             {anyRecsApplied && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-[10px] font-bold text-emerald-500 uppercase tracking-wide">
-                <Flame className="h-3 w-3 animate-pulse" /> Calibrated
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 text-[10px] font-bold text-amber-500 uppercase tracking-wide">
+                <Flame className="h-3 w-3 animate-pulse" /> Optimizations staged — re-analyze
               </span>
             )}
           </h1>

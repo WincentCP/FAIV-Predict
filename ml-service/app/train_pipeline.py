@@ -23,6 +23,13 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(BASE_DIR, "models_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+# Minimum number of real historical posts required to train a model.
+MIN_TRAINING_SAMPLES = 30
+
+
+class InsufficientDataError(Exception):
+    """Raised when there is not enough real data to train a trustworthy model."""
+
 class ModelTrainer:
     """
     ML Pipeline for training, evaluating, and deploying RandomForest models
@@ -68,9 +75,11 @@ class ModelTrainer:
     @classmethod
     def fetch_historical_data(cls, brand_id: Optional[str] = None, niche: Optional[str] = None) -> pd.DataFrame:
         """
-        Fetches historical posts for training.
-        If database connection fails or has insufficient data, generates synthetic data
-        to ensure model training never breaks in dev/sandbox environments.
+        Fetches real historical posts for training from the database.
+
+        Raises InsufficientDataError if the database is unreachable or there are
+        fewer than MIN_TRAINING_SAMPLES real posts. We never fabricate training
+        data: a model must be trained on real engagement history to be trustworthy.
         """
         data = []
         conn = None
@@ -103,62 +112,20 @@ class ModelTrainer:
                     )
                     data = [dict(row) for row in cur.fetchall()]
         except Exception as e:
-            logger.warning(f"Database query failed or is unconfigured: {e}. Generating synthetic training dataset.")
+            logger.error(f"Database query failed or is unconfigured: {e}")
+            raise InsufficientDataError(
+                "Cannot train: the historical posts database is unreachable. "
+                "Configure DATABASE_URL and sync real data first."
+            )
 
-        # Ensure we have a minimum threshold of data points (e.g., 20 posts)
-        if len(data) < 20:
-            logger.info("Insufficient data in database (less than 20 records). Generating synthetic posts...")
-            data = cls.generate_synthetic_posts(brand_id, niche)
+        if len(data) < MIN_TRAINING_SAMPLES:
+            raise InsufficientDataError(
+                f"Cannot train: only {len(data)} real posts found for "
+                f"{'brand ' + str(brand_id) if brand_id else 'niche ' + str(niche)}; "
+                f"at least {MIN_TRAINING_SAMPLES} are required. Sync more data first."
+            )
 
         return pd.DataFrame(data)
-
-    @classmethod
-    def generate_synthetic_posts(cls, brand_id: Optional[str], niche: Optional[str]) -> list:
-        """Generates mock historical data for training in cold-start/sandbox environments."""
-        np.random.seed(42)
-        mock_posts = []
-        formats = [("Single Image", 1, 0, 0), ("Carousel", 0, 1, 0), ("Reels", 0, 0, 1)]
-        
-        # We generate 200 records to represent a mature dataset if brand_id is specified
-        size = 220 if brand_id else 100
-        
-        for i in range(size):
-            fmt_name, is_single, is_carousel, is_reels = formats[np.random.choice(3)]
-            post_hour = int(np.random.choice([8, 9, 12, 13, 17, 18, 19, 20, 21]))
-            caption_len = int(np.random.randint(50, 400))
-            hashtag_count = int(np.random.randint(0, 12))
-            has_cta = bool(np.random.choice([True, False], p=[0.6, 0.4]))
-            
-            # Base Engagement Rate calculation with some patterns
-            er = 1.0 # baseline
-            if post_hour in [19, 20, 21]:
-                er += 1.5
-            if is_reels:
-                er += 2.0
-            if has_cta:
-                er += 0.8
-            if 150 <= caption_len <= 300:
-                er += 0.5
-            if 3 <= hashtag_count <= 8:
-                er += 0.6
-                
-            # Add noise
-            er += np.random.normal(0, 0.4)
-            er = max(0.1, er)
-            
-            mock_posts.append({
-                "caption": f"Mock post {i} with hashtags #awesome #trend" if hashtag_count > 0 else f"Mock post {i}",
-                "er": er,
-                "follower_count_at_post": 5000,
-                "is_single_image": bool(is_single),
-                "is_carousel": bool(is_carousel),
-                "is_reels": bool(is_reels),
-                "post_hour": post_hour,
-                "caption_length": caption_len,
-                "hashtag_count": hashtag_count,
-                "has_cta": has_cta
-            })
-        return mock_posts
 
     @classmethod
     def upload_to_supabase_storage(cls, file_path: str, storage_path: str) -> Optional[str]:

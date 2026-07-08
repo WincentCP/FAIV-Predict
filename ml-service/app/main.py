@@ -4,7 +4,7 @@ import uuid
 import datetime
 import logging
 from typing import Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header
 from dotenv import load_dotenv
 
 # Load environment variables from .env relative to this file
@@ -17,7 +17,7 @@ import psycopg2
 import psycopg2.extras
 
 from app.preprocessing import DataPreprocessor
-from app.model_loader import ModelLoader
+from app.model_loader import ModelLoader, ModelUnavailableError
 from app.train_pipeline import ModelTrainer
 
 # Configure Logging
@@ -30,12 +30,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS Configuration - restrict to frontend local and production URLs
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    os.getenv("FRONTEND_URL", "*")
-]
+# CORS Configuration - explicit allowlist only (never wildcard with credentials).
+# FRONTEND_URL may be a comma-separated list of allowed origins.
+ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+_frontend_env = os.getenv("FRONTEND_URL", "")
+for _origin in _frontend_env.split(","):
+    _origin = _origin.strip()
+    if _origin and _origin != "*" and _origin not in ALLOWED_ORIGINS:
+        ALLOWED_ORIGINS.append(_origin)
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,6 +46,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Service-to-service authentication ──────────────────────────────────────
+# The Next.js BFF is the trust boundary (it enforces the Supabase session).
+# Requests to this service must carry a shared secret. When INTERNAL_API_TOKEN
+# is unset we log a loud warning and allow the request (local dev only);
+# production deployments MUST set INTERNAL_API_TOKEN.
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
+if not INTERNAL_API_TOKEN:
+    logger.warning(
+        "INTERNAL_API_TOKEN is not set. The ML service is UNAUTHENTICATED. "
+        "Set INTERNAL_API_TOKEN in production."
+    )
+
+
+def verify_internal_token(x_internal_token: Optional[str] = Header(default=None)):
+    """Rejects requests that do not present the shared internal token."""
+    if not INTERNAL_API_TOKEN:
+        return
+    if x_internal_token != INTERNAL_API_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid internal token")
 
 # Pydantic Schemas for Requests
 class PredictionRequest(BaseModel):
@@ -119,7 +141,7 @@ def run_training_job_async(job_id: str, brand_id: Optional[str], niche: Optional
             conn.close()
 
 
-@app.post("/predict")
+@app.post("/predict", dependencies=[Depends(verify_internal_token)])
 def predict(req: PredictionRequest):
     """
     Extracts features, loads the appropriate Random Forest model (personal or niche),
@@ -127,9 +149,13 @@ def predict(req: PredictionRequest):
     Logs the prediction metadata to the Supabase database.
     """
     try:
-        # 1. Load model and bounds bundle
-        bundle, metadata = ModelLoader.load_model(brand_id=req.brand_id, niche=req.niche)
-        
+        # 1. Load model and bounds bundle (real trained model only)
+        try:
+            bundle, metadata = ModelLoader.load_model(brand_id=req.brand_id, niche=req.niche)
+        except ModelUnavailableError as mue:
+            # Honest "no trained model yet" signal instead of a fabricated result
+            raise HTTPException(status_code=503, detail=str(mue))
+
         # 2. Extract features using preprocessor
         features = DataPreprocessor.extract_features(
             caption=req.caption, 
@@ -209,12 +235,14 @@ def predict(req: PredictionRequest):
             },
             "feature_importances": feature_importances
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
 
-@app.post("/train")
+@app.post("/train", dependencies=[Depends(verify_internal_token)])
 def train(req: TrainRequest, background_tasks: BackgroundTasks):
     """
     Triggers model retraining. Starts a background thread task to prevent API timeout.
@@ -250,7 +278,7 @@ def train(req: TrainRequest, background_tasks: BackgroundTasks):
     }
 
 
-@app.post("/suggest")
+@app.post("/suggest", dependencies=[Depends(verify_internal_token)])
 def suggest(req: SuggestRequest):
     """
     Template Recommendation Engine (TRE). Evaluates post attributes against niche averages,
@@ -318,7 +346,7 @@ def suggest(req: SuggestRequest):
         "recommendations": suggestions
     }
 
-@app.get("/train/{job_id}")
+@app.get("/train/{job_id}", dependencies=[Depends(verify_internal_token)])
 def get_train_status(job_id: str):
     """Retrieves the status of a background retraining job from database."""
     db_url = os.getenv("DATABASE_URL")
@@ -484,7 +512,7 @@ def _sync_and_retrain_pipeline():
     return {"status": "success", "timestamp": datetime.datetime.utcnow().isoformat(), "results": results}
 
 
-@app.post("/sync")
+@app.post("/sync", dependencies=[Depends(verify_internal_token)])
 def sync_instagram_data(background_tasks: BackgroundTasks):
     """
     n8n Orchestration Endpoint (Async).
@@ -524,7 +552,7 @@ def sync_instagram_data(background_tasks: BackgroundTasks):
     return {"status": "pending", "job_id": job_id, "message": "Sync + retrain pipeline queued."}
 
 
-@app.post("/sync/now")
+@app.post("/sync/now", dependencies=[Depends(verify_internal_token)])
 def sync_instagram_data_now():
     """
     n8n Orchestration Endpoint (Synchronous).
