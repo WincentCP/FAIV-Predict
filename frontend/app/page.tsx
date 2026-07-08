@@ -10,14 +10,21 @@ import { createClient } from "@/lib/supabase/client";
 export default function Page() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("wincentcoleusphan@gmail.com");
+  const [password, setPassword] = useState("skripsisuccess");
   const [authError, setAuthError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setAuthError(null);
+
+    // Immediate bypass for pre-filled demo login to avoid any backend/Supabase connection hiccups
+    if (email === "wincentcoleusphan@gmail.com" && password === "skripsisuccess") {
+      document.cookie = "sb-simulated-login=true; path=/";
+      window.location.href = "/dashboard";
+      return;
+    }
 
     try {
       const supabase = createClient();
@@ -27,11 +34,6 @@ export default function Page() {
       });
 
       if (error) {
-        if (email === "wincentcoleusphan@gmail.com" && password === "skripsisuccess") {
-          document.cookie = "sb-simulated-login=true; path=/";
-          window.location.href = "/dashboard";
-          return;
-        }
         console.error("Supabase auth error:", error.message);
         setAuthError(error.message);
         return;
