@@ -45,9 +45,7 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/niches") ||
     request.nextUrl.pathname.startsWith("/suggest");
 
-  const simulatedCookie = request.cookies.get("sb-simulated-login")?.value === "true";
-
-  if (isDashboardRoute && !user && !simulatedCookie) {
+  if (isDashboardRoute && !user) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);

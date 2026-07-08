@@ -10,8 +10,8 @@ import { createClient } from "@/lib/supabase/client";
 export default function Page() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState("wincentcoleusphan@gmail.com");
-  const [password, setPassword] = useState("skripsisuccess");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -32,8 +32,6 @@ export default function Page() {
         return;
       }
 
-      // Clear simulated login cookie if supabase sign in succeeds
-      document.cookie = "sb-simulated-login=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
       window.location.href = "/dashboard";
     } catch (err: any) {
       console.error("Supabase connection failed:", err.message);

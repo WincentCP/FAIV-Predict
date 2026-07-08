@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 // Retrieve private FastAPI service URL from environment variables
 const FASTAPI_URL = process.env.FASTAPI_URL || "http://127.0.0.1:8000";
 const LLM_API_KEY = process.env.LLM_API_KEY;
+const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
 
 export async function POST(request: Request) {
   try {
@@ -34,6 +35,11 @@ export async function POST(request: Request) {
     // 2. Authorization Wrapping: Forward the JWT session token securely
     if (accessToken) {
       backendHeaders["Authorization"] = `Bearer ${accessToken}`;
+    }
+
+    // Service-to-service shared secret for the ML service
+    if (INTERNAL_API_TOKEN) {
+      backendHeaders["X-Internal-Token"] = INTERNAL_API_TOKEN;
     }
 
     // Map format names for FastAPI
