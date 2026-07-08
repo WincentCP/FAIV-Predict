@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 const LLM_API_KEY = process.env.LLM_API_KEY;
+// Configurable model; defaults to a current Gemini model (gemini-1.5-flash was retired).
+const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.5-flash";
 
 // Whitelisted niches in our system
 const NICHES = [
@@ -47,7 +49,7 @@ export async function POST(request: Request) {
 
     console.log("[BFF Classify] Calling Google Gemini API...");
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${LLM_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${LLM_MODEL}:generateContent?key=${LLM_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -91,10 +93,11 @@ export async function POST(request: Request) {
 
 function runFallbackClassifier(name: string, bio: string) {
   const seed = (name + " " + bio).toLowerCase();
-  
+
   const scoreMap = NICHES.map((niche) => {
-    let match = 0.35 + Math.random() * 0.25;
-    
+    // Deterministic base score (no randomness) so classification is reproducible.
+    let match = 0.4;
+
     // Keyword rules
     const firstWord = niche.split(" ")[0].toLowerCase();
     if (seed.includes(firstWord)) match += 0.35;
