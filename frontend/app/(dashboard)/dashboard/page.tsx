@@ -120,6 +120,9 @@ export default function DashboardPage() {
               if (kpi.id === "accounts" && data.totalBrands !== undefined) {
                 return { ...kpi, value: data.totalBrands.toString(), sub: `${data.totalBrands} brand${data.totalBrands === 1 ? "" : "s"} connected` };
               }
+              if (kpi.id === "confidence" && data.avgConfidence !== undefined) {
+                return { ...kpi, value: data.avgConfidence, sub: "Across recent predictions" };
+              }
               return kpi;
             })
           );
@@ -140,7 +143,6 @@ export default function DashboardPage() {
             const mappedRecent = data.recent.map((r: any) => ({
               id: r.id,
               account: r.brand ? `@${r.brand.toLowerCase().replace(/\s+/g, "")}` : "@unknown",
-              format: "Single Image" as const,
               caption: r.caption,
               tier: r.tier as any,
               confidence: r.confidence ?? null,
@@ -237,10 +239,6 @@ export default function DashboardPage() {
               {brandsList.length} accounts analyzed
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center gap-2 rounded-full border border-border bg-surface/70 px-3.5 py-2 text-[10px] font-bold text-muted-foreground shadow-sm backdrop-blur">
-                <TrendingUp className="h-3.5 w-3.5 text-[oklch(0.65_0.18_155)]" />
-                Forecasts <span className="font-mono text-foreground">+18.4%</span> this week
-              </div>
               {driftCount > 0 && (
                 <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,hsl(var(--destructive))_45%,transparent)] bg-[color-mix(in_oklab,hsl(var(--destructive))_10%,transparent)] px-3.5 py-2 text-[10px] font-extrabold text-destructive shadow-sm backdrop-blur">
                   <AlertTriangle className="h-3.5 w-3.5 animate-bounce" />
@@ -258,8 +256,8 @@ export default function DashboardPage() {
               transition={{ delay: 0.2 }}
               className="font-display text-[40px] font-extrabold leading-[1.05] tracking-tight md:text-[60px]"
             >
-              Good morning,{" "}
-              <span className="text-gradient-primary">Wincent</span>.
+              Welcome back to{" "}
+              <span className="text-gradient-primary">FAIV Predict</span>.
             </motion.h1>
             
             <motion.h2 
@@ -268,7 +266,7 @@ export default function DashboardPage() {
               transition={{ delay: 0.3 }}
               className="mt-3.5 font-display text-2xl font-bold leading-tight tracking-tight text-muted-foreground md:text-3.5xl"
             >
-              Your content is performing well today.
+              Forecast, diagnose, and optimize your content.
             </motion.h2>
             
             <motion.p 
@@ -322,16 +320,6 @@ export default function DashboardPage() {
                 Dedicated AI accounts{" "}
                 <span className="font-mono font-bold text-foreground bg-surface-3/50 px-1.5 py-0.5 rounded">{personalCount}/{brandsList.length}</span>
               </span>
-              <span className="hidden h-3 w-px bg-border-strong sm:inline-block" />
-              <span>
-                Last update{" "}
-                <span className="font-mono font-bold text-foreground bg-surface-3/50 px-1.5 py-0.5 rounded">12h ago</span>
-              </span>
-              <span className="hidden h-3 w-px bg-border-strong sm:inline-block" />
-              <span>
-                Forecasts today{" "}
-                <span className="font-mono font-bold text-foreground bg-surface-3/50 px-1.5 py-0.5 rounded">428</span>
-              </span>
             </div>
           </div>
         </div>
@@ -364,12 +352,6 @@ export default function DashboardPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className={`grid h-10 w-10 place-items-center rounded-xl ${kpi.colorClass} shadow-sm group-hover:bg-primary group-hover:text-primary-foreground transition-all duration-300`}>
                     <KpiIcon className="h-5 w-5" />
-                  </div>
-                  <div
-                    className={`inline-flex items-center gap-0.5 rounded-full px-2.5 py-1 text-[10px] font-bold bg-[color-mix(in_oklab,hsl(var(--success))_15%,transparent)] text-[oklch(0.55_0.18_150)] dark:text-[oklch(0.78_0.18_150)]`}
-                  >
-                    <ArrowUpRight className="h-3.5 w-3.5" />
-                    {kpi.delta}
                   </div>
                 </div>
                 <div className="mt-5 font-display text-3xl font-extrabold tabular-nums tracking-tight">
@@ -440,9 +422,6 @@ export default function DashboardPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-bold text-foreground truncate">{r.account}</span>
-                          <span className="rounded-md border border-border/80 bg-surface-3 px-2 py-0.5 text-[9px] font-bold text-muted-foreground shadow-sm whitespace-nowrap">
-                            {r.format}
-                          </span>
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground/80 line-clamp-1 italic">
                           &quot;{r.caption}&quot;
@@ -505,12 +484,10 @@ export default function DashboardPage() {
           ) : (
             brandsList.slice(0, 6).map((b) => {
               const isPersonal = b.model_type === "personal";
-              const samples = b.followers > 10000 ? 210 : 80;
-              const pct = Math.min(100, Math.round((samples / 200) * 100));
               const stage = isPersonal ? "Personal" : "Niche";
-              const accuracy = isPersonal ? 81.4 : 74.2;
+              const followers = typeof b.followers === "number" ? b.followers : 0;
               const handle = b.handle || `@${b.name.toLowerCase().replace(/\s+/g, "")}`;
-              
+
               return (
                 <li
                   key={b.id}
@@ -533,24 +510,11 @@ export default function DashboardPage() {
                   </div>
                   <div className="mt-4 flex items-center justify-between text-[11px] font-bold">
                     <span className="text-muted-foreground/80">
-                      <span className="font-mono tabular-nums text-foreground">{samples}</span>
-                      {stage === "Personal" ? " posts analyzed · Dedicated active" : `/200 · ${pct}%`}
+                      <span className="font-mono tabular-nums text-foreground">{followers.toLocaleString()}</span> followers
                     </span>
-                    <span className="inline-flex items-center gap-1.5 font-mono text-foreground">
-                      {accuracy.toFixed(1)}% Success Rate
+                    <span className="inline-flex items-center gap-1.5 font-mono text-muted-foreground/80">
+                      {stage === "Personal" ? "Dedicated AI active" : "Niche AI"}
                     </span>
-                  </div>
-                  <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-3/80">
-                    <motion.div
-                       initial={{ width: 0 }}
-                       animate={{ width: `${pct}%` }}
-                       transition={{ duration: 1, ease: "easeOut" }}
-                       className="h-full rounded-full"
-                       style={{
-                         background:
-                           stage === "Personal" ? "var(--gradient-lime)" : "var(--gradient-primary)",
-                       }}
-                    />
                   </div>
                 </li>
               );

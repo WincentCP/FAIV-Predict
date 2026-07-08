@@ -51,16 +51,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isSidebarMenuOpen, setIsSidebarMenuOpen] = React.useState(false);
   const [isTopbarMenuOpen, setIsTopbarMenuOpen] = React.useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+  const [userEmail, setUserEmail] = React.useState<string>("");
+
+  React.useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      setUserEmail(data?.user?.email ?? "");
+    });
+  }, []);
+
+  const displayName = userEmail ? userEmail.split("@")[0] : "Account";
+  const avatarInitial = displayName ? displayName.charAt(0).toUpperCase() : "?";
 
   const handleLogout = async () => {
     try {
       const supabase = createClient();
       await supabase.auth.signOut();
-      document.cookie = "sb-simulated-login=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-      router.push("/");
     } catch (err) {
       console.warn("Failed to sign out via Supabase:", err);
-      document.cookie = "sb-simulated-login=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    } finally {
       router.push("/");
     }
   };
@@ -233,8 +242,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="absolute bottom-full left-2 right-2 mb-2 z-50 rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-elevated)] backdrop-blur animate-[page-enter_0.15s_ease-out]">
                 <div className="flex flex-col gap-0.5">
                   <div className="px-2.5 py-1.5 border-b border-border/40 mb-1">
-                    <div className="text-xs font-semibold text-foreground">Wincent</div>
-                    <div className="text-[10px] text-muted-foreground">alex@nova.studio</div>
+                    <div className="text-xs font-semibold text-foreground">{displayName}</div>
+                    <div className="text-[10px] text-muted-foreground">{userEmail || "—"}</div>
                   </div>
                   <button
                     onClick={() => {
@@ -272,15 +281,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-sidebar-accent/50 cursor-pointer"
             >
               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary text-[11px] font-bold text-primary-foreground">
-                W
+                {avatarInitial}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-medium text-sidebar-foreground">
-                  Wincent
+                  {displayName}
                 </div>
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                   <span className="h-1.5 w-1.5 rounded-full bg-[oklch(0.72_0.16_150)]" />
-                  Administrator
+                  <span className="truncate">{userEmail || "Signed in"}</span>
                 </div>
               </div>
               <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-200", isSidebarMenuOpen && "rotate-180")} />
@@ -334,11 +343,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   className="ml-1 hidden cursor-pointer items-center gap-2 rounded-lg border border-border bg-surface/60 px-2 py-1 transition-colors hover:bg-surface-2 sm:flex ring-focus"
                 >
                   <div className="grid h-6 w-6 place-items-center rounded-md bg-primary text-[10px] font-bold text-primary-foreground">
-                    W
+                    {avatarInitial}
                   </div>
                   <div className="text-left leading-tight">
-                    <div className="text-[12px] font-medium">Wincent</div>
-                    <div className="text-[10px] text-muted-foreground">Administrator</div>
+                    <div className="text-[12px] font-medium">{displayName}</div>
+                    <div className="text-[10px] text-muted-foreground max-w-[140px] truncate">{userEmail || "Signed in"}</div>
                   </div>
                   <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform duration-200", isTopbarMenuOpen && "rotate-180")} />
                 </div>
@@ -346,8 +355,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <div className="absolute right-0 top-full mt-2 w-48 z-50 rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-elevated)] backdrop-blur animate-[page-enter_0.15s_ease-out]">
                     <div className="flex flex-col gap-0.5">
                       <div className="px-2.5 py-1.5 border-b border-border/40 mb-1">
-                        <div className="text-xs font-semibold text-foreground">Wincent</div>
-                        <div className="text-[10px] text-muted-foreground">wincentcoleusphan@gmail.com</div>
+                        <div className="text-xs font-semibold text-foreground">{displayName}</div>
+                        <div className="text-[10px] text-muted-foreground max-w-[160px] truncate">{userEmail || "—"}</div>
                       </div>
                       <button
                         onClick={() => {

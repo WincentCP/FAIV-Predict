@@ -189,7 +189,7 @@ export function CaptionLimitWarning({ count }: { count: number }) {
       className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[color-mix(in_oklab,hsl(var(--destructive))_12%,transparent)] px-3 py-2 text-xs font-medium text-destructive ring-1 ring-inset ring-[color-mix(in_oklab,hsl(var(--destructive))_30%,transparent)]"
     >
       <AlertTriangle className="h-3.5 w-3.5" />
-      Over Instagram's 2,200 character limit by{" "}
+      Over Instagram&apos;s 2,200 character limit by{" "}
       <span className="font-mono tabular-nums">{over}</span>
     </motion.div>
   );

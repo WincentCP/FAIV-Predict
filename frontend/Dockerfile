@@ -12,9 +12,18 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Environment variables must be set during build time for Next.js static optimization
+# Environment variables must be set during build time for Next.js static optimization.
+# NEXT_PUBLIC_* values are inlined into the client bundle at build time, so they
+# must be provided as build args (not just runtime env).
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
 RUN npm run build
 

@@ -5,7 +5,6 @@ import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from typing import Optional, Any, Tuple
-from sklearn.ensemble import RandomForestClassifier
 
 logger = logging.getLogger("model_loader")
 logging.basicConfig(level=logging.INFO)
@@ -14,6 +13,11 @@ logging.basicConfig(level=logging.INFO)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(BASE_DIR, "models_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+
+class ModelUnavailableError(Exception):
+    """Raised when no real trained model is available for the requested scope."""
+
 
 class ModelLoader:
     """
@@ -123,95 +127,47 @@ class ModelLoader:
     @classmethod
     def load_model(cls, brand_id: Optional[str] = None, niche: Optional[str] = None) -> Tuple[Any, dict]:
         """
-        Loads the appropriate model (personal or niche-level) from the database or cache.
-        Returns a tuple of (model_object, metadata_dict).
-        
-        If no model exists or database is unreachable, compiles/loads a default baseline model.
+        Loads the appropriate real trained model (personal or niche-level) from the
+        database/storage. Returns a tuple of (model_bundle, metadata_dict).
+
+        Raises ModelUnavailableError if the database is unreachable or no trained
+        model exists for the requested brand/niche. We never serve a fabricated
+        fallback model, so callers can surface an honest "no model yet" state.
         """
-        metadata = None
-        if os.getenv("DATABASE_URL"):
-            metadata = cls.get_model_metadata(brand_id, niche)
-            
-        if metadata:
-            storage_url = metadata.get("storage_url", "")
-            storage_path = metadata.get("storage_path", "")
-            version = metadata.get("version", "v1.0")
-            model_type = metadata.get("model_type", "niche")
-            
-            filename = f"model_{model_type}_{brand_id or niche}_{version}.joblib"
-            cache_key = f"{brand_id or niche}_{version}"
-            
-            # Check RAM cache first
-            if cache_key in cls._model_cache:
-                logger.info(f"Model {filename} loaded from memory cache.")
-                return cls._model_cache[cache_key], metadata
+        if not os.getenv("DATABASE_URL"):
+            raise ModelUnavailableError(
+                "No model available: DATABASE_URL is not configured."
+            )
 
-            try:
-                local_path = cls.download_model(storage_url, storage_path, filename)
-                model = joblib.load(local_path)
-                cls._model_cache[cache_key] = model
-                logger.info(f"Successfully loaded model {filename} and cached in memory.")
-                return model, metadata
-            except Exception as e:
-                logger.warning(f"Error loading model from storage: {e}. Falling back to default baseline.")
+        metadata = cls.get_model_metadata(brand_id, niche)
+        if not metadata:
+            raise ModelUnavailableError(
+                f"No trained model found for "
+                f"{'brand ' + str(brand_id) if brand_id else 'niche ' + str(niche)}. "
+                "Train a model on real data first."
+            )
 
-        # Fallback to local default model or generate a mock model (cold-start resilience)
-        default_path = os.path.join(CACHE_DIR, "default_rf_model.joblib")
-        cache_key = "default_baseline"
+        storage_url = metadata.get("storage_url", "")
+        storage_path = metadata.get("storage_path", "")
+        version = metadata.get("version", "v1.0")
+        model_type = metadata.get("model_type", "niche")
+
+        filename = f"model_{model_type}_{brand_id or niche}_{version}.joblib"
+        cache_key = f"{brand_id or niche}_{version}"
+
+        # Check RAM cache first
         if cache_key in cls._model_cache:
-            return cls._model_cache[cache_key], {
-                "id": "00000000-0000-0000-0000-000000000000",
-                "model_type": "niche" if not brand_id else "account",
-                "niche": niche or "Fashion",
-                "version": "fallback-baseline",
-                "metrics": {"accuracy": 0.81, "f1_score": 0.80}
-            }
+            logger.info(f"Model {filename} loaded from memory cache.")
+            return cls._model_cache[cache_key], metadata
 
-        if not os.path.exists(default_path):
-            logger.info("Default model not found. Generating a mock RandomForest model for fallback.")
-            cls.generate_fallback_model(default_path)
-            
-        model = joblib.load(default_path)
-        cls._model_cache[cache_key] = model
-        fallback_metadata = {
-            "id": "00000000-0000-0000-0000-000000000000",
-            "model_type": "niche" if not brand_id else "account",
-            "niche": niche or "Fashion",
-            "version": "fallback-baseline",
-            "metrics": {"accuracy": 0.81, "f1_score": 0.80}
-        }
-        return model, fallback_metadata
-
-    @classmethod
-    def generate_fallback_model(cls, path: str):
-        """Generates and saves a mock RandomForestClassifier to use as a fallback."""
-        import numpy as np
-        # 7 Features: [is_single_image, is_carousel, is_reels, post_hour, caption_length, hashtag_count, has_cta]
-        X = np.array([
-            [1.0, 0.0, 0.0, 19.0, 150.0, 5.0, 1.0],
-            [0.0, 1.0, 0.0, 20.0, 250.0, 10.0, 1.0],
-            [0.0, 0.0, 1.0, 18.0, 300.0, 2.0, 1.0],
-            [1.0, 0.0, 0.0, 9.0, 50.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 12.0, 80.0, 12.0, 0.0],
-            [0.0, 0.0, 1.0, 23.0, 500.0, 1.0, 0.0],
-            [1.0, 0.0, 0.0, 15.0, 120.0, 4.0, 1.0],
-            [0.0, 1.0, 0.0, 21.0, 200.0, 7.0, 1.0],
-            [0.0, 0.0, 1.0, 19.0, 180.0, 6.0, 1.0],
-            [1.0, 0.0, 0.0, 8.0, 30.0, 1.0, 0.0]
-        ])
-        y = np.array(["HIGH", "HIGH", "HIGH", "LOW", "LOW", "LOW", "AVERAGE", "HIGH", "HIGH", "LOW"])
-        
-        rf = RandomForestClassifier(n_estimators=10, max_depth=3, random_state=42)
-        rf.fit(X, y)
-        
-        model_bundle = {
-            "model": rf,
-            "p33": 1.0,
-            "p67": 2.0,
-            "features": [
-                "is_single_image", "is_carousel", "is_reels", 
-                "post_hour", "caption_length", "hashtag_count", "has_cta"
-            ]
-        }
-        joblib.dump(model_bundle, path)
-        logger.info(f"Generated mock baseline model bundle at {path}")
+        try:
+            local_path = cls.download_model(storage_url, storage_path, filename)
+            model = joblib.load(local_path)
+            cls._model_cache[cache_key] = model
+            logger.info(f"Successfully loaded model {filename} and cached in memory.")
+            return model, metadata
+        except Exception as e:
+            logger.error(f"Error loading model from storage: {e}")
+            raise ModelUnavailableError(
+                f"A model is registered but its artifact could not be loaded: {e}"
+            )

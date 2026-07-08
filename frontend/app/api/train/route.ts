@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 export const dynamic = "force-dynamic";
 
 const FASTAPI_URL = process.env.FASTAPI_URL || "http://127.0.0.1:8000";
+const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
 
 // GET Handler to query retrain status
 export async function GET(request: Request) {
@@ -23,6 +24,9 @@ export async function GET(request: Request) {
     const backendHeaders: Record<string, string> = {};
     if (accessToken) {
       backendHeaders["Authorization"] = `Bearer ${accessToken}`;
+    }
+    if (INTERNAL_API_TOKEN) {
+      backendHeaders["X-Internal-Token"] = INTERNAL_API_TOKEN;
     }
 
     console.log(`[BFF Proxy] Fetching retrain job status: ${FASTAPI_URL}/train/${job_id}`);
@@ -62,6 +66,9 @@ export async function POST(request: Request) {
     };
     if (accessToken) {
       backendHeaders["Authorization"] = `Bearer ${accessToken}`;
+    }
+    if (INTERNAL_API_TOKEN) {
+      backendHeaders["X-Internal-Token"] = INTERNAL_API_TOKEN;
     }
 
     console.log(`[BFF Proxy] Forwarding retrain request to FastAPI: ${FASTAPI_URL}/train`);

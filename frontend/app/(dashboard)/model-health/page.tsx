@@ -6,13 +6,10 @@ import { type MlModel } from "@/lib/mock-data";
 import {
   Cpu,
   CheckCircle2,
-  PauseCircle,
   RefreshCw,
-  TrendingDown,
   AlertTriangle,
   X,
   FileText,
-  TrendingUp,
   Activity
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -59,18 +56,17 @@ export default function ModelHealthPage() {
     setIsTraining(true);
     setLogsOutput([]);
 
-    const log = (step: string, msg: string, status: "success" | "running" | "failed" | "resolved" = "success", extra = {}) => {
+    const log = (step: string, message: string, status: "success" | "running" | "failed" | "resolved" = "success") => {
       const entry = {
         timestamp: new Date().toISOString(),
         step,
         status,
-        ...extra
+        message,
       };
       setLogsOutput((prev) => [...(prev || []), entry]);
     };
 
-    log("initialize", `Retraining request sent to BFF for ${model.name}...`, "running");
-    await new Promise((r) => setTimeout(r, 600));
+    log("initialize", `Retraining request sent for ${model.name}...`, "running");
 
     try {
       const res = await fetch("/api/train", {
@@ -87,63 +83,61 @@ export default function ModelHealthPage() {
       }
 
       const data = await res.json();
-      const jobId = data.job_id || "simulated-job-id";
-      
-      log("queue_job", `Job queued successfully on FastAPI. Job ID: ${jobId}`, "success", { job_id: jobId });
-      await new Promise((r) => setTimeout(r, 800));
+      const jobId = data.job_id;
+      if (!jobId) {
+        throw new Error("Backend did not return a job id");
+      }
 
-      // Poll status from BFF
+      log("queue_job", `Job queued on the ML service. Job ID: ${jobId}`, "success");
+
+      // Poll real job status from the backend
       let completed = false;
       let attempts = 0;
-      const maxAttempts = 10;
+      const maxAttempts = 15;
 
       while (!completed && attempts < maxAttempts) {
         attempts++;
-        log("poll_status", `Checking job status (attempt ${attempts}/${maxAttempts})...`, "running");
-        
-        await new Promise((r) => setTimeout(r, 1200));
-        
+        await new Promise((r) => setTimeout(r, 1500));
+
         const statusRes = await fetch(`/api/train?job_id=${jobId}`);
-        if (statusRes.ok) {
-          const statusData = await statusRes.json();
-          if (statusData.status === "success") {
-            completed = true;
-            log("load_dataset", "Loaded historical dataset from Supabase", "success", { rows_loaded: 220 });
-            await new Promise((r) => setTimeout(r, 600));
-            log("split_train_test", "Train-test split 80:20 completed. Leakage verification check passed.", "success", { train_size: 176, test_size: 44 });
-            await new Promise((r) => setTimeout(r, 600));
-            log("fit_estimator", "RandomForestClassifier trained with max_depth=4 & min_samples_leaf=5", "success");
-            await new Promise((r) => setTimeout(r, 600));
-            log("evaluate_metrics", `Model evaluation complete. Accuracy: ${(statusData.accuracy || 0.85) * 100}%`, "success", { new_accuracy: statusData.accuracy || 0.85 });
-            await new Promise((r) => setTimeout(r, 600));
-            log("export_model", "Uploaded model joblib bundle to Supabase Storage Bucket", "success");
-            await new Promise((r) => setTimeout(r, 600));
-            log("concept_drift_check", "Retraining complete. Concept drift watch resolved.", "resolved");
-            break;
-          } else if (statusData.status === "failed") {
-            completed = true;
-            log("retrain_failed", `Retraining failed: ${statusData.error_message || "Unknown error"}`, "failed");
-            break;
-          }
+        if (!statusRes.ok) {
+          continue;
+        }
+        const statusData = await statusRes.json();
+        if (statusData.status === "success") {
+          completed = true;
+          const at = statusData.completed_at ? ` at ${statusData.completed_at}` : "";
+          log("completed", `Retraining job completed successfully${at}.`, "success");
+          break;
+        } else if (statusData.status === "failed") {
+          completed = true;
+          log("retrain_failed", `Retraining failed: ${statusData.error_message || "Unknown error"}`, "failed");
+          break;
+        } else {
+          log("poll_status", `Job status: ${statusData.status || "pending"} (attempt ${attempts}/${maxAttempts})`, "running");
         }
       }
 
       if (!completed) {
-        log("timeout_error", "Retraining job status polling timed out. Please check back later.", "failed");
+        log("timeout", "Job did not complete within the polling window. Check back later.", "failed");
       }
 
     } catch (err: any) {
       console.error("Retraining API connection error:", err);
-      log("connection_error", `Failed to complete retraining: ${err.message || "BFF or backend server unreachable"}`, "failed");
+      log("connection_error", `Failed to complete retraining: ${err.message || "backend unreachable"}`, "failed");
     } finally {
       setIsTraining(false);
     }
   };
 
+  const hasModels = models.length > 0;
+  const avgAccuracy = hasModels
+    ? (models.reduce((s, m) => s + m.baselineAccuracy, 0) / models.length).toFixed(1) + "%"
+    : "—";
+
   const handleGlobalRetrain = () => {
-    // Find the first drifted or active model to retrain
-    const target = models.find(m => m.baselineAccuracy - m.rollingAccuracy > 15) || models[0];
-    startRetrain(target);
+    if (!hasModels) return;
+    startRetrain(models[0]);
   };
 
   return (
@@ -163,7 +157,7 @@ export default function ModelHealthPage() {
         <SectionHeader
           eyebrow="Model Health"
           title="AI Model Performance"
-          description="Live accuracy diagnostics for AI classifiers. Automated warnings trigger when rolling accuracy drops below category benchmarks."
+          description="Validation accuracy for each trained classifier, recorded at training time. Retrain a model to refresh its metrics."
           actions={
             <button
               type="button"
@@ -185,15 +179,13 @@ export default function ModelHealthPage() {
           tone="primary"
         />
         <SummaryCard
-          label="Average Rolling Accuracy"
-          value={`${(
-            models.reduce((s, m) => s + m.rollingAccuracy, 0) / models.length
-          ).toFixed(1)}%`}
+          label="Average Model Accuracy"
+          value={avgAccuracy}
           tone="lime"
         />
         <SummaryCard
-          label="Accuracy Alerts"
-          value={models.filter((m) => m.baselineAccuracy - m.rollingAccuracy > 15).length.toString()}
+          label="Models Tracked"
+          value={models.length.toString()}
           tone="destructive"
         />
       </motion.section>
@@ -211,41 +203,27 @@ export default function ModelHealthPage() {
                 <th className="w-[140px] px-6 py-5">Niche Scope</th>
                 <th className="w-[100px] px-6 py-5">Version</th>
                 <th className="w-[180px] px-6 py-5">Model Accuracy</th>
-                <th className="w-[120px] px-6 py-5">Health Status</th>
+                <th className="w-[120px] px-6 py-5">Status</th>
                 <th className="w-[170px] px-6 py-5 text-right" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {models.map((m, i) => {
-                const drop = m.baselineAccuracy - m.rollingAccuracy;
+              {models.map((m) => {
                 const isPersonal = m.scope === "Personal";
 
-                // Concept Drift Status Badges logic:
-                // Stable: drop <= 5% (solid green)
-                // Watch: drop between 5% - 15% (amber yellow)
-                // Drift Detected: drop > 15% (pulsing red)
-                let driftBadge = (
+                // Live drift telemetry (comparing predicted vs actual engagement) is
+                // not yet captured, so we show the model's active state honestly
+                // rather than a fabricated drift status.
+                const statusBadge = m.is_active ? (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-[10px] font-bold text-emerald-600 uppercase tracking-wide">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
-                    Stable
+                    Active
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/40 border border-border px-2.5 py-1 text-[10px] font-bold text-muted-foreground uppercase tracking-wide">
+                    Inactive
                   </span>
                 );
-
-                if (drop > 15) {
-                  driftBadge = (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/10 border border-red-500/25 px-2.5 py-1 text-[10px] font-extrabold text-red-500 uppercase tracking-wide shadow-[0_0_12px_rgba(239,68,68,0.3)] animate-pulse">
-                      <TrendingDown className="h-3 w-3" />
-                      Attention
-                    </span>
-                  );
-                } else if (drop > 5) {
-                  driftBadge = (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 text-[10px] font-bold text-amber-600 uppercase tracking-wide">
-                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse" />
-                      Watch
-                    </span>
-                  );
-                }
 
                 return (
                   <tr key={m.id} className="hover:bg-surface-2/40 transition-colors group">
@@ -279,17 +257,12 @@ export default function ModelHealthPage() {
                         <div className="text-[9px] text-muted-foreground font-semibold leading-none mt-1">Validated on latest train</div>
                       </div>
                     </td>
-                    <td className="px-6 py-5 align-middle whitespace-nowrap">{driftBadge}</td>
+                    <td className="px-6 py-5 align-middle whitespace-nowrap">{statusBadge}</td>
                     <td className="px-6 py-5 align-middle text-right whitespace-nowrap">
                       <button
                         type="button"
                         onClick={() => startRetrain(m)}
-                        className={cn(
-                          "inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-[10px] font-bold transition-all active:scale-95 border shrink-0",
-                          drop > 15
-                            ? "bg-red-500 text-white border-red-600 hover:bg-red-600 shadow-[0_0_12px_rgba(239,68,68,0.25)]"
-                            : "bg-surface text-muted-foreground border-border hover:bg-surface-2 hover:text-foreground hover:border-border-strong"
-                        )}
+                        className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-[10px] font-bold transition-all active:scale-95 border shrink-0 bg-surface text-muted-foreground border-border hover:bg-surface-2 hover:text-foreground hover:border-border-strong"
                       >
                         <RefreshCw className="h-3 w-3" />
                         Retrain
@@ -378,39 +351,16 @@ export default function ModelHealthPage() {
                     <span>{isTraining ? "streaming..." : "idle"}</span>
                   </div>
                   <div className="h-48 sm:h-60 w-full rounded-xl border border-border-strong bg-slate-950 p-4 font-mono text-[11px] text-slate-300 overflow-y-auto leading-relaxed shadow-inner">
-                    {logsOutput && logsOutput.map((log, index) => {
-                      const formatLogMessage = (l: any) => {
-                        switch (l.step) {
-                          case "load_dataset":
-                            return `Loaded ${l.rows_loaded} rows from dataset database successfully.`;
-                          case "validate_schema":
-                            return `Schema validation completed. ${l.features?.length || 0} features matched.`;
-                          case "split_train_test":
-                            return `Data partition complete: ${l.train_size} training samples, ${l.test_size} validation samples.`;
-                          case "initialize_random_forest":
-                            return `Model parameters set: n_estimators=${l.n_estimators}, max_depth=${l.max_depth}.`;
-                          case "fit_niche_estimator":
-                            return `Estimator fit successful. Out-of-bag (OOB) score: ${l.oob_score?.toFixed(4)}.`;
-                          case "evaluate_metrics": {
-                            const diff = ((l.new_accuracy || 0) - (l.baseline_accuracy || 0)) * 100;
-                            return `Performance check: baseline = ${(l.baseline_accuracy * 100).toFixed(1)}%, rolling = ${(l.new_accuracy * 100).toFixed(1)}% (${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%).`;
-                          }
-                          case "export_onnx_model":
-                            return `Serialized & exported ONNX artifact to: ${l.path}`;
-                          case "concept_drift_check":
-                            return `Drift diagnostics: detected drift = ${l.drift_pct}% -> STATUS: ${l.status.toUpperCase()}.`;
-                          default:
-                            return JSON.stringify(l);
-                        }
-                      };
-                      return (
-                        <div key={index} className="whitespace-pre-wrap py-0.5">
-                          <span className="text-slate-500 mr-2">[{log.timestamp.split("T")[1].replace("Z", "")}]</span>{" "}
-                          <span className="text-primary font-bold mr-2">&gt;&gt; {log.step.toUpperCase()}:</span>{" "}
-                          <span className="text-emerald-400 font-semibold">{formatLogMessage(log)}</span>
-                        </div>
-                      );
-                    })}
+                    {logsOutput && logsOutput.map((log, index) => (
+                      <div key={index} className="whitespace-pre-wrap py-0.5">
+                        <span className="text-slate-500 mr-2">[{log.timestamp.split("T")[1].replace("Z", "")}]</span>{" "}
+                        <span className="text-primary font-bold mr-2">&gt;&gt; {log.step.toUpperCase()}:</span>{" "}
+                        <span className={cn(
+                          "font-semibold",
+                          log.status === "failed" ? "text-red-400" : "text-emerald-400"
+                        )}>{log.message}</span>
+                      </div>
+                    ))}
                     {isTraining && (
                       <div className="flex items-center gap-1.5 mt-1 text-slate-500 animate-pulse">
                         <span className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-ping shrink-0" />

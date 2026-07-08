@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { cookies } from "next/headers";
-import { MODELS } from "@/lib/mock-data";
 
 export const dynamic = "force-dynamic";
 
@@ -42,37 +40,33 @@ export async function GET() {
       if (!key || seen.has(key)) continue;
       seen.add(key);
 
-      const baselineAcc = m.accuracy ? parseFloat(m.accuracy) * 100 : 70.0;
+      const baselineAcc = m.accuracy ? parseFloat(m.accuracy) * 100 : 0;
       const trainedDate = new Date(m.created_at);
       const hoursAgo = Math.round((Date.now() - trainedDate.getTime()) / 3600000);
       const trainedText = hoursAgo < 24 ? `${hoursAgo} hours ago` : `${Math.round(hoursAgo / 24)} days ago`;
 
-      // Synthesize 30-day rolling accuracy based on base accuracy
-      const synthRolling30d = Array.from({ length: 30 }, (_, i) => {
-        const noise = Math.sin(i * 1.3) * 1.4 + Math.cos(i * 0.7) * 0.8;
-        return Math.max(40, Math.min(99, baselineAcc + noise));
-      });
-
       uniqueModels.push({
         id: m.id,
-        name: m.model_type === "account" 
+        name: m.model_type === "account"
           ? `Personal Model: ${(Array.isArray(m.brands) ? m.brands[0]?.name : (m.brands as any)?.name) || "Unknown Brand"}`
           : `Niche Model: ${m.niche || "General"}`,
         scope: m.model_type === "account" ? "Personal" : "Niche",
-        niche: m.model_type === "account" ? (m.niche || "Bakery & Café") : (m.niche || "Bakery & Café"),
+        niche: m.niche || "—",
         brandId: m.brand_id || undefined,
         version: `v${m.version || "1.0.0"}`,
+        // Accuracy recorded at training time. Rolling/live-drift telemetry is not
+        // captured yet, so we do not synthesize a rolling series.
         baselineAccuracy: baselineAcc,
         rollingAccuracy: baselineAcc,
         is_active: true,
         trained: trainedText,
-        rolling30d: synthRolling30d
+        rolling30d: []
       });
     }
 
     return NextResponse.json(uniqueModels);
   } catch (error: any) {
     console.error("[BFF Models] Failed to fetch models:", error);
-    return NextResponse.json(MODELS);
+    return NextResponse.json([]);
   }
 }
