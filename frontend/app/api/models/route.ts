@@ -57,16 +57,17 @@ export async function GET() {
         // Accuracy recorded at training time. Rolling/live-drift telemetry is not
         // captured yet, so we do not synthesize a rolling series.
         baselineAccuracy: baselineAcc,
-        rollingAccuracy: baselineAcc,
         is_active: true,
         trained: trainedText,
-        rolling30d: []
       });
     }
 
     return NextResponse.json(uniqueModels);
   } catch (error: any) {
     console.error("[BFF Models] Failed to fetch models:", error);
-    return NextResponse.json([]);
+    return NextResponse.json(
+      { status: "error", message: error.message || "Failed to fetch models" },
+      { status: 500 }
+    );
   }
 }

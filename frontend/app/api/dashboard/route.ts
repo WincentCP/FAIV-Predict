@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -112,18 +111,12 @@ export async function GET() {
       recent: formattedRecent
     });
   } catch (error: any) {
+    // Surface the failure honestly instead of returning zeroed metrics that
+    // are indistinguishable from an empty-but-healthy workspace.
     console.error("[BFF Dashboard] Failed to fetch dashboard aggregates:", error);
-    return NextResponse.json({
-      totalPredictions: 0,
-      totalModels: 0,
-      totalBrands: 0,
-      highCount: 0,
-      avgCount: 0,
-      lowCount: 0,
-      highTierRate: "0%",
-      avgConfidence: "—",
-      accuracyTrend: [],
-      recent: []
-    });
+    return NextResponse.json(
+      { status: "error", message: error.message || "Failed to fetch dashboard metrics" },
+      { status: 503 }
+    );
   }
 }

@@ -1,94 +1,88 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
-const LLM_API_KEY = process.env.LLM_API_KEY;
-// Configurable model; defaults to a current Gemini model (gemini-1.5-flash was retired).
-const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.5-flash";
+// Proxies the ML service's Template Recommendation Engine (TRE): deterministic,
+// niche-baseline parameter recommendations computed from the draft's features.
+const FASTAPI_URL = process.env.FASTAPI_URL || "http://127.0.0.1:8000";
+const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
+
+const ALLOWED_FORMATS = ["Reels", "Carousel", "Single Image"];
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { visual_concept, caption, brand, format } = body;
+    const { caption, format, post_hour, brand_id, niche } = body;
 
-    if (!LLM_API_KEY) {
-      console.warn("[BFF Suggest] LLM_API_KEY is not configured in server environment.");
+    if (typeof caption !== "string") {
       return NextResponse.json(
-        { 
-          status: "error", 
-          message: "AI suggestion service is not configured on this server." 
-        },
-        { status: 501 }
+        { status: "error", message: "'caption' is required." },
+        { status: 400 }
+      );
+    }
+    if (!ALLOWED_FORMATS.includes(format)) {
+      return NextResponse.json(
+        { status: "error", message: `'format' must be one of: ${ALLOWED_FORMATS.join(", ")}.` },
+        { status: 400 }
+      );
+    }
+    const hour = Number(post_hour);
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+      return NextResponse.json(
+        { status: "error", message: "'post_hour' must be an integer between 0 and 23." },
+        { status: 400 }
       );
     }
 
-    const structuredPrompt = `Role:
-You are an experienced social media strategist.
+    const cookieStore = await cookies();
+    const accessToken = cookieStore.get("sb-access-token")?.value;
+    const backendHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (accessToken) {
+      backendHeaders["Authorization"] = `Bearer ${accessToken}`;
+    }
+    if (INTERNAL_API_TOKEN) {
+      backendHeaders["X-Internal-Token"] = INTERNAL_API_TOKEN;
+    }
 
-Context:
-Brand: ${brand || "Default Brand"}
-Format: ${format || "Single Image"}
-
-Visual Concept:
-${visual_concept || "None provided"}
-
-Current Caption:
-${caption || ""}
-
-Objective:
-Improve the caption while ensuring it aligns with the planned visual concept.
-
-Output Requirements:
-• Bahasa Indonesia
-• Friendly and persuasive
-• Maximum 300 characters
-• Include a natural CTA
-• Suggest relevant hashtags
-• Keep the tone consistent with the visual concept`;
-
-    console.log("[BFF Suggest] Requesting suggestion from Google Gemini API...");
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${LLM_MODEL}:generateContent?key=${LLM_API_KEY}`,
-      {
+    let mlResponse;
+    try {
+      mlResponse = await fetch(`${FASTAPI_URL}/suggest`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: backendHeaders,
         body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: structuredPrompt
-            }]
-          }]
+          caption,
+          format,
+          post_hour: hour,
+          brand_id: brand_id || null,
+          niche: niche || null,
         }),
-      }
-    );
-
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.warn(`[BFF Suggest] Gemini API call failed: ${geminiRes.status} - ${errText}`);
+      });
+    } catch (netErr: any) {
+      console.error("[BFF Suggest] FastAPI service is unreachable:", netErr.message);
       return NextResponse.json(
-        { 
-          status: "error", 
-          message: "Failed to fetch response from AI engine." 
-        },
-        { status: 502 }
+        { status: "error", message: "Recommendation service is unreachable." },
+        { status: 503 }
       );
     }
 
-    const data = await geminiRes.json();
-    const suggestions = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (!mlResponse.ok) {
+      const errText = await mlResponse.text();
+      console.error(`[BFF Suggest] FastAPI returned ${mlResponse.status}:`, errText);
+      return NextResponse.json(
+        { status: "error", message: "Failed to compute recommendations." },
+        { status: mlResponse.status }
+      );
+    }
 
-    return NextResponse.json({
-      status: "success",
-      suggestions: suggestions.trim()
-    });
-
+    const data = await mlResponse.json();
+    return NextResponse.json(data);
   } catch (error: any) {
-    console.error("[BFF Suggest] Error generating suggestions:", error);
+    console.error("[BFF Suggest] Error generating recommendations:", error);
     return NextResponse.json(
-      { 
-        status: "error", 
-        message: error.message || "Failed to generate suggestions." 
-      },
+      { status: "error", message: error.message || "Failed to generate recommendations." },
       { status: 500 }
     );
   }
