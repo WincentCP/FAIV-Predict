@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { DatePicker, TimePicker } from "@/components/DateTimePicker";
 import { FlowStepper } from "@/components/FlowStepper";
 import { ModelMaturity } from "@/components/ModelMaturity";
 import { ConfidenceMeter } from "@/components/ConfidenceMeter";
 import { TierBadge } from "@/components/TierBadge";
-import { WhyThisScore } from "@/components/WhyThisScore";
+import { WhyThisScore, type WhyReason } from "@/components/WhyThisScore";
 import {
   analyzeCaption,
   CaptionMeter,
@@ -22,25 +22,17 @@ import {
   Image as ImageIcon,
   PenTool,
   ArrowRight,
-  Copy,
   Check,
   Clock,
   Calendar,
   HelpCircle,
   FileText,
   AlertTriangle,
-  Flame,
-  Sliders,
-  ChevronRight,
-  TrendingUp,
   Cpu,
-  BarChart3,
-  BadgeAlert,
-  Info,
   Activity,
-  CheckCircle2,
   Loader2,
-  Sparkles
+  Sparkles,
+  RefreshCw,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 
@@ -49,118 +41,98 @@ const FeatureAttributionChart = dynamic(() => import("@/components/FeatureAttrib
   loading: () => <div className="h-56 w-full animate-pulse bg-muted/40 rounded-xl" />,
 });
 
-import {
-  SUGGESTIONS,
-  type ContentFormat,
-  type Tier,
-} from "@/lib/mock-data";
-import { copyToClipboard, cn } from "@/lib/utils";
+import { type ContentFormat, type Tier, type Brand } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
-// Formats per Section 3.2.1
 const FORMATS: { id: ContentFormat; label: string; icon: typeof Film; hint: string }[] = [
   { id: "Reels", label: "Reels", icon: Film, hint: "Vertical video content" },
   { id: "Carousel", label: "Carousel", icon: LayoutGrid, hint: "Multiple images swipe" },
   { id: "Single Image", label: "Single Image", icon: ImageIcon, hint: "Static feed post" },
 ];
 
-const KEY_LABELS: Record<string, string> = {
-  media_type: "Content Type",
-  posting_hour: "Posting Time",
+// Labels for the real model feature keys returned by the ML service.
+const FEATURE_LABELS: Record<string, string> = {
+  media_type: "Content Format",
+  post_hour: "Posting Hour",
   caption_length: "Caption Length",
   hashtag_count: "Hashtag Count",
-  posting_day: "Posting Day",
   has_cta: "Call-to-Action",
 };
 
-type AiState = "idle" | "loading" | "enriched" | "fallback";
+type AiState = "idle" | "loading" | "enriched" | "unavailable";
 
-function useDebounced<T>(value: T, delay = 500): T {
-  const [v, setV] = useState(value);
-  const t = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    if (t.current) window.clearTimeout(t.current);
-    t.current = window.setTimeout(() => setV(value), delay);
-    return () => {
-      if (t.current) window.clearTimeout(t.current);
-    };
-  }, [value, delay]);
-  return v;
+interface PredictionResult {
+  tier: Tier;
+  confidence: number;
+  probs: Array<{ tier: Tier; prob: number }>;
+  featureImportances: Record<string, number> | null;
+  isPersonalModel: boolean;
 }
+
+interface TreRecommendation {
+  parameter: string;
+  current: string | number;
+  recommendation: string;
+  impact: string;
+}
+
+// TRE parameters the UI can stage automatically on "Apply & Re-Analyze".
+const AUTO_APPLICABLE = new Set(["post_hour", "has_cta", "hashtag_count"]);
 
 export default function PredictPage() {
   const [activeStep, setActiveStep] = useState(1);
-  const [accountIdx, setAccountIdx] = useState(0);
 
-  // Real DB Brands dynamic list
-  const [brandsList, setBrandsList] = useState<any[]>([]);
-  const account = brandsList[accountIdx] || null;
+  // Brands from the real database
+  const [brandsList, setBrandsList] = useState<Brand[]>([]);
+  const [brandsError, setBrandsError] = useState<string | null>(null);
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const account = brandsList.find((b) => b.id === accountId) || null;
 
   const [contentFormat, setContentFormat] = useState<ContentFormat>("Reels");
-
-  // Real ML Prediction States
-  const [predictedTier, setPredictedTier] = useState<Tier>("Average");
-  const [predictedConfidence, setPredictedConfidence] = useState<number>(71);
-  const [predictedProbs, setPredictedProbs] = useState<Array<{ tier: Tier; prob: number }>>([
-    { tier: "High", prob: 0.22 },
-    { tier: "Average", prob: 0.71 },
-    { tier: "Low", prob: 0.07 },
-  ]);
-  const [featureImportances, setFeatureImportances] = useState<Record<string, number> | null>(null);
-  const [modelMetadata, setModelMetadata] = useState<any>(null);
-  const [optimizationsApplied, setOptimizationsApplied] = useState(false);
-
   const [scheduledAt, setScheduledAt] = useState<Date>(() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     d.setHours(19, 30, 0, 0);
     return d;
   });
-
   const [caption, setCaption] = useState("");
   const [visualConcept, setVisualConcept] = useState("");
 
+  // Prediction state — null until the model has actually returned a result.
+  const [prediction, setPrediction] = useState<PredictionResult | null>(null);
+  const [predictError, setPredictError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [loadingPhase, setLoadingPhase] = useState(0);
-  const [hasPredicted, setHasPredicted] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [optimizationsApplied, setOptimizationsApplied] = useState(false);
 
-  // AI suggestions state
+  // TRE recommendations from the ML service
+  const [treRecs, setTreRecs] = useState<TreRecommendation[] | null>(null);
+  const [treError, setTreError] = useState<string | null>(null);
+
+  // Optional AI caption refinement (Gemini via BFF)
   const [aiState, setAiState] = useState<AiState>("idle");
-  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
+  const [aiMessage, setAiMessage] = useState("");
   const [typewriterText, setTypewriterText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
 
-  // Calibration Simulator States
-  const [appliedRecs, setAppliedRecs] = useState<Record<string, boolean>>({
-    posting_hour: false,
-    caption_length: false,
-    has_cta: false,
-    hashtag_count: false
-  });
-  const [isCalibrating, setIsCalibrating] = useState(false);
+  // Staged optimizations selected on the Optimize step
+  const [appliedRecs, setAppliedRecs] = useState<Record<string, boolean>>({});
 
-  // Snapshot tracker for prediction inputs to check staleness
+  // Snapshot of the inputs used for the last prediction (staleness detection)
   const [predictionSnapshot, setPredictionSnapshot] = useState<{
     caption: string;
     contentFormat: ContentFormat;
     scheduledAt: number;
-    accountIdx: number;
-    predictedTier: Tier;
-    predictedConfidence: number;
+    accountId: string | null;
   } | null>(null);
 
-  // Form validation checks
   const isFormValid = useMemo(() => {
     return (
       caption.trim() !== "" &&
-      account !== undefined &&
       account !== null &&
-      contentFormat !== undefined &&
-      contentFormat !== null &&
       scheduledAt instanceof Date &&
       !isNaN(scheduledAt.getTime())
     );
-  }, [caption, account, contentFormat, scheduledAt]);
+  }, [caption, account, scheduledAt]);
 
   const isPredictionStale = useMemo(() => {
     if (!predictionSnapshot) return false;
@@ -168,19 +140,14 @@ export default function PredictPage() {
       predictionSnapshot.caption !== caption ||
       predictionSnapshot.contentFormat !== contentFormat ||
       predictionSnapshot.scheduledAt !== scheduledAt.getTime() ||
-      predictionSnapshot.accountIdx !== accountIdx
+      predictionSnapshot.accountId !== accountId
     );
-  }, [predictionSnapshot, caption, contentFormat, scheduledAt, accountIdx]);
+  }, [predictionSnapshot, caption, contentFormat, scheduledAt, accountId]);
 
-  // Live text check (instant) for characters count and visual limit warnings.
-  const liveStats = useMemo(() => analyzeCaption(caption), [caption]);
-  // Debounced checks (500ms) for heavy analysis (Section 4).
-  const debouncedCaption = useDebounced(caption, 500);
-  const stats = useMemo(() => analyzeCaption(debouncedCaption), [debouncedCaption]);
+  const stats = useMemo(() => analyzeCaption(caption), [caption]);
+  const tooLong = stats.charCount > CAPTION_MAX;
 
-  const tooLong = liveStats.charCount > CAPTION_MAX;
-
-  // Load dynamic brands list on mount
+  // Load real brands on mount
   useEffect(() => {
     const fetchBrands = async () => {
       try {
@@ -188,177 +155,164 @@ export default function PredictPage() {
         if (res.ok) {
           const data = await res.json();
           setBrandsList(data || []);
+          setBrandsError(null);
           if (data && data.length > 0) {
-            setAccountIdx(0);
+            setAccountId(data[0].id);
           }
         } else {
           setBrandsList([]);
+          setBrandsError("Brand accounts could not be loaded.");
         }
-      } catch (err) {
-        console.error("Failed to load brands from BFF:", err);
+      } catch {
         setBrandsList([]);
+        setBrandsError("Brand accounts could not be loaded.");
       }
     };
     fetchBrands();
   }, []);
 
-  // Clear optimizationsApplied banner if inputs are manually edited
+  // Clear the "optimizations applied" note once inputs are edited again
   useEffect(() => {
     setOptimizationsApplied(false);
-  }, [caption, contentFormat, scheduledAt, accountIdx]);
+  }, [caption, contentFormat, scheduledAt, accountId]);
 
-  // Loading phases text representing real ML telemetry
-  const LOADING_PHASES = [
-    "PARSING TEXT TOKENS & CHARACTER DEVIATIONS...",
-    "CONSTRUCTING MULTI-TREE RANDOM FOREST ESTIMATORS...",
-    "EVALUATING HISTORICAL ENGAGEMENT NICHE COEFFICIENTS...",
-    "CALCULATING ATTRIBUTION FEATURE IMPORTANCE VECTORS...",
-    "FINALIZING CONFIDENCE INTERVAL CLASSIFICATION..."
-  ];
+  const fetchTreRecommendations = useCallback(
+    async (payload: { caption: string; format: ContentFormat; post_hour: number }) => {
+      setTreRecs(null);
+      setTreError(null);
+      try {
+        const res = await fetch("/api/suggest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...payload,
+            brand_id: account?.id,
+            niche: account?.niche,
+          }),
+        });
+        if (!res.ok) {
+          throw new Error("Recommendation service unavailable");
+        }
+        const data = await res.json();
+        setTreRecs(Array.isArray(data.recommendations) ? data.recommendations : []);
+      } catch {
+        setTreError("Recommendations are unavailable right now.");
+      }
+    },
+    [account]
+  );
 
-  useEffect(() => {
-    if (!submitting) { setLoadingPhase(0); return; }
-    const interval = setInterval(() => {
-      setLoadingPhase((p) => (p + 1) % LOADING_PHASES.length);
-    }, 700);
-    return () => clearInterval(interval);
-  }, [submitting]);
-
-  // Predict submit handler
-  const handlePredict = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handlePredict = async () => {
+    if (!isFormValid || submitting) return;
     setSubmitting(true);
+    setPredictError(null);
     setAiState("idle");
-    setAiSuggestions([]);
     setTypewriterText("");
-    // Reset calibration on fresh submit
-    setAppliedRecs({
-      posting_hour: false,
-      caption_length: false,
-      has_cta: false,
-      hashtag_count: false
-    });
+    setAppliedRecs({});
+
+    const payload = {
+      caption,
+      format: contentFormat,
+      post_hour: scheduledAt.getHours(),
+      brand_id: account?.id,
+      niche: account?.niche,
+      scheduled_date: format(scheduledAt, "yyyy-MM-dd"),
+    };
 
     try {
-      const is_carousel = contentFormat === "Carousel" ? 1.0 : 0.0;
-      const is_reels = contentFormat === "Reels" ? 1.0 : 0.0;
-      const has_cta_val = stats.hasCTA ? 1.0 : 0.0;
-
       const res = await fetch("/api/predict", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          is_carousel,
-          is_reels,
-          post_hour: scheduledAt.getHours(),
-          caption_length: parseFloat(liveStats.charCount.toString()),
-          hashtag_count: parseFloat(stats.hashtags.length.toString()),
-          has_cta: has_cta_val,
-          brand_id: account?.id,
-          niche: account?.niche,
-          caption: caption,
-        }),
+        body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status === "success" || data.predicted_class) {
-          const predClass = data.predicted_class as Tier;
-          const conf = Math.round(data.confidence);
-          const rawProbs = data.probabilities;
-          const mappedProbs = [
-            { tier: "High" as const, prob: (rawProbs.High || 0) / 100 },
-            { tier: "Average" as const, prob: (rawProbs.Average || 0) / 100 },
-            { tier: "Low" as const, prob: (rawProbs.Low || 0) / 100 },
-          ];
-          
-          setPredictedTier(predClass);
-          setPredictedConfidence(conf);
-          setPredictedProbs(mappedProbs);
-          if (data.feature_importances) {
-            setFeatureImportances(data.feature_importances);
-          }
-          if (data.model_metadata) {
-            setModelMetadata(data.model_metadata);
-          }
+      const data = await res.json().catch(() => null);
 
-          // Save snapshot of inputs used for prediction
-          setPredictionSnapshot({
-            caption,
-            contentFormat,
-            scheduledAt: scheduledAt.getTime(),
-            accountIdx,
-            predictedTier: predClass,
-            predictedConfidence: conf
-          });
-
-          // Smooth fast transition once we have the real prediction
-          setTimeout(() => {
-            setSubmitting(false);
-            setHasPredicted(true);
-            setActiveStep(2);
-          }, 500);
-          return;
-        }
+      if (!res.ok || !data || data.status === "error" || !data.predicted_class) {
+        setPredictError(
+          data?.message || "The prediction service returned an unexpected response."
+        );
+        return;
       }
-    } catch (err) {
-      console.error("Error connecting to BFF predict API: ", err);
+
+      const rawProbs = data.probabilities || {};
+      setPrediction({
+        tier: data.predicted_class as Tier,
+        confidence: Math.round(data.confidence),
+        probs: [
+          { tier: "High", prob: (rawProbs.High || 0) / 100 },
+          { tier: "Average", prob: (rawProbs.Average || 0) / 100 },
+          { tier: "Low", prob: (rawProbs.Low || 0) / 100 },
+        ],
+        featureImportances: data.feature_importances || null,
+        isPersonalModel: Boolean(data.model_metadata?.is_personal_model_active),
+      });
+      setPredictionSnapshot({
+        caption,
+        contentFormat,
+        scheduledAt: scheduledAt.getTime(),
+        accountId,
+      });
+      setActiveStep(2);
+
+      // Fetch the deterministic TRE recommendations for the Optimize step.
+      fetchTreRecommendations({
+        caption,
+        format: contentFormat,
+        post_hour: scheduledAt.getHours(),
+      });
+    } catch {
+      setPredictError("Could not reach the prediction service. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
-    setSubmitting(false);
   };
 
   const handleStepClick = (stepNum: number) => {
-    if (stepNum === 1 || hasPredicted) {
+    if (stepNum === 1 || prediction) {
       setActiveStep(stepNum);
     }
   };
-  // AI suggestions from Google Gemini API via Next.js BFF proxy
+
+  // Optional AI caption refinement via Gemini (BFF /api/refine-caption)
   const enrichWithAI = async () => {
     setAiState("loading");
     setTypewriterText("");
     setIsTyping(true);
-    
+
     try {
-      const res = await fetch("/api/suggest", {
+      const res = await fetch("/api/refine-caption", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           visual_concept: visualConcept,
-          caption: caption,
-          brand: account?.name || "Fitness",
-          format: contentFormat
+          caption,
+          brand: account?.name,
+          format: contentFormat,
         }),
       });
+      const data = await res.json().catch(() => null);
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status === "success" && data.suggestions) {
-          setAiState("enriched");
-          const suggestedText = data.suggestions;
-          
-          // Simulate typewriter effect for premium feel
-          let currentIdx = 0;
-          const interval = setInterval(() => {
-            if (currentIdx < suggestedText.length) {
-              setTypewriterText((prev) => prev + suggestedText.charAt(currentIdx));
-              currentIdx++;
-            } else {
-              clearInterval(interval);
-              setIsTyping(false);
-            }
-          }, 10);
-          return;
-        }
+      if (res.ok && data?.status === "success" && data.suggestions) {
+        setAiState("enriched");
+        const suggestedText: string = data.suggestions;
+        let idx = 0;
+        const interval = setInterval(() => {
+          idx += 2;
+          setTypewriterText(suggestedText.slice(0, idx));
+          if (idx >= suggestedText.length) {
+            clearInterval(interval);
+            setIsTyping(false);
+          }
+        }, 12);
+        return;
       }
-      
-      // Fallback if API fails or Gemini is not configured
-      setAiState("fallback");
-      const fallbackText = "AI suggestions are temporarily unavailable.";
-      setTypewriterText(fallbackText);
+
+      setAiState("unavailable");
+      setAiMessage(data?.message || "AI caption refinement is unavailable.");
       setIsTyping(false);
-    } catch (err) {
-      console.error("AI Enrichment fetch error:", err);
-      setAiState("fallback");
-      setTypewriterText("AI suggestions are temporarily unavailable.");
+    } catch {
+      setAiState("unavailable");
+      setAiMessage("AI caption refinement is unavailable.");
       setIsTyping(false);
     }
   };
@@ -369,179 +323,137 @@ export default function PredictPage() {
     }
   };
 
-  const handleCopy = async (text: string, id: string) => {
-    const ok = await copyToClipboard(text);
-    if (ok) {
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
-    }
+  const handleToggleRec = (parameter: string) => {
+    setAppliedRecs((prev) => ({ ...prev, [parameter]: !prev[parameter] }));
   };
 
-  // Whether the user has selected any optimization to apply on re-analysis.
+  const applyStagedRecommendations = () => {
+    if (appliedRecs.post_hour) {
+      const d = new Date(scheduledAt);
+      d.setHours(19, 0, 0, 0);
+      setScheduledAt(d);
+    }
+    let nextCaption = caption;
+    if (appliedRecs.has_cta && !stats.hasCTA) {
+      nextCaption += "\n\nSave this for later!";
+    }
+    if (appliedRecs.hashtag_count && stats.hashtags.length < 3) {
+      nextCaption += "\n#explore #community #tips";
+    }
+    setCaption(nextCaption);
+    setOptimizationsApplied(true);
+    setActiveStep(1);
+  };
+
   const anyRecsApplied = Object.values(appliedRecs).some(Boolean);
 
-  // Displayed result always reflects the real model prediction. Selecting
-  // recommendations only stages changes; the model is re-run when the user
-  // clicks "Apply Changes & Re-Analyze" (which re-calls /api/predict).
-  const top = { tier: predictedTier };
-  const confidence = predictedConfidence;
-  const activeProbs = predictedProbs;
-
-  // Toggle which recommendations to apply on the next real re-analysis.
-  const handleToggleRec = (key: string) => {
-    setAppliedRecs(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
-  };
-
-  const handleApplyAllCalibration = () => {
-    setIsCalibrating(true);
-    setAppliedRecs({
-      posting_hour: true,
-      caption_length: true,
-      has_cta: true,
-      hashtag_count: true
-    });
-    setTimeout(() => {
-      setIsCalibrating(false);
-    }, 1000);
-  };
-
+  // MDI chart data from the real model importances. The three one-hot format
+  // features are merged into a single "Content Format" row for readability.
   const mdiChartData = useMemo(() => {
-    if (!featureImportances) {
-      return [];
+    const fi = prediction?.featureImportances;
+    if (!fi) return [];
+
+    const merged: Record<string, number> = {};
+    for (const [key, value] of Object.entries(fi)) {
+      const target =
+        key === "is_single_image" || key === "is_carousel" || key === "is_reels"
+          ? "media_type"
+          : key;
+      merged[target] = (merged[target] || 0) + value;
     }
 
-    const keys = Object.keys(featureImportances);
-    const items = keys.map(key => ({
-      key,
-      feature: key,
-      importance: featureImportances[key]
-    }));
+    const items = Object.entries(merged).map(([key, importance]) => ({ key, importance }));
     const mdiMax = Math.max(...items.map((f) => f.importance), 0.001);
-    return items.map((f) => ({
-      name: KEY_LABELS[f.key] || f.feature,
-      importance: Math.round(f.importance * 100),
-      rawPct: (f.importance / mdiMax) * 100
-    })).sort((a, b) => b.importance - a.importance);
-  }, [featureImportances]);
+    return items
+      .map((f) => ({
+        name: FEATURE_LABELS[f.key] || f.key,
+        importance: Math.round(f.importance * 100),
+        rawPct: (f.importance / mdiMax) * 100,
+      }))
+      .sort((a, b) => b.importance - a.importance);
+  }, [prediction]);
 
-  const dynamicReasons = useMemo(() => {
-    const currentNiche = account?.niche || "this category";
-    const postHour = scheduledAt.getHours();
-    const isCTA = stats.hasCTA;
-    const isOptimalHour = postHour >= 19 && postHour <= 21;
-    const isOptimalHashtags = stats.hashtags.length >= 3 && stats.hashtags.length <= 8;
+  // "Why this score" — input signals checked against the niche guidelines the
+  // TRE uses, weighted by the model's real global feature importances (MDI).
+  const whyReasons = useMemo<WhyReason[]>(() => {
+    const fi = prediction?.featureImportances;
+    if (!fi) return [];
+
+    const postHour = predictionSnapshot
+      ? new Date(predictionSnapshot.scheduledAt).getHours()
+      : scheduledAt.getHours();
+    const snapshotStats = analyzeCaption(predictionSnapshot?.caption ?? caption);
+    const inWindow = postHour >= 17 && postHour <= 21;
+    const goodHashtags = snapshotStats.hashtags.length >= 3 && snapshotStats.hashtags.length <= 8;
+    const goodLength = snapshotStats.charCount >= 180 && snapshotStats.charCount <= 320;
 
     return [
       {
-        label: `Content Type (${contentFormat}) aligns with top-performing formats`,
-        detail: `${contentFormat} perform exceptionally well for ${currentNiche} brands.`,
-        weight: 0.28,
-        direction: "positive" as const,
+        label: inWindow
+          ? `Posted at ${postHour}:00 — inside the 17:00–21:00 activity window`
+          : `Posted at ${postHour}:00 — outside the 17:00–21:00 activity window`,
+        detail: "Evening hours carry the highest audience activity in this niche's history.",
+        weight: fi.post_hour ?? 0,
+        direction: inWindow ? ("positive" as const) : ("negative" as const),
       },
       {
-        label: isOptimalHour 
-          ? "Posting time is within the peak audience window" 
-          : "Posting time is outside the peak audience window",
-        detail: isOptimalHour
-          ? `${postHour}:00 is during the optimal 19:00–21:00 engagement window for ${currentNiche}.`
-          : `${postHour}:00 is outside the optimal 19:00–21:00 engagement window for ${currentNiche}.`,
-        weight: 0.22,
-        direction: isOptimalHour ? ("positive" as const) : ("negative" as const),
+        label: snapshotStats.hasCTA
+          ? `Call-to-action detected ("${snapshotStats.ctaTerms[0] || "CTA"}")`
+          : "No call-to-action detected",
+        detail: "An explicit save/comment/share prompt is a model input feature.",
+        weight: fi.has_cta ?? 0,
+        direction: snapshotStats.hasCTA ? ("positive" as const) : ("negative" as const),
       },
       {
-        label: isCTA ? "Explicit Call-to-Action detected" : "No explicit Call-to-Action detected",
-        detail: isCTA
-          ? `Adding a prompt ("${stats.ctaTerms[0] || 'CTA'}") to save or comment increases overall post performance.`
-          : "Adding a prompt to save or comment (like 'Save this' or 'Comment below') can increase reach by 8%.",
-        weight: 0.08,
-        direction: isCTA ? ("positive" as const) : ("negative" as const),
+        label: goodHashtags
+          ? `${snapshotStats.hashtags.length} hashtags — within the 3–8 baseline`
+          : `${snapshotStats.hashtags.length} hashtags — outside the 3–8 baseline`,
+        detail: "Hashtag count feeds the model directly.",
+        weight: fi.hashtag_count ?? 0,
+        direction: goodHashtags ? ("positive" as const) : ("negative" as const),
       },
       {
-        label: isOptimalHashtags ? "Optimal hashtag count detected" : "Suboptimal hashtag count",
-        detail: isOptimalHashtags
-          ? `Using ${stats.hashtags.length} hashtags aligns perfectly with the optimal 3-8 range for discovery.`
-          : `Using ${stats.hashtags.length} hashtags is outside the optimal 3-8 hashtag range for ${currentNiche}.`,
-        weight: 0.15,
-        direction: isOptimalHashtags ? ("positive" as const) : ("negative" as const),
-      }
+        label: goodLength
+          ? `${snapshotStats.charCount} characters — within the 180–320 baseline`
+          : `${snapshotStats.charCount} characters — outside the 180–320 baseline`,
+        detail: "Caption length feeds the model directly.",
+        weight: fi.caption_length ?? 0,
+        direction: goodLength ? ("positive" as const) : ("negative" as const),
+      },
     ];
-  }, [account, scheduledAt, stats, contentFormat]);
+  }, [prediction, predictionSnapshot, caption, scheduledAt]);
 
-  const friendlySuggestions = useMemo(() => {
-    return SUGGESTIONS.map((s) => {
-      if (s.feature === "caption_length") {
-        return {
-          ...s,
-          title: "Optimize Caption Length (180–320 characters)",
-          detail: "Adjusting your caption count to land between 180 and 320 characters matches top-performing posts in your category.",
-          rationale: "Top captions average 247 characters.",
-        };
-      }
-      if (s.feature === "has_cta") {
-        return {
-          ...s,
-          title: "Include a Call-to-Action",
-          detail: "Add an explicit prompt (like 'Save this' or 'Comment below') to drive user responses.",
-          rationale: "Using clear CTA phrases boosts overall performance potential by 8%.",
-        };
-      }
-      if (s.feature === "hashtag_count") {
-        return {
-          ...s,
-          title: "Use 3–8 Hashtags",
-          detail: "Adjust your hashtag count to be between 3 and 8 tags for optimal audience discovery.",
-          rationale: "Using 3 to 8 hashtags represents the ideal sweet spot for engagement.",
-        };
-      }
-      if (s.feature === "posting_hour") {
-        return {
-          ...s,
-          title: "Reschedule to Peak Hours (19:00–21:00)",
-          detail: "Shift your posting time to align with the peak local audience window.",
-          rationale: "Niche engagement peaks at 20:15 local time.",
-        };
-      }
-      return s;
-    });
-  }, []);
+  const tierColorClass = (tier: Tier) =>
+    tier === "High"
+      ? "text-emerald-500 dark:text-emerald-400"
+      : tier === "Average"
+      ? "text-amber-500 dark:text-amber-400"
+      : "text-rose-500 dark:text-rose-400";
 
-  // Ambient glows based on active step and simulated status
   const dynamicGlowClass = useMemo(() => {
-    if (activeStep === 1) return "bg-indigo-500/10 dark:bg-indigo-500/5 shadow-[0_0_80px_rgba(99,102,241,0.15)]";
-    if (activeStep === 2) {
-      if (top.tier === "High") return "bg-emerald-500/10 dark:bg-emerald-500/5 shadow-[0_0_80px_rgba(16,185,129,0.15)]";
-      if (top.tier === "Average") return "bg-amber-500/10 dark:bg-amber-500/5 shadow-[0_0_80px_rgba(245,158,11,0.15)]";
-      return "bg-rose-500/10 dark:bg-rose-500/5 shadow-[0_0_80px_rgba(239,68,68,0.15)]";
+    if (activeStep === 2 && prediction) {
+      if (prediction.tier === "High") return "bg-emerald-500/10 dark:bg-emerald-500/5";
+      if (prediction.tier === "Average") return "bg-amber-500/10 dark:bg-amber-500/5";
+      return "bg-rose-500/10 dark:bg-rose-500/5";
     }
-    if (activeStep === 3) return "bg-sky-500/10 dark:bg-sky-500/5 shadow-[0_0_80px_rgba(14,165,233,0.15)]";
-    return "bg-purple-500/10 dark:bg-purple-500/5 shadow-[0_0_80px_rgba(168,85,247,0.15)]";
-  }, [activeStep, top.tier]);
+    return "bg-indigo-500/10 dark:bg-indigo-500/5";
+  }, [activeStep, prediction]);
 
   return (
-    <div className="relative px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto min-h-screen transition-all duration-700">
-      
-      {/* Interactive Backglow Globe */}
-      <div className={`absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[350px] rounded-full filter blur-[120px] transition-all duration-1000 -z-10 pointer-events-none ${dynamicGlowClass}`} />
+    <div className="relative px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto min-h-screen">
+      {/* Ambient glow */}
+      <div
+        className={`absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[350px] rounded-full filter blur-[120px] transition-all duration-1000 -z-10 pointer-events-none ${dynamicGlowClass}`}
+      />
 
-      {/* Stepper & Header section */}
+      {/* Header + stepper */}
       <div className="flex flex-col items-center justify-between gap-4 border-b border-border/60 pb-6 mb-8 md:flex-row md:items-end">
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
-            AI Content Optimizer
-          </span>
-          <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-foreground md:text-3xl flex items-center gap-2">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground md:text-3xl">
             Analyze Post Performance
-            {anyRecsApplied && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 text-[10px] font-bold text-amber-500 uppercase tracking-wide">
-                <Flame className="h-3 w-3 animate-pulse" /> Optimizations staged — re-analyze
-              </span>
-            )}
           </h1>
-          <p className="mt-1 text-xs text-muted-foreground max-w-xl">
-            Get instant AI analysis, detailed diagnostics, and tailored content recommendations.
+          <p className="mt-1 text-xs text-muted-foreground">
+            Draft, score, and optimize a post before publishing.
           </p>
         </div>
         <div className="shrink-0 w-full md:w-auto flex justify-center md:justify-end">
@@ -549,98 +461,27 @@ export default function PredictPage() {
         </div>
       </div>
 
-      {/* Main Content Area: Responsive Card-Based Stepper Layout */}
       <div className="mx-auto max-w-4xl">
         <AnimatePresence mode="wait">
           {submitting ? (
             <motion.div
               key="loading"
-              initial={{ opacity: 0, scale: 0.95 }}
+              initial={{ opacity: 0, scale: 0.97 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.97 }}
               transition={{ duration: 0.2 }}
-              className="flex flex-col gap-8 py-12 px-6 sm:px-10 border border-border bg-surface/80 backdrop-blur-xl rounded-3xl max-w-xl mx-auto shadow-[var(--shadow-elevated)] relative overflow-hidden"
+              className="flex flex-col items-center gap-4 py-14 px-8 border border-border bg-surface/80 backdrop-blur-xl rounded-3xl max-w-md mx-auto shadow-[var(--shadow-elevated)] text-center"
             >
-              <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full filter blur-2xl pointer-events-none" />
-
-              {/* Centered Header */}
-              <div className="text-center space-y-2">
-                <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-[10px] font-bold text-primary uppercase tracking-wider">
-                  <Cpu className="h-3.5 w-3.5 animate-pulse" />
-                  Running ML Classifier
-                </div>
-                <h3 className="text-xl font-bold font-display text-foreground">Analyzing Post Impact</h3>
-                <p className="text-xs text-muted-foreground max-w-sm mx-auto">Evaluating caption copy against {account?.samples || 0} niche historical interaction samples</p>
-              </div>
-
-              {/* Checklist Progress Timeline */}
-              <div className="space-y-5 my-2">
-                {[
-                  { title: "Analyzing Caption Structure", desc: "Validating character counts and call-to-action indicators" },
-                  { title: "Niche Affinity Evaluation", desc: "Benchmarking copy draft against niche categories" },
-                  { title: "Attribution Computation", desc: "Generating Mean Decrease in Impurity impact weights" },
-                  { title: "Scoring Model Assembly", desc: "Running multi-tree Random Forest classifier trees" },
-                  { title: "Visibility Grade Finalization", desc: "Formulating performance class confidence curves" },
-                ].map((step, i) => {
-                  const isDone = i < loadingPhase;
-                  const isActive = i === loadingPhase;
-                  const isPending = i > loadingPhase;
-
-                  return (
-                    <div key={i} className="flex gap-4 items-start text-left">
-                      <div className="flex flex-col items-center shrink-0 mt-0.5">
-                        <span className={cn(
-                          "grid h-6 w-6 place-items-center rounded-full text-xs font-semibold border transition-all",
-                          isDone ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-500" :
-                          isActive ? "bg-primary/15 border-primary/45 text-primary shadow-[0_0_12px_rgba(16,185,129,0.2)] animate-pulse" :
-                          "bg-surface-3 border-border text-muted-foreground/45"
-                        )}>
-                          {isDone ? (
-                            <CheckCircle2 className="h-4 w-4 stroke-[3]" />
-                          ) : isActive ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Clock className="h-3.5 w-3.5" />
-                          )}
-                        </span>
-                        {i < 4 && (
-                          <span className={cn(
-                            "w-[2px] h-6 my-1 transition-colors duration-500",
-                            isDone ? "bg-emerald-500/30" : "bg-border/60"
-                          )} />
-                        )}
-                      </div>
-                      <div>
-                        <h4 className={cn(
-                          "text-xs font-bold transition-all",
-                          isDone ? "text-foreground/90 line-through decoration-emerald-500/30 decoration-1" :
-                          isActive ? "text-primary text-[12.5px] scale-[1.01]" :
-                          "text-muted-foreground/60"
-                        )}>
-                          {step.title}
-                        </h4>
-                        <p className={cn(
-                          "text-[10px] leading-normal transition-all mt-0.5",
-                          isActive ? "text-muted-foreground" : "text-muted-foreground/50"
-                        )}>
-                          {step.desc}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Dynamic progress indicators */}
-              <div className="flex items-center justify-center gap-1.5">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className={`h-1.5 rounded-full transition-all duration-300 ${
-                      i <= loadingPhase ? "w-5 bg-primary" : "w-1.5 bg-primary/20"
-                    }`}
-                  />
-                ))}
+              <span className="grid h-12 w-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </span>
+              <div>
+                <h3 className="text-base font-bold font-display text-foreground">
+                  Running classification…
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Scoring your draft with the {account?.model_type === "personal" ? "personal" : "niche"} Random Forest model.
+                </p>
               </div>
             </motion.div>
           ) : (
@@ -649,81 +490,73 @@ export default function PredictPage() {
               {activeStep === 1 && (
                 <motion.div
                   key="step-predict"
-                  initial={{ opacity: 0, scale: 0.98, y: 15 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.98, y: -15 }}
-                  transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ type: "spring", stiffness: 350, damping: 28 }}
                   className="space-y-6"
                 >
-                  {/* Step Guide Banner */}
-                  <div className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-5 flex items-start gap-4 shadow-sm backdrop-blur-md animate-[page-enter_0.2s_ease-out]">
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                      <PenTool className="h-5 w-5" />
+                  {predictError && (
+                    <div className="rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 flex items-start gap-3">
+                      <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <div className="text-xs font-bold text-destructive">Prediction failed</div>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{predictError}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handlePredict}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold hover:bg-surface-2 shrink-0"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        Retry
+                      </button>
                     </div>
-                    <div>
-                      <h3 className="font-display text-sm font-bold text-foreground">Compose & Schedule Content</h3>
-                      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                        Configure brand metrics, select content formats, and review CTA signal density in real-time before initiating the ML performance analysis.
-                      </p>
-                    </div>
-                  </div>
+                  )}
 
                   {optimizationsApplied && (
-                    <div className="rounded-xl border border-primary/20 bg-primary/[0.02] p-4 flex items-center gap-3 animate-[page-enter_0.2s_ease-out]">
-                      <Sparkles className="h-4.5 w-4.5 text-primary shrink-0 animate-pulse" />
+                    <div className="rounded-xl border border-primary/20 bg-primary/[0.02] p-4 flex items-center gap-3">
+                      <Sparkles className="h-4 w-4 text-primary shrink-0" />
                       <div className="text-xs text-foreground font-semibold">
-                        Optimizations successfully applied to copy drafts. Click <strong className="text-primary">Analyze Post</strong> below to re-run predictions.
+                        Optimizations applied — run <span className="text-primary">Analyze Post</span> to re-score.
                       </div>
                     </div>
                   )}
 
                   <div className="grid gap-6 md:grid-cols-12">
-                    
-                    {/* Left Column: Accounts and Post Settings */}
+                    {/* Left: account + post settings */}
                     <div className="md:col-span-5 space-y-6">
-                      
-                      {/* Brand selector Panel */}
-                      <Panel id="predict" title="Brand Account" subtitle="Set publishing brand account.">
-                        <div>
-                          <Label>Brand Account</Label>
-                          <select
-                             value={account?.handle || (account ? `@${account.name.toLowerCase().replace(/\s+/g, "")}` : "")}
-                             onChange={(e) => {
-                               const list = brandsList;
-                               const idx = list.findIndex((a) => {
-                                 const itemHandle = a.handle || `@${a.name.toLowerCase().replace(/\s+/g, "")}`;
-                                 return itemHandle === e.target.value;
-                               });
-                               if (idx !== -1) setAccountIdx(idx);
-                             }}
-                             disabled={brandsList.length === 0}
-                             className="mt-1.5 h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs font-semibold outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20 disabled:opacity-60"
-                           >
-                             {brandsList.length === 0 ? (
-                               <option value="">No brand accounts configured</option>
-                             ) : (
-                               brandsList.map((a) => {
-                                 const itemHandle = a.handle || `@${a.name.toLowerCase().replace(/\s+/g, "")}`;
-                                 return (
-                                   <option key={a.id || a.name} value={itemHandle}>
-                                     {itemHandle} ({a.name})
-                                   </option>
-                                 );
-                               })
-                             )}
-                           </select>
-                           {brandsList.length === 0 && (
-                             <p className="mt-2 text-xs text-rose-500 font-semibold leading-relaxed">
-                               ⚠️ No brand accounts configured. Please add a brand in the Niches & Brands dashboard page first.
-                             </p>
-                           )}
-                        </div>
+                      <Panel title="Brand Account" subtitle="The model is selected per brand.">
+                        <select
+                          value={accountId ?? ""}
+                          onChange={(e) => setAccountId(e.target.value || null)}
+                          disabled={brandsList.length === 0}
+                          className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs font-semibold outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20 disabled:opacity-60"
+                        >
+                          {brandsList.length === 0 ? (
+                            <option value="">No brand accounts available</option>
+                          ) : (
+                            brandsList.map((b) => (
+                              <option key={b.id} value={b.id}>
+                                {b.name} · {b.niche}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                        {brandsList.length === 0 && (
+                          <p className="mt-2 text-xs text-destructive font-semibold">
+                            {brandsError || "No brand accounts yet. Register one under Niche Management."}
+                          </p>
+                        )}
+                        {account && (
+                          <div className="mt-3">
+                            <ModelMaturity samples={account.samples ?? 0} />
+                          </div>
+                        )}
                       </Panel>
 
-                      {/* Post Configuration Panel */}
-                      <Panel title="Post Configuration" subtitle="Select standard format and publication slot.">
+                      <Panel title="Post Configuration" subtitle="Format and publication slot.">
                         <div className="space-y-5">
-                          {/* Content format cards selector */}
                           <div>
                             <Label>Content Format</Label>
                             <div className="grid grid-cols-1 gap-3 mt-1.5">
@@ -734,20 +567,24 @@ export default function PredictPage() {
                                     key={f.id}
                                     type="button"
                                     onClick={() => setContentFormat(f.id)}
-                                    className={`group relative flex items-center gap-4 rounded-xl border p-4 text-left transition-all active:scale-[0.98] ${
+                                    className={`group relative flex items-center gap-4 rounded-xl border p-3.5 text-left transition-all active:scale-[0.98] ${
                                       active
                                         ? "border-primary bg-gradient-to-r from-primary/10 to-primary-glow/5 text-primary shadow-[var(--shadow-glow-purple)]"
                                         : "border-border bg-surface hover:border-border-strong hover:bg-surface-2/30"
                                     }`}
                                   >
-                                    <span className={`grid h-7 w-7 place-items-center rounded-lg transition-all ${
-                                      active ? "bg-primary text-primary-foreground shadow-[0_0_8px_rgba(168,85,247,0.3)]" : "bg-surface-2 text-muted-foreground group-hover:bg-surface-3"
-                                    }`}>
+                                    <span
+                                      className={`grid h-7 w-7 place-items-center rounded-lg transition-all ${
+                                        active
+                                          ? "bg-primary text-primary-foreground"
+                                          : "bg-surface-2 text-muted-foreground group-hover:bg-surface-3"
+                                      }`}
+                                    >
                                       <f.icon className="h-3.5 w-3.5" />
                                     </span>
                                     <div className="flex-1">
                                       <div className="text-[11px] font-bold text-foreground">{f.label}</div>
-                                      <div className="text-[9px] text-muted-foreground/80 leading-normal">{f.hint}</div>
+                                      <div className="text-[9px] text-muted-foreground/80">{f.hint}</div>
                                     </div>
                                   </button>
                                 );
@@ -755,7 +592,6 @@ export default function PredictPage() {
                             </div>
                           </div>
 
-                          {/* Date and Time inputs */}
                           <div className="space-y-4 pt-4 border-t border-border/40">
                             <div>
                               <Label>Post Date</Label>
@@ -774,43 +610,32 @@ export default function PredictPage() {
                       </Panel>
                     </div>
 
-                    {/* Right Column: Planner & Drafting Workspace */}
+                    {/* Right: drafting workspace */}
                     <div className="md:col-span-7 space-y-6">
-                      
-                      {/* Content Planner Panel */}
-                      <Panel title="Content Planner" subtitle="Plan visual concept ideas and draft caption copy copy.">
+                      <Panel
+                        title="Content Planner"
+                        subtitle="Only caption, format, and timing feed the model — the visual concept guides AI suggestions."
+                      >
                         <div className="space-y-5">
-                          
-                          {/* Visual Concept Textarea */}
                           <div>
-                            <Label>Visual Concept</Label>
+                            <Label>Visual Concept (optional)</Label>
                             <div className="rounded-xl border border-border bg-surface transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 overflow-hidden shadow-inner">
                               <textarea
                                 value={visualConcept}
                                 onChange={(e) => setVisualConcept(e.target.value)}
-                                rows={4}
+                                rows={3}
                                 className="w-full resize-none bg-transparent p-4 text-xs font-mono leading-relaxed outline-none placeholder:text-muted-foreground/45 text-foreground/90"
-                                placeholder={`Describe what will appear in the post.
-Example:
-• Carousel (5 slides)
-• First slide: "5 Kesalahan Marketing"
-• Slides 2–4 explain each point
-• Last slide contains CTA to follow the page
-• Bright blue background with minimal illustrations`}
+                                placeholder={`Describe what will appear in the post, e.g.\n• Carousel (5 slides) about "5 Marketing Mistakes"\n• Last slide contains a follow CTA`}
                               />
                             </div>
-                            <p className="mt-1.5 text-[9.5px] text-muted-foreground/80 leading-normal px-0.5">
-                              Note: Performance predictions are based on the validated features used during model training (such as posting metadata and caption-derived features). Visual Concept is used only to generate AI suggestions and is not sent to the prediction model.
-                            </p>
                           </div>
 
-                          {/* Caption drafting box */}
                           <div className="pt-4 border-t border-border/40">
                             <div className="flex items-center justify-between mb-2">
                               <Label>Caption Text</Label>
-                              <CaptionMeter count={liveStats.charCount} />
+                              <CaptionMeter count={stats.charCount} />
                             </div>
-                            
+
                             <div className="rounded-xl border border-border bg-surface transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 overflow-hidden shadow-inner">
                               <textarea
                                 value={caption}
@@ -818,47 +643,39 @@ Example:
                                 rows={6}
                                 maxLength={CAPTION_MAX + 100}
                                 className="w-full resize-none bg-transparent p-4 text-xs font-mono leading-relaxed outline-none placeholder:text-muted-foreground/40 text-foreground/90"
-                                placeholder="Write your creative caption..."
+                                placeholder="Write your caption…"
                               />
                               <div className="border-t border-border px-4 py-3 bg-surface-2/40">
                                 <CaptionSignals stats={stats} />
                               </div>
                             </div>
 
-                            <CaptionLimitWarning count={liveStats.charCount} />
+                            <CaptionLimitWarning count={stats.charCount} />
 
-                            {/* Interactive Metric boxes */}
                             <div className="mt-4 grid gap-3 grid-cols-3">
                               <MetricBox
-                                label="Caption Length"
+                                label="Length"
                                 value={`${stats.charCount}`}
-                                hint={stats.charCount >= 180 && stats.charCount <= 320 ? "Optimal Length" : "Niche optimal: 180-320"}
+                                hint={stats.charCount >= 180 && stats.charCount <= 320 ? "Optimal" : "Baseline: 180–320"}
                                 status={stats.charCount >= 180 && stats.charCount <= 320 ? "success" : "warning"}
                               />
                               <MetricBox
                                 label="Hashtags"
                                 value={stats.hashtags.length.toString()}
-                                hint={stats.hashtags.length >= 3 && stats.hashtags.length <= 8 ? "Optimal count" : "Niche optimal: 3-8"}
+                                hint={stats.hashtags.length >= 3 && stats.hashtags.length <= 8 ? "Optimal" : "Baseline: 3–8"}
                                 status={stats.hashtags.length >= 3 && stats.hashtags.length <= 8 ? "success" : "warning"}
                               />
                               <MetricBox
-                                label="Call-to-Action"
-                                value={stats.hasCTA ? "DETECTED" : "MISSING"}
-                                hint={stats.hasCTA ? `using: "${stats.ctaTerms[0]}"` : "CTA increases reach"}
+                                label="CTA"
+                                value={stats.hasCTA ? "Yes" : "No"}
+                                hint={stats.hasCTA ? `"${stats.ctaTerms[0]}"` : "Add a prompt"}
                                 status={stats.hasCTA ? "success" : "warning"}
                               />
                             </div>
                           </div>
 
-                          {/* AI Action trigger */}
-                          <div className="flex items-center justify-between pt-3 border-t border-border/40 gap-4">
-                            <span className="text-[10px] text-muted-foreground/80 leading-normal">
-                              {caption.trim() === "" ? (
-                                <span className="text-warning font-semibold">⚠️ Draft a caption first to enable AI refinement.</span>
-                              ) : (
-                                <span>Visual Concept (optional) will enrich suggestions if provided.</span>
-                              )}
-                            </span>
+                          {/* AI refinement trigger */}
+                          <div className="flex items-center justify-end pt-3 border-t border-border/40 gap-4">
                             <button
                               type="button"
                               onClick={enrichWithAI}
@@ -868,7 +685,7 @@ Example:
                               {aiState === "loading" ? (
                                 <>
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  Refining...
+                                  Refining…
                                 </>
                               ) : (
                                 <>
@@ -879,7 +696,6 @@ Example:
                             </button>
                           </div>
 
-                          {/* Typewriter Output workspace inside Step 1 */}
                           <AnimatePresence mode="wait">
                             {aiState === "enriched" && (
                               <motion.div
@@ -889,14 +705,11 @@ Example:
                                 exit={{ opacity: 0 }}
                                 className="rounded-2xl border border-border bg-surface-2/60 p-5 space-y-4 shadow-sm relative overflow-hidden text-left"
                               >
-                                {isTyping && (
-                                  <div className="absolute inset-0 bg-primary/[0.01] pointer-events-none animate-pulse" />
-                                )}
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-1.5">
                                     <FileText className="h-3.5 w-3.5 text-primary" />
                                     <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
-                                      AI Suggested Copy Draft
+                                      AI Suggested Caption
                                     </span>
                                   </div>
                                   {!isTyping && typewriterText && (
@@ -909,51 +722,43 @@ Example:
                                     </button>
                                   )}
                                 </div>
-                                <div className="p-4 rounded-xl border border-border bg-surface text-xs font-medium leading-relaxed italic text-foreground/90 min-h-[60px] text-left relative shadow-inner">
-                                  <span className="text-foreground/15 absolute top-2 left-3 font-display text-4xl leading-none font-black select-none pointer-events-none">“</span>
-                                  <div className="pl-5 pr-2 pt-1">
-                                    <span className="relative z-10">{typewriterText}</span>
-                                    {isTyping && <span className="inline-block w-[2px] h-3.5 bg-primary animate-pulse ml-1 align-middle" />}
-                                  </div>
+                                <div className="p-4 rounded-xl border border-border bg-surface text-xs font-medium leading-relaxed text-foreground/90 min-h-[60px] shadow-inner whitespace-pre-wrap">
+                                  {typewriterText}
+                                  {isTyping && (
+                                    <span className="inline-block w-[2px] h-3.5 bg-primary animate-pulse ml-1 align-middle" />
+                                  )}
                                 </div>
                               </motion.div>
                             )}
 
-                            {aiState === "fallback" && (
+                            {aiState === "unavailable" && (
                               <motion.div
-                                key="fallback"
+                                key="unavailable"
                                 initial={{ opacity: 0, y: 8 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0 }}
-                                className="rounded-xl border border-warning/30 bg-warning/[0.02] p-4 text-left"
+                                className="rounded-xl border border-warning/30 bg-warning/[0.02] p-4 flex items-start gap-3 text-left"
                               >
-                                <div className="flex items-start gap-3">
-                                  <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
-                                  <div>
-                                    <div className="text-xs font-semibold text-foreground">
-                                      AI Service Notice
-                                    </div>
-                                    <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
-                                      AI suggestions are temporarily unavailable.
-                                    </p>
-                                  </div>
-                                </div>
+                                <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                                <p className="text-[11px] text-muted-foreground leading-relaxed">{aiMessage}</p>
                               </motion.div>
                             )}
                           </AnimatePresence>
-
                         </div>
                       </Panel>
                     </div>
-
                   </div>
 
                   <div className="mt-6 flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="text-xs text-muted-foreground text-left">
                       {!isFormValid ? (
-                        <span className="text-warning font-semibold">⚠️ A caption is required before running predictions.</span>
+                        <span className="text-warning font-semibold">
+                          Select a brand and write a caption to run the analysis.
+                        </span>
                       ) : isPredictionStale ? (
-                        <span className="text-warning font-semibold">⚠️ Plan inputs modified. Re-analyze post to update predictions.</span>
+                        <span className="text-warning font-semibold">
+                          Inputs changed — re-analyze to refresh the result.
+                        </span>
                       ) : null}
                     </div>
                     <button
@@ -969,42 +774,25 @@ Example:
               )}
 
               {/* STEP 2: RESULT */}
-              {activeStep === 2 && (
+              {activeStep === 2 && prediction && (
                 <motion.div
                   key="step-result"
-                  initial={{ opacity: 0, scale: 0.98, y: 15 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.98, y: -15 }}
-                  transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ type: "spring", stiffness: 350, damping: 28 }}
                   className="space-y-6"
                 >
-                  {isPredictionStale && (
-                    <div className="rounded-2xl border border-warning/30 bg-warning/[0.03] p-4 flex items-center gap-3 shadow-sm">
-                      <AlertTriangle className="h-4.5 w-4.5 text-warning shrink-0 animate-pulse" />
-                      <div className="text-xs font-semibold text-warning">
-                        Prediction out of date. Re-analyze to see updated results.
-                      </div>
-                    </div>
-                  )}
-                  {/* Step Guide Banner */}
-                  <div className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-5 flex items-start gap-4 shadow-sm backdrop-blur-md animate-[page-enter_0.2s_ease-out]">
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                      <Clock className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-display text-sm font-bold text-foreground">AI Visibility Potential Score</h3>
-                      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                        The score indicates estimated visibility rating. A higher potential is achieved by meeting specific timing and hashtag indicators.
-                      </p>
-                    </div>
-                  </div>
+                  {isPredictionStale && <StaleBanner />}
 
-                  {/* Summary Badges strip */}
+                  {/* Model input summary strip */}
                   <div className="flex flex-wrap items-center gap-3 p-4 rounded-2xl border border-border bg-surface/50 backdrop-blur text-xs shadow-inner">
-                    <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground font-bold">Model Input:</span>
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground font-bold">
+                      Model input:
+                    </span>
                     <div className="flex items-center gap-1.5 text-foreground font-bold">
                       <FileText className="h-3.5 w-3.5 text-primary" />
-                      <span>{account?.handle || ""}</span>
+                      <span>{account?.name || "—"}</span>
                     </div>
                     <span className="text-muted-foreground/30">•</span>
                     <div className="flex items-center gap-1.5 text-foreground font-semibold">
@@ -1014,7 +802,7 @@ Example:
                     <span className="text-muted-foreground/30">•</span>
                     <div className="flex items-center gap-1.5 text-foreground font-semibold">
                       <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span>{format(scheduledAt, "HH:mm")} WIB</span>
+                      <span>{format(scheduledAt, "HH:mm")}</span>
                     </div>
                     <span className="text-muted-foreground/30">•</span>
                     <span className="rounded-lg border border-border bg-surface px-2.5 py-1 font-mono font-bold text-muted-foreground text-[10px]">
@@ -1022,80 +810,60 @@ Example:
                     </span>
                   </div>
 
-                  {/* Redesigned Dashboard Main Score Result Block */}
                   <div className="grid gap-6 md:grid-cols-12">
-                    
-                    {/* Dial Section */}
                     <div className="md:col-span-5 flex flex-col items-center justify-center p-6 border border-border bg-surface/60 rounded-2xl backdrop-blur relative shadow-[var(--shadow-soft)]">
-                      <ConfidenceMeter
-                        value={confidence}
-                        tier={top.tier}
-                        label="AI Confidence"
-                      />
+                      <ConfidenceMeter value={prediction.confidence} tier={prediction.tier} label="Model Confidence" />
                     </div>
 
-                    {/* Meta/Score details */}
-                    <div className="md:col-span-7 flex flex-col justify-between p-6 border border-border bg-surface/60 rounded-2xl backdrop-blur relative shadow-[var(--shadow-soft)] space-y-6">
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-2">
-                          <TierBadge tier={top.tier} />
-                          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-1 text-[9px] font-bold text-primary uppercase tracking-wide">
-                            <Cpu className="h-2.5 w-2.5" /> Random Forest Active
-                          </span>
-                        </div>
-                        <h4 className="text-2xl font-black font-display leading-tight text-foreground">
-                          Estimated Performance: <span className={
-                            top.tier === "High" ? "text-emerald-500 dark:text-emerald-400" :
-                            top.tier === "Average" ? "text-amber-500 dark:text-amber-400" : "text-rose-500 dark:text-rose-400"
-                          }>{top.tier.toUpperCase()}</span>
-                        </h4>
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          Your draft has **{top.tier.toLowerCase()}** performance potential with a model confidence of **{confidence}%**. Optimization suggestions are available in Step 4 to boost indicators.
-                        </p>
+                    <div className="md:col-span-7 flex flex-col justify-center p-6 border border-border bg-surface/60 rounded-2xl backdrop-blur relative shadow-[var(--shadow-soft)] space-y-4">
+                      <div className="flex items-center gap-2">
+                        <TierBadge tier={prediction.tier} />
+                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-1 text-[9px] font-bold text-primary uppercase tracking-wide">
+                          <Cpu className="h-2.5 w-2.5" />
+                          {prediction.isPersonalModel ? "Personal model" : "Niche model"}
+                        </span>
                       </div>
-
-                      {/* Niche Benchmark Stats Card */}
-                      <div className="p-4 rounded-xl border border-border bg-surface-2/50 grid grid-cols-2 gap-4 text-xs">
-                        <div>
-                          <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-bold">Audience Peak Hour</span>
-                          <div className="mt-1 font-bold text-foreground flex items-center gap-1">
-                            <Clock className="h-3.5 w-3.5 text-primary" />
-                            19:00 - 21:00
-                          </div>
-                        </div>
-                        <div>
-                          <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-bold">Hashtag Window</span>
-                          <div className="mt-1 font-bold text-foreground flex items-center gap-1">
-                            <Sliders className="h-3.5 w-3.5 text-primary" />
-                            3 - 8 Hashtags
-                          </div>
-                        </div>
-                      </div>
+                      <h4 className="text-2xl font-black font-display leading-tight text-foreground">
+                        Predicted tier:{" "}
+                        <span className={tierColorClass(prediction.tier)}>
+                          {prediction.tier.toUpperCase()}
+                        </span>
+                      </h4>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        The classifier assigns this draft {prediction.tier.toLowerCase()}-tier engagement
+                        potential with {prediction.confidence}% confidence, relative to this account&apos;s
+                        historical baseline. See <strong className="text-foreground">Diagnose</strong> for the
+                        drivers and <strong className="text-foreground">Optimize</strong> for adjustments.
+                      </p>
                     </div>
-
                   </div>
 
-                  {/* Equalizer Probability Bars */}
-                  <Panel id="result" title="Probability Distribution Profiles" subtitle="ML classification probabilities across standard output tiers.">
+                  <Panel
+                    title="Class Probabilities"
+                    subtitle="Model output distribution across the three tiers (sums to 100%)."
+                  >
                     <div className="grid gap-3 mt-2 sm:grid-cols-3">
-                      {activeProbs.map((c) => {
+                      {prediction.probs.map((c) => {
                         const pct = Math.round(c.prob * 100);
-                        const active = c.tier === top.tier;
+                        const active = c.tier === prediction.tier;
                         const colorClass =
                           c.tier === "High"
-                            ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+                            ? "bg-emerald-500"
                             : c.tier === "Average"
-                            ? "bg-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.3)]"
-                            : "bg-rose-500 shadow-[0_0_12px_rgba(239,68,68,0.3)]";
+                            ? "bg-amber-500"
+                            : "bg-rose-500";
                         return (
-                          <div key={c.tier} className={cn(
-                            "rounded-xl border p-4 transition-all flex flex-col gap-3 backdrop-blur",
-                            active 
-                              ? "bg-surface-2 border-primary/20 shadow-[var(--shadow-soft)] scale-[1.01]" 
-                              : "bg-surface-2/30 border-border/50 opacity-60"
-                          )}>
+                          <div
+                            key={c.tier}
+                            className={cn(
+                              "rounded-xl border p-4 transition-all flex flex-col gap-3 backdrop-blur",
+                              active
+                                ? "bg-surface-2 border-primary/20 shadow-[var(--shadow-soft)]"
+                                : "bg-surface-2/30 border-border/50 opacity-60"
+                            )}
+                          >
                             <div className="flex items-center justify-between text-xs font-mono">
-                              <span className="font-bold text-foreground">{c.tier} Potential</span>
+                              <span className="font-bold text-foreground">{c.tier}</span>
                               <span className="font-extrabold text-foreground">{pct}%</span>
                             </div>
                             <div className="h-2 w-full bg-surface-3 rounded-full overflow-hidden border border-border/30">
@@ -1110,74 +878,47 @@ Example:
                     </div>
                   </Panel>
 
-                  <div className="flex gap-4">
-                    <button
-                      type="button"
-                      onClick={() => setActiveStep(1)}
-                      className="flex-1 flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface text-xs font-semibold transition-all hover:bg-surface-2 active:scale-[0.98]"
-                    >
-                      Back to Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveStep(3)}
-                      className="flex-1 flex h-11 items-center justify-center gap-2.5 rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.98]"
-                    >
-                      Explore Diagnostics
-                      <ArrowRight className="h-4.5 w-4.5" />
-                    </button>
-                  </div>
+                  <StepNav
+                    onBack={() => setActiveStep(1)}
+                    backLabel="Back to Edit"
+                    onNext={() => setActiveStep(3)}
+                    nextLabel="Explore Diagnostics"
+                  />
                 </motion.div>
               )}
 
               {/* STEP 3: DIAGNOSE */}
-              {activeStep === 3 && (
+              {activeStep === 3 && prediction && (
                 <motion.div
                   key="step-diagnose"
-                  initial={{ opacity: 0, scale: 0.98, y: 15 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.98, y: -15 }}
-                  transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ type: "spring", stiffness: 350, damping: 28 }}
                   className="space-y-6"
                 >
-                  {isPredictionStale && (
-                    <div className="rounded-2xl border border-warning/30 bg-warning/[0.03] p-4 flex items-center gap-3 shadow-sm">
-                      <AlertTriangle className="h-4.5 w-4.5 text-warning shrink-0 animate-pulse" />
-                      <div className="text-xs font-semibold text-warning">
-                        Prediction out of date. Re-analyze to see updated results.
-                      </div>
-                    </div>
-                  )}
-                  {/* Step Guide Banner */}
-                  <div className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-5 flex items-start gap-4 shadow-sm backdrop-blur-md animate-[page-enter_0.2s_ease-out]">
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                      <Activity className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-display text-sm font-bold text-foreground">Global Model Significance</h3>
-                      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                        Feature weight ratios detail the global significance of each input parameter across the entire trained model.
-                      </p>
-                    </div>
-                  </div>
+                  {isPredictionStale && <StaleBanner />}
 
                   <div className="grid gap-6 md:grid-cols-2">
-                    <WhyThisScore reasons={dynamicReasons} context="Key performance indicators shaped by your account history." />
-                    <ModelMaturity samples={account?.samples || 0} />
+                    <WhyThisScore
+                      reasons={whyReasons}
+                      context="Input signals vs niche baselines, weighted by the model's feature importance."
+                    />
+                    <ModelMaturity samples={account?.samples ?? 0} />
                   </div>
 
-                  {/* Recharts chart panel */}
                   <Panel
-                    id="diagnose"
-                    title="Overall Model Feature Significance"
-                    subtitle="Mean Decrease in Impurity (MDI) representing global dataset-wide feature weights."
+                    title="Model Feature Importance"
+                    subtitle="Mean Decrease in Impurity (MDI) — how much each input drives this model's decisions overall."
                   >
                     <div className="h-56 w-full mt-2">
                       {mdiChartData.length === 0 ? (
                         <div className="h-full w-full flex flex-col items-center justify-center border border-dashed border-border rounded-xl bg-surface-2/40 p-5 text-center">
                           <Activity className="h-7 w-7 text-muted-foreground/50 mb-2" />
-                          <p className="text-xs font-semibold text-foreground">No active prediction weights loaded</p>
-                          <p className="text-[10px] text-muted-foreground mt-1 max-w-[280px]">Run a post performance analysis in Step 1 to calculate and load current model weights.</p>
+                          <p className="text-xs font-semibold text-foreground">No model weights loaded</p>
+                          <p className="text-[10px] text-muted-foreground mt-1 max-w-[280px]">
+                            Run an analysis to load the active model&apos;s feature importances.
+                          </p>
                         </div>
                       ) : (
                         <FeatureAttributionChart data={mdiChartData} />
@@ -1186,150 +927,164 @@ Example:
 
                     <div className="mt-4 text-[10px] text-muted-foreground leading-relaxed flex items-start gap-1.5 p-3 rounded-lg bg-surface-2 border border-border/40">
                       <HelpCircle className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
-                      <span>Percentages represent the relative global importance of each feature in the overall trained model, rather than explaining the specific local influence on this single prediction.</span>
+                      <span>
+                        MDI measures each feature&apos;s global influence magnitude in the trained model — it
+                        does not state direction for this specific prediction.
+                      </span>
                     </div>
                   </Panel>
 
-                  <div className="flex gap-4">
-                    <button
-                      type="button"
-                      onClick={() => setActiveStep(2)}
-                      className="flex-1 flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface text-xs font-semibold transition-all hover:bg-surface-2 active:scale-[0.98]"
-                    >
-                      Back to Result
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveStep(4)}
-                      className="flex-1 flex h-11 items-center justify-center gap-2.5 rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.98]"
-                    >
-                      Get Recommendations
-                      <ArrowRight className="h-4.5 w-4.5" />
-                    </button>
-                  </div>
+                  <StepNav
+                    onBack={() => setActiveStep(2)}
+                    backLabel="Back to Result"
+                    onNext={() => setActiveStep(4)}
+                    nextLabel="Get Recommendations"
+                  />
                 </motion.div>
               )}
 
-              {/* STEP 4: SUGGEST */}
-              {activeStep === 4 && (
+              {/* STEP 4: OPTIMIZE */}
+              {activeStep === 4 && prediction && (
                 <motion.div
                   key="step-suggest"
-                  initial={{ opacity: 0, scale: 0.98, y: 15 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.98, y: -15 }}
-                  transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ type: "spring", stiffness: 350, damping: 28 }}
                   className="space-y-6"
                 >
-                  {isPredictionStale && (
-                    <div className="rounded-2xl border border-warning/30 bg-warning/[0.03] p-4 flex items-center gap-3 shadow-sm">
-                      <AlertTriangle className="h-4.5 w-4.5 text-warning shrink-0 animate-pulse" />
-                      <div className="text-xs font-semibold text-warning">
-                        Prediction out of date. Re-analyze to see updated results.
-                      </div>
-                    </div>
-                  )}
-                  {/* Step Guide Banner */}
-                  <div className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-5 flex items-start gap-4 shadow-sm backdrop-blur-md animate-[page-enter_0.2s_ease-out]">
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                      <Sliders className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-display text-sm font-bold text-foreground">Optimization Recommendations</h3>
-                      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                        Select and apply recommendations to post details, timing, and copy signals to optimize performance before publishing.
-                      </p>
-                    </div>
-                  </div>
+                  {isPredictionStale && <StaleBanner />}
 
-                  {/* Recommendations Toggles list */}
                   <Panel
-                    id="suggest"
-                    title="Available Recommendations"
-                    subtitle="Select which suggestions to apply to your copy and post settings."
+                    title="Recommendations"
+                    subtitle="Deterministic adjustments computed from your draft's features against niche baselines."
                     actions={
-                      <button
-                        type="button"
-                        onClick={handleApplyAllCalibration}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white transition-all hover:bg-emerald-500 active:scale-[0.98] shadow-[0_0_12px_rgba(16,185,129,0.3)]"
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                        Select All
-                      </button>
+                      treRecs && treRecs.some((r) => AUTO_APPLICABLE.has(r.parameter)) ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAppliedRecs(
+                              Object.fromEntries(
+                                treRecs
+                                  .filter((r) => AUTO_APPLICABLE.has(r.parameter))
+                                  .map((r) => [r.parameter, true])
+                              )
+                            )
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white transition-all hover:bg-emerald-500 active:scale-[0.98]"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          Select All
+                        </button>
+                      ) : undefined
                     }
                   >
-                    <div className="mb-5 p-4 rounded-xl border border-primary/10 bg-primary/[0.01] space-y-2">
-                      <div className="flex items-center gap-1.5">
-                        <FileText className="h-4 w-4 text-primary" />
-                        <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
-                          Scheduling Insight
-                        </span>
+                    {treError ? (
+                      <div className="rounded-xl border border-warning/30 bg-warning/[0.03] p-4 flex items-start gap-3">
+                        <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-xs text-muted-foreground">{treError}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            fetchTreRecommendations({
+                              caption: predictionSnapshot?.caption ?? caption,
+                              format: predictionSnapshot?.contentFormat ?? contentFormat,
+                              post_hour: new Date(
+                                predictionSnapshot?.scheduledAt ?? scheduledAt.getTime()
+                              ).getHours(),
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold hover:bg-surface-2 shrink-0"
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                          Retry
+                        </button>
                       </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Niche model parameters indicate posting during peak hour (<strong className="text-foreground">20:15 WIB</strong>) offers **8%** higher baseline engagement index.
-                      </p>
-                    </div>
+                    ) : treRecs === null ? (
+                      <div className="space-y-3">
+                        {[1, 2, 3].map((i) => (
+                          <div key={i} className="h-20 animate-pulse rounded-2xl bg-surface-2" />
+                        ))}
+                      </div>
+                    ) : treRecs.length === 0 ? (
+                      <div className="rounded-xl border border-accent-lime/30 bg-accent-lime/[0.04] p-5 flex items-center gap-3">
+                        <Check className="h-4.5 w-4.5 text-accent-lime-strong shrink-0" />
+                        <p className="text-xs font-semibold text-foreground">
+                          All measurable parameters already sit within this niche&apos;s baselines.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid gap-4">
+                        {treRecs.map((rec) => {
+                          const canApply = AUTO_APPLICABLE.has(rec.parameter);
+                          const isApplied = appliedRecs[rec.parameter] || false;
+                          return (
+                            <article
+                              key={rec.parameter}
+                              className={cn(
+                                "rounded-2xl border bg-surface p-5 space-y-2.5 relative transition-all duration-300",
+                                isApplied
+                                  ? "border-emerald-500/30 bg-emerald-500/[0.01]"
+                                  : "border-border hover:border-border-strong"
+                              )}
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="rounded-lg bg-surface-3 border border-border/60 px-2.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">
+                                      {FEATURE_LABELS[rec.parameter] || rec.parameter}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        "rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide",
+                                        rec.impact === "High"
+                                          ? "bg-primary/10 text-primary"
+                                          : rec.impact === "Medium"
+                                          ? "bg-warning/10 text-warning"
+                                          : "bg-surface-3 text-muted-foreground"
+                                      )}
+                                    >
+                                      {rec.impact} impact
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-foreground leading-relaxed font-medium">
+                                    {rec.recommendation}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground">
+                                    Current value: <span className="font-mono font-bold">{String(rec.current)}</span>
+                                  </p>
+                                </div>
 
-                    <div className="grid gap-4">
-                      {friendlySuggestions.map((s) => {
-                        const isApplied = appliedRecs[s.feature] || false;
-                        return (
-                          <article
-                            key={s.id}
-                            className={cn(
-                              "rounded-2xl border bg-surface p-5 space-y-3 relative transition-all duration-300 hover:shadow-[var(--shadow-soft)]",
-                              isApplied 
-                                ? "border-emerald-500/30 bg-emerald-500/[0.01] shadow-[0_0_16px_rgba(16,185,129,0.02)]" 
-                                : "border-border hover:border-border-strong"
-                            )}
-                          >
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="space-y-1">
-                                <span className="rounded-lg bg-surface-3 border border-border/60 px-2.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">
-                                  {KEY_LABELS[s.feature] || s.feature}
-                                </span>
-                                <h5 className="font-bold text-sm text-foreground leading-snug mt-1.5">{s.title}</h5>
-                              </div>
-                              
-                              {/* Calibration Toggle Switch button */}
-                              <div className="flex items-center gap-3">
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopy(s.detail, s.id)}
-                                  className="text-muted-foreground hover:text-primary transition-colors p-1"
-                                  title="Copy text content"
-                                >
-                                  {copiedId === s.id ? (
-                                    <Check className="h-4 w-4 text-primary" />
-                                  ) : (
-                                    <Copy className="h-4 w-4" />
-                                  )}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleRec(s.feature)}
-                                  className={cn(
-                                    "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out outline-none",
-                                    isApplied ? "bg-emerald-500" : "bg-surface-3"
-                                  )}
-                                >
-                                  <span
+                                {canApply ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleRec(rec.parameter)}
+                                    aria-pressed={isApplied}
                                     className={cn(
-                                      "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
-                                      isApplied ? "translate-x-5" : "translate-x-0"
+                                      "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out outline-none",
+                                      isApplied ? "bg-emerald-500" : "bg-surface-3"
                                     )}
-                                  />
-                                </button>
+                                  >
+                                    <span
+                                      className={cn(
+                                        "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                                        isApplied ? "translate-x-5" : "translate-x-0"
+                                      )}
+                                    />
+                                  </button>
+                                ) : (
+                                  <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-muted-foreground/70 border border-border rounded-full px-2 py-1">
+                                    Manual edit
+                                  </span>
+                                )}
                               </div>
-                            </div>
-
-                            <p className="text-xs text-muted-foreground leading-relaxed">{s.detail}</p>
-                            <div className="text-[10px] text-muted-foreground/85 bg-surface-2 border border-border/40 px-3 py-2 rounded-lg">
-                              <strong className="text-foreground">Rationale:</strong> {s.rationale}
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    )}
                   </Panel>
 
                   <div className="flex gap-4">
@@ -1342,27 +1097,11 @@ Example:
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        // Apply calibration values to main form if calibrated
-                        if (appliedRecs.posting_hour) {
-                          const d = new Date(scheduledAt);
-                          d.setHours(20, 15, 0, 0);
-                          setScheduledAt(d);
-                        }
-                        let nextCaption = caption;
-                        if (appliedRecs.has_cta && !stats.hasCTA) {
-                          nextCaption += "\n\nSave this for later!";
-                        }
-                        if (appliedRecs.hashtag_count && stats.hashtags.length < 3) {
-                          nextCaption += " #explore #niche #momentum";
-                        }
-                        setCaption(nextCaption);
-                        setOptimizationsApplied(true);
-                        setActiveStep(1);
-                      }}
-                      className="flex-1 flex h-11 items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.98]"
+                      onClick={applyStagedRecommendations}
+                      disabled={!anyRecsApplied}
+                      className="flex-1 flex h-11 items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50"
                     >
-                      Apply Changes & Re-Analyze
+                      Apply Changes &amp; Re-Analyze
                     </button>
                   </div>
                 </motion.div>
@@ -1371,6 +1110,49 @@ Example:
           )}
         </AnimatePresence>
       </div>
+    </div>
+  );
+}
+
+function StaleBanner() {
+  return (
+    <div className="rounded-2xl border border-warning/30 bg-warning/[0.03] p-4 flex items-center gap-3 shadow-sm">
+      <AlertTriangle className="h-4.5 w-4.5 text-warning shrink-0" />
+      <div className="text-xs font-semibold text-warning">
+        Inputs changed since this prediction — re-analyze to refresh.
+      </div>
+    </div>
+  );
+}
+
+function StepNav({
+  onBack,
+  backLabel,
+  onNext,
+  nextLabel,
+}: {
+  onBack: () => void;
+  backLabel: string;
+  onNext: () => void;
+  nextLabel: string;
+}) {
+  return (
+    <div className="flex gap-4">
+      <button
+        type="button"
+        onClick={onBack}
+        className="flex-1 flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface text-xs font-semibold transition-all hover:bg-surface-2 active:scale-[0.98]"
+      >
+        {backLabel}
+      </button>
+      <button
+        type="button"
+        onClick={onNext}
+        className="flex-1 flex h-11 items-center justify-center gap-2.5 rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.98]"
+      >
+        {nextLabel}
+        <ArrowRight className="h-4.5 w-4.5" />
+      </button>
     </div>
   );
 }
@@ -1410,20 +1192,20 @@ function Label({ children }: { children: React.ReactNode }) {
   );
 }
 
-function MetricBox({ 
-  label, 
-  value, 
-  hint, 
-  status 
-}: { 
-  label: string; 
-  value: string; 
-  hint: string; 
-  status?: "success" | "warning" | "error" 
+function MetricBox({
+  label,
+  value,
+  hint,
+  status,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  status?: "success" | "warning" | "error";
 }) {
-  const statusColor = 
-    status === "success" 
-      ? "text-success bg-success/5 border-success/20" 
+  const statusColor =
+    status === "success"
+      ? "text-success bg-success/5 border-success/20"
       : "text-warning bg-warning/5 border-warning/20";
 
   return (

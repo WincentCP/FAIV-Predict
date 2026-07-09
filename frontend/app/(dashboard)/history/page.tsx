@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
-import { type Tier, type ContentFormat } from "@/lib/mock-data";
-import { Search, Filter } from "lucide-react";
+import { type Tier, type ContentFormat } from "@/lib/types";
+import { Search, Filter, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type HistoryItem = {
@@ -15,21 +15,16 @@ type HistoryItem = {
   format: ContentFormat;
   caption: string;
   tier: Tier;
-  confidence: number;
+  confidence: number | null;
   when: string;
 };
-
-
-import { useEffect } from "react";
 
 export default function HistoryPage() {
   const [tier, setTier] = useState<"All" | Tier>("All");
   const [brand, setBrand] = useState<string>("All");
   const [q, setQ] = useState("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
-
-  // Actual evaluation outcomes map for closed-loop tracking (in-memory)
-  const [outcomes, setOutcomes] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchHistory() {
@@ -37,26 +32,19 @@ export default function HistoryPage() {
         const res = await fetch("/api/history");
         if (res.ok) {
           const data = await res.json();
-          if (data && data.length > 0) {
-            setHistory(data);
-          } else {
-            setHistory([]);
-          }
+          setHistory(Array.isArray(data) ? data : []);
+          setLoadError(null);
         } else {
-          console.warn("API returned non-ok status for history.");
           setHistory([]);
+          setLoadError("The prediction log could not be loaded.");
         }
-      } catch (err) {
-        console.warn("Could not fetch history from API:", err);
+      } catch {
         setHistory([]);
+        setLoadError("The prediction log could not be loaded.");
       }
     }
     fetchHistory();
   }, []);
-
-  const updateOutcome = (id: string, val: string) => {
-    setOutcomes((prev) => ({ ...prev, [id]: val }));
-  };
 
   const uniqueBrandsInHistory = useMemo(() => {
     const list = new Set(history.map((h) => h.brand));
@@ -83,6 +71,13 @@ export default function HistoryPage() {
         title="Prediction History"
         description="Every classification this workspace has produced. Filter by brand or tier to spot patterns."
       />
+
+      {loadError && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 flex items-center gap-3 text-xs">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+          <span className="font-semibold text-destructive">{loadError}</span>
+        </div>
+      )}
 
       {/* Filters */}
       <section className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -149,7 +144,7 @@ export default function HistoryPage() {
 
         {/* Horizontal scroll container — only for the table itself */}
         <div className="w-full overflow-x-auto">
-          <table className="w-full min-w-[800px] text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-[9px] uppercase tracking-[0.18em] text-muted-foreground font-semibold bg-surface-2/40">
                 <th className="px-6 py-5">Account</th>
@@ -158,7 +153,6 @@ export default function HistoryPage() {
                 <th className="px-6 py-5 text-center">Confidence</th>
                 <th className="px-6 py-5">Result</th>
                 <th className="px-6 py-5">When</th>
-                <th className="px-6 py-5">Actual outcome</th>
               </tr>
             </thead>
             <tbody>
@@ -189,7 +183,9 @@ export default function HistoryPage() {
 
                   {/* Confidence */}
                   <td className="px-6 py-5 align-middle text-center">
-                    <span className="font-mono text-xs font-semibold tabular-nums">{h.confidence}%</span>
+                    <span className="font-mono text-xs font-semibold tabular-nums">
+                      {h.confidence != null ? `${h.confidence}%` : "—"}
+                    </span>
                   </td>
 
                   {/* Tier badge */}
@@ -198,36 +194,15 @@ export default function HistoryPage() {
                   </td>
 
                   {/* Timestamp */}
-                  <td className="px-6 py-5 align-middle text-[11px] text-muted-foreground whitespace-nowrap">{h.when}</td>
-
-                  {/* Actual outcome dropdown */}
-                  <td className="px-6 py-5 align-middle">
-                    <select
-                      value={outcomes[h.id] || "PENDING"}
-                      onChange={(e) => updateOutcome(h.id, e.target.value)}
-                      className={cn(
-                        "h-7 rounded border text-[9px] font-extrabold px-2 focus:border-primary outline-none uppercase bg-surface tracking-wider",
-                        outcomes[h.id] === "HIGH"
-                          ? "text-primary border-primary/20 bg-primary/5"
-                          : outcomes[h.id] === "AVERAGE"
-                          ? "text-warning border-warning/20 bg-warning/5"
-                          : outcomes[h.id] === "LOW"
-                          ? "text-destructive border-destructive/20 bg-destructive/5"
-                          : "text-muted-foreground border-border bg-surface-2"
-                      )}
-                    >
-                      <option value="PENDING">Pending</option>
-                      <option value="HIGH">High</option>
-                      <option value="AVERAGE">Average</option>
-                      <option value="LOW">Low</option>
-                    </select>
+                  <td className="px-6 py-5 align-middle text-[11px] text-muted-foreground whitespace-nowrap">
+                    {new Date(h.when).toLocaleString()}
                   </td>
                 </tr>
               ))}
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-muted-foreground">
                     No predictions match these filters.
                   </td>
                 </tr>

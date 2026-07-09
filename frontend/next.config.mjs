@@ -17,6 +17,11 @@ const nextConfig = {
         destination: "/predict",
         permanent: true,
       },
+      {
+        source: "/suggest",
+        destination: "/predict",
+        permanent: true,
+      },
     ];
   },
 };

@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
-import { type Tier } from "@/lib/mock-data";
+import { type Brand, brandHandle } from "@/lib/types";
 import dynamic from "next/dynamic";
 
 const DashboardChart = dynamic(() => import("@/components/DashboardChart"), {
@@ -25,7 +25,6 @@ import {
   Users,
   ShieldCheck,
 } from "lucide-react";
-import { PostingHeatmap } from "@/components/PostingHeatmap";
 import { motion, Variants } from "framer-motion";
 
 
@@ -83,7 +82,8 @@ const LOCAL_KPIS = [
 const LOCAL_RECENT_PREDICTIONS: any[] = [];
 
 export default function DashboardPage() {
-  const [brandsList, setBrandsList] = useState<any[]>([]);
+  const [brandsList, setBrandsList] = useState<Brand[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [accuracyTrend, setAccuracyTrend] = useState<{ day: string; accuracy: number }[]>([]);
   const [tierDistribution, setTierDistribution] = useState([
     { tier: "High" as const, count: 0, color: "var(--primary)" },
@@ -95,10 +95,6 @@ export default function DashboardPage() {
     return brandsList.filter((b) => b.model_type === "personal").length;
   }, [brandsList]);
 
-  const driftCount = useMemo(() => {
-    return brandsList.filter((b) => b.drift).length;
-  }, [brandsList]);
-
   const [kpis, setKpis] = useState(LOCAL_KPIS);
   const [recentPredictions, setRecentPredictions] = useState(LOCAL_RECENT_PREDICTIONS);
 
@@ -106,9 +102,14 @@ export default function DashboardPage() {
     async function fetchDashboard() {
       try {
         const res = await fetch("/api/dashboard");
-        if (res.ok) {
+        if (!res.ok) {
+          setLoadError("Workspace metrics could not be loaded right now.");
+          return;
+        }
+        {
           const data = await res.json();
-          
+          setLoadError(null);
+
           setKpis((prev) =>
             prev.map((kpi) => {
               if (kpi.id === "predictions" && data.totalPredictions !== undefined) {
@@ -153,6 +154,7 @@ export default function DashboardPage() {
         }
       } catch (err) {
         console.warn("Could not fetch dashboard metrics aggregates:", err);
+        setLoadError("Workspace metrics could not be loaded right now.");
       }
     }
 
@@ -238,14 +240,12 @@ export default function DashboardPage() {
               <span className="h-2 w-2 animate-ping rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary))]" />
               {brandsList.length} accounts analyzed
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {driftCount > 0 && (
-                <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,hsl(var(--destructive))_45%,transparent)] bg-[color-mix(in_oklab,hsl(var(--destructive))_10%,transparent)] px-3.5 py-2 text-[10px] font-extrabold text-destructive shadow-sm backdrop-blur">
-                  <AlertTriangle className="h-3.5 w-3.5 animate-bounce" />
-                  {driftCount} account{driftCount === 1 ? "" : "s"} need attention
-                </div>
-              )}
-            </div>
+            {loadError && (
+              <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,hsl(var(--destructive))_45%,transparent)] bg-[color-mix(in_oklab,hsl(var(--destructive))_10%,transparent)] px-3.5 py-2 text-[10px] font-extrabold text-destructive shadow-sm backdrop-blur">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {loadError}
+              </div>
+            )}
           </div>
 
           {/* Centered headline + sub — vertically anchored to fill space */}
@@ -446,14 +446,6 @@ export default function DashboardPage() {
         </div>
       </motion.section>
 
-      {/* Posting heatmap */}
-      <motion.section 
-        variants={itemVariants}
-        className="rounded-2xl border border-border bg-surface p-6 shadow-sm hover:border-border-strong transition-all duration-300"
-      >
-        <PostingHeatmap />
-      </motion.section>
-
       {/* Hierarchy panel — AI status per brand */}
       <motion.section 
         variants={itemVariants}
@@ -486,7 +478,7 @@ export default function DashboardPage() {
               const isPersonal = b.model_type === "personal";
               const stage = isPersonal ? "Personal" : "Niche";
               const followers = typeof b.followers === "number" ? b.followers : 0;
-              const handle = b.handle || `@${b.name.toLowerCase().replace(/\s+/g, "")}`;
+              const handle = brandHandle(b.name);
 
               return (
                 <li

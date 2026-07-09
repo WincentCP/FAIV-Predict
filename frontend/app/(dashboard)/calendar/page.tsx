@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useMemo, useRef, useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
-import { type Tier, type ContentFormat } from "@/lib/mock-data";
+import { type Tier, type ContentFormat, type Brand, brandHandle } from "@/lib/types";
 import {
   UploadCloud,
   Download,
@@ -11,15 +12,12 @@ import {
   ChevronRight,
   Calendar as CalendarIcon,
   List,
-  LayoutGrid,
   X,
   Plus,
   Save,
   Loader2,
-  Clock,
-  Award,
-  Users,
-  Activity
+  AlertTriangle,
+  CheckCircle2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,89 +27,78 @@ import { cn } from "@/lib/utils";
 type CalendarEntry = {
   id: string;
   date: string; // YYYY-MM-DD
-  time: string; // HH:MM
+  time: string | null; // HH:00 from the prediction's post_hour feature
   account: string;
+  brand: string;
   format: ContentFormat;
   caption: string;
+  title: string;
   tier: Tier;
-  confidence: number;
-  status: "draft" | "screening" | "ready_to_post" | "published";
-  picName: string;
-  platform: string;
-  postingNote?: string;
+  confidence: number | null;
 };
 
-// ---------------------------------------------------------------------------
-// Mock data — anchored to the current month so the grid always has content
-// ---------------------------------------------------------------------------
-const today = new Date();
-const yyyy = today.getFullYear();
-const mm = today.getMonth();
-const ymd = (y: number, m: number, d: number) =>
-  `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-
-const SEED_ENTRIES: CalendarEntry[] = [];
+type ImportReport = {
+  total: number;
+  predicted: number;
+  skipped: number;
+  failed: number;
+  running: boolean;
+  errors: string[];
+};
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
 const WEEK_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const ALLOWED_FORMATS: ContentFormat[] = ["Reels", "Carousel", "Single Image"];
 
+const today = new Date();
+const yyyy = today.getFullYear();
+const mm = today.getMonth();
+const ymd = (y: number, m: number, d: number) =>
+  `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
 export default function CalendarPage() {
-  const [entries, setEntries] = useState<CalendarEntry[]>(SEED_ENTRIES);
+  const [entries, setEntries] = useState<CalendarEntry[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [cursor, setCursor] = useState<{ y: number; m: number }>({ y: yyyy, m: mm });
-  const [view, setView] = useState<"board" | "month" | "list">("month");
+  const [view, setView] = useState<"month" | "list">("month");
   const [editing, setEditing] = useState<CalendarEntry | null>(null);
-  const [creatingDate, setCreatingDate] = useState<string | null>(null);
-  const [importing, setImporting] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [runningPredictId, setRunningPredictId] = useState<string | null>(null);
-  
-  // Real DB Brands dynamic list
-  const [brandsList, setBrandsList] = useState<any[]>([]);
-
-  // Drag over tracking
-  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+  const [importReport, setImportReport] = useState<ImportReport | null>(null);
+  const [brandsList, setBrandsList] = useState<Brand[]>([]);
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Load predictions and brands from database
-  useEffect(() => {
-    async function loadPredictions() {
-      try {
-        const res = await fetch("/api/history");
-        if (res.ok) {
-          const data = await res.json();
-          const mapped: CalendarEntry[] = data.map((p: any) => {
-            const dateStr = p.scheduled_date 
-              ? p.scheduled_date 
-              : p.when.split("T")[0];
-            const timeStr = "19:30";
-            
-            return {
-              id: p.id,
-              date: dateStr,
-              time: timeStr,
-              account: p.account || "@unknown",
-              format: p.format as ContentFormat,
-              caption: p.caption,
-              tier: p.tier as Tier,
-              confidence: p.confidence,
-              status: p.scheduled_date ? "ready_to_post" : "draft",
-              picName: "Wincent",
-              platform: "Instagram",
-              postingNote: p.title || ""
-            };
-          });
-          setEntries(mapped);
-        }
-      } catch (err) {
-        console.warn("Could not load prediction history for content calendar:", err);
+  const loadPredictions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/history");
+      if (!res.ok) {
+        throw new Error("Could not load predictions");
       }
+      const data = await res.json();
+      const mapped: CalendarEntry[] = (data || []).map((p: any) => ({
+        id: p.id,
+        date: p.scheduled_date ? p.scheduled_date : p.when.split("T")[0],
+        time: typeof p.post_hour === "number" ? `${String(p.post_hour).padStart(2, "0")}:00` : null,
+        account: p.account || "@unknown",
+        brand: p.brand || "Unknown Brand",
+        format: p.format as ContentFormat,
+        caption: p.caption,
+        title: p.title || "",
+        tier: p.tier as Tier,
+        confidence: p.confidence ?? null,
+      }));
+      setEntries(mapped);
+      setLoadError(null);
+    } catch {
+      setLoadError("The prediction history could not be loaded.");
     }
+  }, []);
+
+  useEffect(() => {
+    loadPredictions();
 
     async function loadBrands() {
       try {
@@ -120,14 +107,12 @@ export default function CalendarPage() {
           const data = await res.json();
           setBrandsList(data || []);
         }
-      } catch (err) {
-        console.error("Failed to load brands in calendar:", err);
+      } catch {
+        // brand resolution simply unavailable; imports will report it per-row
       }
     }
-
-    loadPredictions();
     loadBrands();
-  }, []);
+  }, [loadPredictions]);
 
   const monthEntries = useMemo(
     () =>
@@ -140,83 +125,181 @@ export default function CalendarPage() {
 
   const grid = useMemo(() => buildMonthGrid(cursor.y, cursor.m), [cursor]);
 
-  // ------- Excel Import -------
+  const resolveBrand = useCallback(
+    (identifier: string): Brand | undefined => {
+      const needle = identifier.trim().toLowerCase().replace(/^@/, "");
+      return brandsList.find(
+        (b) =>
+          b.name.toLowerCase() === identifier.trim().toLowerCase() ||
+          brandHandle(b.name).replace(/^@/, "") === needle
+      );
+    },
+    [brandsList]
+  );
+
+  // ------- CSV Import: parse rows, run real predictions, reload -------
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    setImporting(true);
-    await new Promise((r) => setTimeout(r, 1100));
-
-    const fresh: CalendarEntry[] = [
-      {
-        id: `imp-${Date.now()}-1`,
-        date: ymd(cursor.y, cursor.m, 6),
-        time: "08:30",
-        account: "@lasence.bakeshop",
-        format: "Reels",
-        caption: file.name + " · Row 1 Import",
-        tier: "High",
-        confidence: 88,
-        status: "screening",
-        picName: "Alice",
-        platform: "IG"
-      },
-      {
-        id: `imp-${Date.now()}-2`,
-        date: ymd(cursor.y, cursor.m, 14),
-        time: "13:00",
-        account: "@lasence.bakeshop",
-        format: "Carousel",
-        caption: file.name + " · Row 2 Import",
-        tier: "Average",
-        confidence: 72,
-        status: "draft",
-        picName: "Bob",
-        platform: "IG"
-      },
-    ];
-    setEntries((prev) => [...prev, ...fresh]);
-    setImporting(false);
     if (fileRef.current) fileRef.current.value = "";
+    if (!file) return;
+
+    const text = await file.text();
+    const rows = parseCsv(text);
+    if (rows.length < 2) {
+      setImportReport({
+        total: 0, predicted: 0, skipped: 0, failed: 0, running: false,
+        errors: ["The file has no data rows. Expected a header row (brand, format, caption, date, time) plus content rows."],
+      });
+      return;
+    }
+
+    const header = rows[0].map((h) => h.trim().toLowerCase());
+    const col = (name: string) => header.indexOf(name);
+    const iBrand = col("brand");
+    const iFormat = col("format");
+    const iCaption = col("caption");
+    const iDate = col("date");
+    const iTime = col("time");
+
+    if (iBrand === -1 || iFormat === -1 || iCaption === -1) {
+      setImportReport({
+        total: 0, predicted: 0, skipped: 0, failed: 0, running: false,
+        errors: ["Missing required columns. The header must include: brand, format, caption (optional: date, time)."],
+      });
+      return;
+    }
+
+    const dataRows = rows.slice(1).filter((r) => r.some((c) => c.trim() !== ""));
+    const report: ImportReport = {
+      total: dataRows.length, predicted: 0, skipped: 0, failed: 0, running: true, errors: [],
+    };
+    setImportReport({ ...report });
+
+    for (let idx = 0; idx < dataRows.length; idx++) {
+      const row = dataRows[idx];
+      const rowLabel = `Row ${idx + 2}`;
+      const formatValue = (row[iFormat] || "").trim();
+      const brandValue = (row[iBrand] || "").trim();
+      const caption = (row[iCaption] || "").trim();
+
+      // Unsupported formats (e.g. Story) are skipped before hitting the model.
+      if (!ALLOWED_FORMATS.includes(formatValue as ContentFormat)) {
+        report.skipped++;
+        report.errors.push(`${rowLabel}: unsupported format "${formatValue}" — skipped.`);
+        setImportReport({ ...report });
+        continue;
+      }
+      if (!caption) {
+        report.skipped++;
+        report.errors.push(`${rowLabel}: empty caption — skipped.`);
+        setImportReport({ ...report });
+        continue;
+      }
+      const brand = resolveBrand(brandValue);
+      if (!brand) {
+        report.failed++;
+        report.errors.push(`${rowLabel}: brand "${brandValue}" is not registered.`);
+        setImportReport({ ...report });
+        continue;
+      }
+
+      const dateValue = iDate !== -1 ? (row[iDate] || "").trim() : "";
+      const timeValue = iTime !== -1 ? (row[iTime] || "").trim() : "";
+      const hourMatch = timeValue.match(/^(\d{1,2})/);
+      const postHour = hourMatch ? Math.min(23, Math.max(0, parseInt(hourMatch[1], 10))) : 19;
+
+      try {
+        const res = await fetch("/api/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            caption,
+            format: formatValue,
+            post_hour: postHour,
+            brand_id: brand.id,
+            niche: brand.niche,
+            scheduled_date: /^\d{4}-\d{2}-\d{2}$/.test(dateValue) ? dateValue : undefined,
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.predicted_class) {
+          report.predicted++;
+        } else {
+          report.failed++;
+          report.errors.push(`${rowLabel}: ${data?.message || "prediction failed"}.`);
+        }
+      } catch {
+        report.failed++;
+        report.errors.push(`${rowLabel}: prediction service unreachable.`);
+      }
+      setImportReport({ ...report });
+    }
+
+    report.running = false;
+    setImportReport({ ...report });
+    await loadPredictions();
   };
 
-  const handleExport = async () => {
-    setExporting(true);
-    await new Promise((r) => setTimeout(r, 600));
-    setExporting(false);
+  // ------- CSV Export of the visible month -------
+  const handleExport = () => {
+    const header = ["date", "time", "brand", "account", "format", "caption", "predicted_tier", "confidence"];
+    const lines = [header.join(",")];
+    for (const e of monthEntries) {
+      lines.push(
+        [
+          e.date,
+          e.time ?? "",
+          csvEscape(e.brand),
+          e.account,
+          e.format,
+          csvEscape(e.caption),
+          e.tier,
+          e.confidence != null ? `${e.confidence}%` : "",
+        ].join(",")
+      );
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `faiv-calendar-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleSave = async (next: CalendarEntry) => {
-    setEntries((prev) =>
-      prev.some((e) => e.id === next.id)
-        ? prev.map((e) => (e.id === next.id ? next : e))
-        : [...prev, next],
-    );
     setEditing(null);
-    setCreatingDate(null);
-
-    // Save scheduled date, title and caption modifications to the DB
-    if (!next.id.startsWith("imp-") && !next.id.startsWith("new-")) {
-      try {
-        await fetch("/api/history", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: next.id,
-            scheduled_date: next.date,
-            caption: next.caption,
-            title: next.postingNote
-          })
-        });
-      } catch (err) {
-        console.error("Failed to persist calendar edits in DB:", err);
-      }
+    try {
+      const res = await fetch("/api/history", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: next.id,
+          scheduled_date: next.date,
+          caption: next.caption,
+          title: next.title,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      setEntries((prev) => prev.map((e) => (e.id === next.id ? next : e)));
+    } catch {
+      setLoadError("Saving the change failed — the database rejected the update.");
     }
   };
 
-  const handleDelete = (id: string) => {
-    setEntries((prev) => prev.filter((e) => e.id !== id));
+  const handleDelete = async (id: string) => {
     setEditing(null);
+    try {
+      const res = await fetch("/api/history", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) throw new Error();
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+    } catch {
+      setLoadError("Deleting the prediction failed — the database rejected the delete.");
+    }
   };
 
   const goPrev = () =>
@@ -225,20 +308,10 @@ export default function CalendarPage() {
     setCursor((c) => (c.m === 11 ? { y: c.y + 1, m: 0 } : { y: c.y, m: c.m + 1 }));
   const goToday = () => setCursor({ y: yyyy, m: mm });
 
-  // Drag and Drop handlers
+  // Drag and drop between dates → persists scheduled_date
   const handleDragStart = (e: React.DragEvent, id: string) => {
     e.dataTransfer.setData("text/plain", id);
     e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleDropOnStatus = (e: React.DragEvent, targetStatus: "draft" | "screening" | "ready_to_post" | "published") => {
-    e.preventDefault();
-    setDragOverCol(null);
-    const id = e.dataTransfer.getData("text/plain");
-    if (!id) return;
-    setEntries((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, status: targetStatus } : item))
-    );
   };
 
   const handleDropOnDate = async (e: React.DragEvent, targetDate: string) => {
@@ -247,135 +320,124 @@ export default function CalendarPage() {
     const id = e.dataTransfer.getData("text/plain");
     if (!id) return;
 
-    // Reschedule locally
+    const prevEntries = entries;
     setEntries((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, date: targetDate, status: "ready_to_post" } : item))
+      prev.map((item) => (item.id === id ? { ...item, date: targetDate } : item))
     );
 
-    // Persist scheduled date update to DB
-    if (!id.startsWith("imp-") && !id.startsWith("new-")) {
-      try {
-        await fetch("/api/history", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id,
-            scheduled_date: targetDate
-          })
-        });
-      } catch (err) {
-        console.error("Failed to reschedule calendar date in DB:", err);
-      }
-    }
-  };
-
-  // Predict Shortcut Action for screening/ready_to_post cards
-  const runPredictShortcut = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    setRunningPredictId(id);
-    
-    const entry = entries.find((x) => x.id === id);
-    if (!entry) {
-      setRunningPredictId(null);
-      return;
-    }
-
     try {
-      const is_carousel = entry.format === "Carousel" ? 1.0 : 0.0;
-      const is_reels = entry.format === "Reels" ? 1.0 : 0.0;
-      
-      const words = /(beli|dapatkan|pesan|kunjungi|klik|daftar|hubungi|contact|order|yuk|promo|diskon|check|checkout|tonton|baca|share|follow)/i;
-      const has_cta_val = words.test(entry.caption) ? 1.0 : 0.0;
-      const hashtags = (entry.caption.match(/#\w+/g) || []).length;
-
-      const res = await fetch("/api/predict", {
-        method: "POST",
+      const res = await fetch("/api/history", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          is_carousel,
-          is_reels,
-          post_hour: parseInt(entry.time.split(":")[0]) || 19,
-          caption_length: parseFloat(entry.caption.length.toString()),
-          hashtag_count: parseFloat(hashtags.toString()),
-          has_cta: has_cta_val,
-          caption: entry.caption,
-          brand_id: entry.account === "@lasence.bakeshop" ? "bfd6dbca-613d-4950-8b1e-45ad7dcf1088" : "bfd6dbca-613d-4950-8b1e-45ad7dcf1089",
-          niche: entry.account === "@lasence.bakeshop" ? "Bakery & Café" : "Gym & Fitness"
-        }),
+        body: JSON.stringify({ id, scheduled_date: targetDate }),
       });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status === "success" || data.predicted_class) {
-          setEntries((prev) =>
-            prev.map((item) => {
-              if (item.id === id) {
-                return {
-                  ...item,
-                  tier: data.predicted_class as any,
-                  confidence: Math.round(data.confidence),
-                  postingNote: `Model: ${data.model_metadata?.is_personal_model_active ? "Personal" : "Niche"}`
-                };
-              }
-              return item;
-            })
-          );
-        }
-      }
-    } catch (err) {
-      console.error("Error executing shortcut prediction:", err);
-    } finally {
-      setRunningPredictId(null);
+      if (!res.ok) throw new Error();
+    } catch {
+      setEntries(prevEntries); // roll back the optimistic move
+      setLoadError("Rescheduling failed — the database rejected the update.");
     }
   };
 
   return (
     <div className="px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto">
       <SectionHeader
-        eyebrow="Content Planning Workspace"
+        eyebrow="Content Planning"
         title="Content Calendar"
-        description="Plan your scheduled content. Drag posts between dates in the monthly grid, or move them across production stages in the board view."
+        description="Every scored prediction on its scheduled date. Drag posts between dates to reschedule; import a CSV to score drafts in batch."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <input
               ref={fileRef}
               type="file"
-              accept=".xlsx,.csv"
+              accept=".csv"
               className="hidden"
               onChange={handleImport}
             />
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              disabled={importing}
+              disabled={importReport?.running}
               className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 disabled:opacity-60"
             >
-              {importing ? (
+              {importReport?.running ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <UploadCloud className="h-3.5 w-3.5" />
               )}
-              Upload Document
+              Import CSV
             </button>
             <button
               type="button"
               onClick={handleExport}
-              disabled={exporting}
+              disabled={monthEntries.length === 0}
               className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/95 disabled:opacity-60"
             >
-              {exporting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
-              Export Excel
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
             </button>
           </div>
         }
       />
 
-      {/* Control panel: Toggles, Month Selector */}
-      <div className="mt-8 flex flex-col md:flex-row items-center justify-between gap-4 border border-border bg-surface/40 p-3 rounded-xl">
+      {loadError && (
+        <div className="mt-6 rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 flex items-center gap-3 text-xs">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+          <span className="font-semibold text-destructive">{loadError}</span>
+          <button
+            type="button"
+            onClick={() => { setLoadError(null); loadPredictions(); }}
+            className="ml-auto rounded-lg border border-border bg-surface px-3 py-1.5 font-semibold hover:bg-surface-2"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {importReport && (
+        <div
+          className={cn(
+            "mt-6 rounded-xl border p-4 text-xs space-y-2",
+            importReport.running
+              ? "border-primary/25 bg-primary/[0.03]"
+              : importReport.failed > 0
+              ? "border-warning/30 bg-warning/[0.03]"
+              : "border-accent-lime/30 bg-accent-lime/[0.04]"
+          )}
+        >
+          <div className="flex items-center gap-2 font-bold text-foreground">
+            {importReport.running ? (
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4 text-accent-lime-strong" />
+            )}
+            {importReport.running ? "Scoring imported rows…" : "Import finished"}
+            <span className="font-mono font-semibold text-muted-foreground">
+              {importReport.predicted} predicted · {importReport.skipped} skipped · {importReport.failed} failed
+              {importReport.total > 0 && ` (of ${importReport.total})`}
+            </span>
+            {!importReport.running && (
+              <button
+                type="button"
+                onClick={() => setImportReport(null)}
+                className="ml-auto grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-surface-2"
+                aria-label="Dismiss"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {importReport.errors.length > 0 && (
+            <ul className="list-disc pl-5 text-muted-foreground space-y-0.5 max-h-28 overflow-y-auto">
+              {importReport.errors.map((err, i) => (
+                <li key={i}>{err}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Controls: month navigation + view switcher */}
+      <div className="mt-6 flex flex-col md:flex-row items-center justify-between gap-4 border border-border bg-surface/40 p-3 rounded-xl">
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
           <button
             type="button"
@@ -405,150 +467,35 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        {/* View Switcher: Board | Calendar | List */}
         <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 p-1 text-xs w-full md:w-auto justify-center">
-          <button
-            type="button"
-            onClick={() => setView("board")}
-            className={cn(
-              "flex-1 md:flex-none inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition active:scale-95",
-              view === "board"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <LayoutGrid className="h-3.5 w-3.5" />
-            Board
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("month")}
-            className={cn(
-              "flex-1 md:flex-none inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition active:scale-95",
-              view === "month"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <CalendarIcon className="h-3.5 w-3.5" />
-            Calendar
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("list")}
-            className={cn(
-              "flex-1 md:flex-none inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition active:scale-95",
-              view === "list"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <List className="h-3.5 w-3.5" />
-            List
-          </button>
+          {(
+            [
+              { id: "month", label: "Calendar", icon: CalendarIcon },
+              { id: "list", label: "List", icon: List },
+            ] as const
+          ).map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => setView(v.id)}
+              className={cn(
+                "flex-1 md:flex-none inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition active:scale-95",
+                view === v.id
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <v.icon className="h-3.5 w-3.5" />
+              {v.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Main Views Container */}
       <div className="mt-6">
-        {/* VIEW 1: KANBAN BOARD */}
-        {view === "board" && (
-          <div className="overflow-x-auto pb-4">
-            <div className="flex gap-4 min-w-[900px]">
-              {(["draft", "screening", "ready_to_post", "published"] as const).map((colStatus) => {
-                const colEntries = monthEntries.filter((e) => e.status === colStatus);
-                const colTitle =
-                  colStatus === "draft"
-                    ? "Draft"
-                    : colStatus === "screening"
-                    ? "Screening"
-                    : colStatus === "ready_to_post"
-                    ? "Ready to Post"
-                    : "Published";
-                const isOver = dragOverCol === colStatus;
-
-                return (
-                  <div
-                    key={colStatus}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      if (dragOverCol !== colStatus) setDragOverCol(colStatus);
-                    }}
-                    onDragLeave={() => setDragOverCol(null)}
-                    onDrop={(e) => handleDropOnStatus(e, colStatus)}
-                    className={cn(
-                      "flex-1 min-h-[500px] rounded-xl border p-4 transition-colors bg-surface/20",
-                      isOver ? "border-primary bg-primary/[0.01]" : "border-border"
-                    )}
-                  >
-                    <div className="flex items-center justify-between mb-4 pb-2 border-b border-border/60">
-                      <h3 className="font-display text-sm font-bold capitalize text-foreground flex items-center gap-2">
-                        <span className={cn(
-                          "h-2 w-2 rounded-full",
-                          colStatus === "draft" ? "bg-slate-400" :
-                          colStatus === "screening" ? "bg-amber-400" :
-                          colStatus === "ready_to_post" ? "bg-purple-400" : "bg-emerald-400"
-                        )} />
-                        {colTitle}
-                      </h3>
-                      <span className="font-mono text-xs text-muted-foreground bg-surface-2 px-2 py-0.5 rounded-full">
-                        {colEntries.length}
-                      </span>
-                    </div>
-
-                    <div className="space-y-3">
-                      {colEntries.map((e) => (
-                        <div
-                          key={e.id}
-                          draggable
-                          onDragStart={(evt) => handleDragStart(evt, e.id)}
-                          onClick={() => setEditing(e)}
-                          className="group relative bg-surface border border-border rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-border-strong hover:shadow-sm transition-all"
-                        >
-                          <div className="flex items-start gap-2 mb-2">
-                            {/* Thumbnail */}
-                            <div className="h-7 w-7 rounded bg-gradient-to-br from-primary/10 to-primary/30 flex items-center justify-center font-bold text-[9px] text-primary shrink-0 border border-border">
-                              {e.format[0]}
-                            </div>
-                            <div className="min-w-0 flex-1 leading-tight">
-                              <div className="flex items-center justify-between">
-                                <span className="font-semibold text-xs text-foreground truncate">{e.account}</span>
-                                <span className="text-[9px] text-muted-foreground font-mono font-semibold">{e.platform}</span>
-                              </div>
-                              <div className="text-[9px] text-muted-foreground">PIC: {e.picName}</div>
-                            </div>
-                          </div>
-
-                          <h4 className="text-xs font-semibold text-foreground/80 line-clamp-2 leading-relaxed mb-3 italic">
-                            &quot;{e.caption || "No caption yet."}&quot;
-                          </h4>
-
-                          <div className="flex items-center justify-between pt-2.5 border-t border-border/40 text-[10px]">
-                            <span className="rounded border border-border bg-surface-2 px-2 py-0.5 font-bold text-muted-foreground font-mono">
-                              {e.format}
-                            </span>
-                            {e.status !== "draft" && <TierBadge tier={e.tier} />}
-                          </div>
-                        </div>
-                      ))}
-
-                      {colEntries.length === 0 && (
-                        <div className="py-8 text-center text-xs text-muted-foreground border border-dashed border-border/60 rounded-xl bg-surface/10">
-                          Drag posts here
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* VIEW 2: DEDICATED CALENDAR MONTHLY GRID */}
+        {/* MONTH GRID */}
         {view === "month" && (
           <section className="overflow-hidden rounded-xl border border-border bg-surface/30">
-            {/* Weekday labels */}
             <div className="grid grid-cols-7 border-b border-border bg-surface-2/60">
               {WEEK_LABELS.map((w) => (
                 <div
@@ -559,7 +506,6 @@ export default function CalendarPage() {
                 </div>
               ))}
             </div>
-            {/* Days grid */}
             <div className="grid grid-cols-7">
               {grid.map((cell, idx) => {
                 const dateStr = ymd(cell.year, cell.month, cell.day);
@@ -580,7 +526,7 @@ export default function CalendarPage() {
                     onDragLeave={() => setDragOverDate(null)}
                     onDrop={(e) => handleDropOnDate(e, dateStr)}
                     className={cn(
-                      "group relative min-h-[160px] border-b border-r border-border p-2.5 transition-colors hover:bg-surface-2/30",
+                      "group relative min-h-[130px] border-b border-r border-border p-2.5 transition-colors hover:bg-surface-2/30",
                       cell.inMonth ? "bg-surface/10" : "bg-surface-2/20 text-muted-foreground/40",
                       (idx + 1) % 7 === 0 ? "border-r-0" : "",
                       isOverDate ? "bg-primary/[0.04] border-primary" : ""
@@ -596,85 +542,47 @@ export default function CalendarPage() {
                         {cell.day}
                       </span>
                       {cell.inMonth && (
-                        <button
-                          type="button"
-                          onClick={() => setCreatingDate(dateStr)}
+                        <Link
+                          href="/predict"
                           className="grid h-5 w-5 place-items-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-surface-3 transition-opacity"
-                          aria-label="Add entry"
+                          aria-label="Analyze a new post"
+                          title="Analyze a new post"
                         >
                           <Plus className="h-3.5 w-3.5" />
-                        </button>
+                        </Link>
                       )}
                     </div>
 
-                    {/* Mini Content Cards Grid in Monthly Cells */}
                     <div className="space-y-2">
-                      {dayEntries.slice(0, 3).map((e) => {
-                        const isRunning = runningPredictId === e.id;
-
-                        let statusColor = "bg-slate-100 text-slate-700 border-slate-200";
-                        if (e.status === "screening") statusColor = "bg-amber-500/10 text-amber-600 border-amber-500/20";
-                        else if (e.status === "ready_to_post") statusColor = "bg-purple-500/10 text-purple-600 border-purple-500/20";
-                        else if (e.status === "published") statusColor = "bg-emerald-500/10 text-emerald-600 border-emerald-500/20";
-
-                        return (
-                          <div
-                            key={e.id}
-                            draggable
-                            onDragStart={(evt) => handleDragStart(evt, e.id)}
-                            onClick={() => setEditing(e)}
-                            className="group/card relative flex flex-col gap-1.5 rounded-lg border border-border bg-surface p-2 cursor-grab active:cursor-grabbing hover:border-border-strong hover:shadow-xs transition-all text-[10px]"
-                          >
-                            <div className="flex items-center gap-1.5">
-                              {/* Thumbnail */}
-                              <div className="h-6 w-6 rounded bg-gradient-to-br from-primary/10 to-primary/30 flex items-center justify-center font-bold text-[8px] text-primary shrink-0">
-                                {e.format[0]}
-                              </div>
-                              <div className="min-w-0 flex-1 leading-tight">
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="font-mono font-bold text-foreground truncate">{e.account}</span>
-                                  <span className="text-[8px] text-muted-foreground font-semibold font-mono">{e.platform}</span>
-                                </div>
-                                <div className="text-[8px] text-muted-foreground font-semibold">
-                                  PIC: {e.picName || "Unassigned"}
-                                </div>
-                              </div>
+                      {dayEntries.slice(0, 3).map((e) => (
+                        <div
+                          key={e.id}
+                          draggable
+                          onDragStart={(evt) => handleDragStart(evt, e.id)}
+                          onClick={() => setEditing(e)}
+                          className="relative flex flex-col gap-1.5 rounded-lg border border-border bg-surface p-2 cursor-grab active:cursor-grabbing hover:border-border-strong hover:shadow-xs transition-all text-[10px]"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-6 w-6 rounded bg-gradient-to-br from-primary/10 to-primary/30 flex items-center justify-center font-bold text-[8px] text-primary shrink-0">
+                              {e.format[0]}
                             </div>
-
-                            <div className="flex items-center justify-between gap-1.5 border-t border-border/40 pt-1.5">
-                              <span className="rounded border border-border bg-surface-2 px-1 py-0.5 text-[8px] font-bold text-muted-foreground font-mono">
-                                {e.format}
+                            <div className="min-w-0 flex-1 leading-tight">
+                              <span className="font-mono font-bold text-foreground truncate block">
+                                {e.account}
                               </span>
-                              <span className={cn("rounded border px-1 py-0.5 text-[7px] font-bold uppercase tracking-wider scale-95", statusColor)}>
-                                {e.status === "ready_to_post" ? "Ready" : e.status}
-                              </span>
+                              {e.time && (
+                                <span className="text-[8px] text-muted-foreground font-semibold">{e.time}</span>
+                              )}
                             </div>
-
-                            {/* Predict shortcut trigger */}
-                            {(e.status === "screening" || e.status === "ready_to_post") && (
-                              <button
-                                type="button"
-                                onClick={(evt) => runPredictShortcut(evt, e.id)}
-                                className="absolute top-1.5 right-1.5 grid h-4 w-4 place-items-center rounded bg-primary/10 text-primary opacity-0 group-hover/card:opacity-100 hover:bg-primary hover:text-primary-foreground transition-all duration-200"
-                                title="Predict performance"
-                              >
-                                {isRunning ? (
-                                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                                ) : (
-                                  <Activity className="h-2.5 w-2.5" />
-                                )}
-                              </button>
-                            )}
-
-                            {/* Inline posting note */}
-                            {e.postingNote && (
-                              <div className="text-[8.5px] font-bold text-primary bg-primary/5 border border-primary/15 rounded px-1.5 py-0.5 mt-0.5">
-                                {e.postingNote}
-                              </div>
-                            )}
                           </div>
-                        );
-                      })}
+                          <div className="flex items-center justify-between gap-1.5 border-t border-border/40 pt-1.5">
+                            <span className="rounded border border-border bg-surface-2 px-1 py-0.5 text-[8px] font-bold text-muted-foreground font-mono">
+                              {e.format}
+                            </span>
+                            <TierBadge tier={e.tier} className="scale-90 origin-right" />
+                          </div>
+                        </div>
+                      ))}
                       {dayEntries.length > 3 && (
                         <div className="px-1 text-[8px] font-bold text-primary">
                           +{dayEntries.length - 3} posts
@@ -688,33 +596,30 @@ export default function CalendarPage() {
           </section>
         )}
 
-        {/* VIEW 3: LIST TABLE */}
+        {/* LIST VIEW */}
         {view === "list" && (
           <section className="overflow-hidden rounded-xl border border-border bg-surface/30 shadow-[var(--shadow-soft)]">
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead>
                   <tr className="border-b border-border bg-surface-2/60 text-[9px] uppercase tracking-wider text-muted-foreground font-bold">
-                    <th className="px-6 py-5 font-semibold">Date</th>
-                    <th className="px-6 py-5 font-semibold">Time</th>
-                    <th className="px-6 py-5 font-semibold">Account</th>
-                    <th className="px-6 py-5 font-semibold">Format</th>
-                    <th className="px-6 py-5 font-semibold">PIC</th>
-                    <th className="px-6 py-5 font-semibold">Caption Preview</th>
-                    <th className="px-6 py-5 font-semibold">Status</th>
-                    <th className="px-6 py-5 font-semibold">Tier</th>
+                    <th className="px-6 py-4 font-semibold">Date</th>
+                    <th className="px-6 py-4 font-semibold">Time</th>
+                    <th className="px-6 py-4 font-semibold">Account</th>
+                    <th className="px-6 py-4 font-semibold">Format</th>
+                    <th className="px-6 py-4 font-semibold">Caption Preview</th>
+                    <th className="px-6 py-4 font-semibold text-center">Confidence</th>
+                    <th className="px-6 py-4 font-semibold">Tier</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
                   {monthEntries
                     .slice()
-                    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+                    .sort((a, b) => (a.date + (a.time ?? "")).localeCompare(b.date + (b.time ?? "")))
                     .map((r) => {
                       const [y, m, d] = r.date.split("-").map(Number);
                       const dateObj = new Date(y, m - 1, d);
                       const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short" });
-                      const dayNum = dateObj.getDate();
-                      const monthYear = dateObj.toLocaleDateString("en-US", { month: "short", year: "numeric" });
 
                       return (
                         <tr
@@ -722,51 +627,43 @@ export default function CalendarPage() {
                           onClick={() => setEditing(r)}
                           className="cursor-pointer hover:bg-surface-2/40 transition-colors group/row"
                         >
-                          <td className="px-6 py-5 align-middle">
+                          <td className="px-6 py-4 align-middle">
                             <div className="flex items-center gap-3">
-                              <div className="flex flex-col items-center justify-center shrink-0 w-11 h-11 rounded-lg bg-surface-2 border border-border transition-colors group-hover/row:border-primary/30 group-hover/row:bg-primary/[0.02]">
+                              <div className="flex flex-col items-center justify-center shrink-0 w-11 h-11 rounded-lg bg-surface-2 border border-border transition-colors group-hover/row:border-primary/30">
                                 <span className="text-[9px] uppercase font-extrabold text-muted-foreground/80 tracking-wider leading-none">
                                   {weekday}
                                 </span>
                                 <span className="text-sm font-extrabold text-foreground leading-none mt-1">
-                                  {dayNum}
+                                  {dateObj.getDate()}
                                 </span>
                               </div>
-                              <div className="flex flex-col justify-center">
-                                <span className="text-xs font-bold text-foreground">
-                                  {monthYear}
-                                </span>
-                                <span className="text-[8px] font-bold text-muted-foreground/80 uppercase tracking-widest mt-0.5">
-                                  Scheduled
-                                </span>
-                              </div>
+                              <span className="text-xs font-bold text-foreground">
+                                {dateObj.toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+                              </span>
                             </div>
                           </td>
-                          <td className="px-6 py-5 align-middle font-mono text-xs font-semibold">{r.time}</td>
-                          <td className="px-6 py-5 align-middle">
-                            <div className="max-w-[120px] md:max-w-[140px] truncate font-bold text-foreground" title={r.account}>
+                          <td className="px-6 py-4 align-middle font-mono text-xs font-semibold">
+                            {r.time ?? "—"}
+                          </td>
+                          <td className="px-6 py-4 align-middle">
+                            <div className="max-w-[140px] truncate font-bold text-foreground" title={r.account}>
                               {r.account}
                             </div>
                           </td>
-                          <td className="px-6 py-5 align-middle">
+                          <td className="px-6 py-4 align-middle">
                             <span className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-muted-foreground font-mono font-semibold">
                               {r.format}
                             </span>
                           </td>
-                          <td className="px-6 py-5 align-middle">
-                            <div className="max-w-[80px] md:max-w-[100px] truncate font-semibold" title={r.picName}>
-                              {r.picName}
-                            </div>
-                          </td>
-                          <td className="px-6 py-5 align-middle">
-                            <div className="max-w-[200px] md:max-w-[280px] truncate text-xs text-muted-foreground italic" title={r.caption}>
+                          <td className="px-6 py-4 align-middle">
+                            <div className="max-w-[280px] truncate text-xs text-muted-foreground italic" title={r.caption}>
                               &quot;{r.caption}&quot;
                             </div>
                           </td>
-                          <td className="px-6 py-5 align-middle capitalize text-xs text-foreground/80 font-bold">
-                            {r.status.replace(/_/g, " ")}
+                          <td className="px-6 py-4 align-middle text-center font-mono text-xs font-semibold tabular-nums">
+                            {r.confidence != null ? `${r.confidence}%` : "—"}
                           </td>
-                          <td className="px-6 py-5 align-middle">
+                          <td className="px-6 py-4 align-middle">
                             <TierBadge tier={r.tier} />
                           </td>
                         </tr>
@@ -774,8 +671,8 @@ export default function CalendarPage() {
                     })}
                   {monthEntries.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-6 py-10 text-center text-xs text-muted-foreground">
-                        No entries scheduled. Upload document or select dates above.
+                      <td colSpan={7} className="px-6 py-10 text-center text-xs text-muted-foreground">
+                        No predictions scheduled this month. Analyze a post or import a CSV to populate the calendar.
                       </td>
                     </tr>
                   )}
@@ -786,32 +683,12 @@ export default function CalendarPage() {
         )}
       </div>
 
-      {/* Edit / Create dialog popup modal */}
-      {(editing || creatingDate) && (
+      {editing && (
         <EntryModal
-          initial={
-            editing ?? {
-              id: `new-${Date.now()}`,
-              date: creatingDate!,
-              time: "19:00",
-              account: brandsList[0]?.handle || "@unknown",
-              format: "Reels" as const,
-              caption: "",
-              tier: "Average",
-              confidence: 70,
-              status: "draft",
-              picName: "Alice",
-              platform: "IG"
-            }
-          }
-          isNew={!editing}
-          onClose={() => {
-            setEditing(null);
-            setCreatingDate(null);
-          }}
+          initial={editing}
+          onClose={() => setEditing(null)}
           onSave={handleSave}
-          onDelete={editing ? () => handleDelete(editing.id) : undefined}
-          brandsList={brandsList}
+          onDelete={() => handleDelete(editing.id)}
         />
       )}
     </div>
@@ -819,22 +696,18 @@ export default function CalendarPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Entry Modal Dialog
+// Entry Modal — edits persist through /api/history PATCH
 // ---------------------------------------------------------------------------
 function EntryModal({
   initial,
-  isNew,
   onClose,
   onSave,
   onDelete,
-  brandsList,
 }: {
   initial: CalendarEntry;
-  isNew: boolean;
   onClose: () => void;
   onSave: (next: CalendarEntry) => void;
-  onDelete?: () => void;
-  brandsList: any[];
+  onDelete: () => void;
 }) {
   const [draft, setDraft] = useState<CalendarEntry>(initial);
 
@@ -860,10 +733,10 @@ function EntryModal({
         <div className="flex items-start justify-between border-b border-border p-4">
           <div>
             <div className="text-[9px] font-bold uppercase tracking-wider text-primary">
-              {isNew ? "Create Entry" : "Configure Entry"}
+              Edit Scheduled Prediction
             </div>
             <h3 className="mt-1 font-display text-sm font-bold">
-              {formatDayLabel(draft.date)} · {draft.time}
+              {formatDayLabel(draft.date)} · {draft.account}
             </h3>
           </div>
           <button
@@ -877,142 +750,58 @@ function EntryModal({
         </div>
 
         <div className="space-y-4 p-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ModalField label="Date">
-              <input
-                type="date"
-                value={draft.date}
-                onChange={(e) => setDraft({ ...draft, date: e.target.value })}
-                className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
-              />
-            </ModalField>
-            <ModalField label="Time">
-              <input
-                type="time"
-                value={draft.time}
-                onChange={(e) => setDraft({ ...draft, time: e.target.value })}
-                className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
-              />
-            </ModalField>
-          </div>
+          <ModalField label="Scheduled Date">
+            <input
+              type="date"
+              value={draft.date}
+              onChange={(e) => setDraft({ ...draft, date: e.target.value })}
+              className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
+            />
+          </ModalField>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ModalField label="Brand Account">
-              <select
-                value={draft.account}
-                onChange={(e) => setDraft({ ...draft, account: e.target.value })}
-                className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary disabled:opacity-60"
-                disabled={brandsList.length === 0}
-              >
-                {brandsList.length === 0 ? (
-                  <option value="">No brand accounts configured</option>
-                ) : (
-                  brandsList.map((b) => {
-                    const itemHandle = b.handle || `@${b.name.toLowerCase().replace(/\s+/g, "")}`;
-                    return (
-                      <option key={b.id || b.name} value={itemHandle}>
-                        {itemHandle} ({b.name})
-                      </option>
-                    );
-                  })
-                )}
-              </select>
-            </ModalField>
-            <ModalField label="PIC Owner">
-              <input
-                type="text"
-                value={draft.picName}
-                onChange={(e) => setDraft({ ...draft, picName: e.target.value })}
-                className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
-                placeholder="e.g. Alice"
-              />
-            </ModalField>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ModalField label="Content Format">
-              <select
-                value={draft.format}
-                onChange={(e) => setDraft({ ...draft, format: e.target.value as ContentFormat })}
-                className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
-              >
-                <option value="Reels">Reels</option>
-                <option value="Carousel">Carousel</option>
-                <option value="Single Image">Single Image</option>
-              </select>
-            </ModalField>
-            <ModalField label="Platform Code">
-              <input
-                type="text"
-                value={draft.platform}
-                onChange={(e) => setDraft({ ...draft, platform: e.target.value })}
-                className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
-                placeholder="e.g. IG, FB"
-              />
-            </ModalField>
-          </div>
+          <ModalField label="Title / Note">
+            <input
+              type="text"
+              value={draft.title}
+              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+              className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
+              placeholder="Optional label for this post"
+            />
+          </ModalField>
 
           <ModalField label="Caption Text">
             <textarea
               value={draft.caption}
               onChange={(e) => setDraft({ ...draft, caption: e.target.value })}
-              rows={3}
+              rows={4}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs outline-none focus:border-primary"
-              placeholder="What's the caption for this content?"
             />
           </ModalField>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ModalField label="Workflow Status">
-              <select
-                value={draft.status}
-                onChange={(e) => setDraft({ ...draft, status: e.target.value as any })}
-                className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
-              >
-                <option value="draft">Draft</option>
-                <option value="screening">Screening</option>
-                <option value="ready_to_post">Ready to Post</option>
-                <option value="published">Published</option>
-              </select>
-            </ModalField>
-            {draft.status !== "draft" ? (
-              <ModalField label="Performance Score">
-                <div className="flex items-center gap-2.5 h-10 px-3 bg-surface-2 rounded-lg border border-border text-xs font-mono text-foreground font-semibold">
-                  <div className="flex-1 h-1.5 bg-surface-3 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary rounded-full transition-all"
-                      style={{ width: `${draft.confidence}%` }}
-                    />
-                  </div>
-                  <span>{draft.confidence}%</span>
-                </div>
-              </ModalField>
-            ) : (
-              <div />
-            )}
+          <div className="flex items-center justify-between rounded-lg border border-border bg-surface-2/50 px-3 py-2.5">
+            <div className="text-[10px] text-muted-foreground font-semibold">
+              Predicted result
+              <span className="block text-[9px] font-normal">
+                Re-run the analysis on the Prediction page after editing the caption.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {draft.confidence != null && (
+                <span className="font-mono text-xs font-bold tabular-nums">{draft.confidence}%</span>
+              )}
+              <TierBadge tier={draft.tier} />
+            </div>
           </div>
-
-          {draft.status !== "draft" && (
-            <ModalField label="Performance Potential">
-              <div className="flex items-center h-10 px-3 bg-surface-2 rounded-lg border border-border">
-                <TierBadge tier={draft.tier} />
-              </div>
-            </ModalField>
-          )}
         </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-border bg-surface-2/40 p-4">
-          {onDelete ? (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="text-xs font-semibold text-destructive hover:underline"
-            >
-              Delete post
-            </button>
-          ) : (
-            <span />
-          )}
+          <button
+            type="button"
+            onClick={onDelete}
+            className="text-xs font-semibold text-destructive hover:underline"
+          >
+            Delete prediction
+          </button>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -1027,7 +816,7 @@ function EntryModal({
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95 active:scale-95"
             >
               <Save className="h-3.5 w-3.5" />
-              {isNew ? "Create" : "Save Changes"}
+              Save Changes
             </button>
           </div>
         </div>
@@ -1088,4 +877,53 @@ function formatDayLabel(yyyymmdd: string) {
     day: "numeric",
     month: "short",
   });
+}
+
+/** Minimal CSV parser with support for quoted fields and escaped quotes. */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(field);
+      field = "";
+      rows.push(row);
+      row = [];
+    } else {
+      field += ch;
+    }
+  }
+  if (field !== "" || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function csvEscape(value: string): string {
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
 }

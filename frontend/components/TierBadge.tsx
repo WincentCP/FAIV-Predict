@@ -1,6 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { Tier } from "@/lib/mock-data";
-import { TIER_META } from "@/lib/mock-data";
+import { type Tier, TIER_META } from "@/lib/types";
 
 export function TierBadge({ tier, className }: { tier: Tier; className?: string }) {
   const meta = TIER_META[tier];

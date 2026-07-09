@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
-import { type MlModel } from "@/lib/mock-data";
+import { type MlModel } from "@/lib/types";
 import {
   Cpu,
   CheckCircle2,
@@ -32,6 +32,7 @@ const itemVariants = {
 
 export default function ModelHealthPage() {
   const [models, setModels] = useState<MlModel[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [retrainingModel, setRetrainingModel] = useState<MlModel | null>(null);
   const [logsOutput, setLogsOutput] = useState<any[] | null>(null);
   const [isTraining, setIsTraining] = useState(false);
@@ -40,12 +41,17 @@ export default function ModelHealthPage() {
     async function fetchModels() {
       try {
         const res = await fetch("/api/models");
-        if (res.ok) {
-          const data = await res.json();
-          setModels(data || []);
+        const data = await res.json().catch(() => null);
+        if (res.ok && Array.isArray(data)) {
+          setModels(data);
+          setLoadError(null);
+        } else {
+          setModels([]);
+          setLoadError("The model registry could not be loaded.");
         }
-      } catch (err) {
-        console.error("Could not load real models from BFF API:", err);
+      } catch {
+        setModels([]);
+        setLoadError("The model registry could not be loaded.");
       }
     }
     fetchModels();
@@ -159,17 +165,29 @@ export default function ModelHealthPage() {
           title="AI Model Performance"
           description="Validation accuracy for each trained classifier, recorded at training time. Retrain a model to refresh its metrics."
           actions={
-            <button
-              type="button"
-              onClick={handleGlobalRetrain}
-              className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface/80 backdrop-blur px-4 py-2.5 text-xs font-bold text-foreground hover:bg-surface-2 hover:scale-[1.01] active:scale-[0.98] transition-all shadow-sm"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Trigger manual retrain
-            </button>
+            hasModels ? (
+              <button
+                type="button"
+                onClick={handleGlobalRetrain}
+                className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface/80 backdrop-blur px-4 py-2.5 text-xs font-bold text-foreground hover:bg-surface-2 hover:scale-[1.01] active:scale-[0.98] transition-all shadow-sm"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Trigger manual retrain
+              </button>
+            ) : undefined
           }
         />
       </motion.div>
+
+      {loadError && (
+        <motion.div
+          variants={itemVariants}
+          className="rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 flex items-center gap-3 text-xs"
+        >
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+          <span className="font-semibold text-destructive">{loadError}</span>
+        </motion.div>
+      )}
 
       {/* Summary Widgets */}
       <motion.section variants={itemVariants} className="grid gap-4 sm:grid-cols-3">
@@ -208,6 +226,13 @@ export default function ModelHealthPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
+              {models.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-xs text-muted-foreground">
+                    No trained models registered yet. Models appear here after the first training run.
+                  </td>
+                </tr>
+              )}
               {models.map((m) => {
                 const isPersonal = m.scope === "Personal";
 
@@ -298,7 +323,7 @@ export default function ModelHealthPage() {
                 <div>
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-primary">
                     <RefreshCw className="h-3 w-3 animate-spin" />
-                    n8n Workflow Runner
+                    Retraining Pipeline
                   </div>
                   <h3 className="mt-2 font-display text-base font-bold text-foreground">
                     Retraining Console: {retrainingModel.name.split(": ")[1] || retrainingModel.name}
@@ -325,9 +350,9 @@ export default function ModelHealthPage() {
                     <span className="font-mono mt-0.5 block text-foreground truncate" title={retrainingModel.id}>{retrainingModel.id}</span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground uppercase text-[9px] block">Target Version</span>
-                    <span className="font-mono mt-0.5 block text-foreground">
-                      {retrainingModel.version.replace(/(\d+)$/, (m) => String(parseInt(m, 10) + 1))}
+                    <span className="text-muted-foreground uppercase text-[9px] block">Current Version</span>
+                    <span className="font-mono mt-0.5 block text-foreground truncate" title={retrainingModel.version}>
+                      {retrainingModel.version}
                     </span>
                   </div>
                   <div>
