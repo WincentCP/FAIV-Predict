@@ -80,3 +80,10 @@ def test_train_endpoint():
     assert data["status"] == "pending"
     assert "job_id" in data
     assert "message" in data
+
+def test_train_status_without_db_is_honest():
+    """Without a database there is no job state — the service must not fabricate success."""
+    if os.getenv("DATABASE_URL"):
+        return  # a real database is configured in this environment
+    response = client.get("/train/00000000-0000-0000-0000-000000000000")
+    assert response.status_code == 503

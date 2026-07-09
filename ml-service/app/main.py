@@ -74,6 +74,7 @@ class PredictionRequest(BaseModel):
     post_hour: int
     brand_id: Optional[str] = None
     niche: Optional[str] = None
+    scheduled_date: Optional[str] = None  # ISO date (YYYY-MM-DD)
 
 class TrainRequest(BaseModel):
     brand_id: Optional[str] = None
@@ -179,9 +180,16 @@ def predict(req: PredictionRequest):
         confidence = round(float(np.max(probs_raw)) * 100, 2)
         
         # 4. Log Prediction to Database (Optional & Safe)
+        prediction_id = None
         db_url = os.getenv("DATABASE_URL")
         if db_url and req.brand_id:
             try:
+                scheduled_date = datetime.date.today()
+                if req.scheduled_date:
+                    try:
+                        scheduled_date = datetime.date.fromisoformat(req.scheduled_date)
+                    except ValueError:
+                        logger.warning(f"Invalid scheduled_date '{req.scheduled_date}', using today.")
                 conn = psycopg2.connect(db_url)
                 with conn.cursor() as cur:
                     # Clean features for JSON storage — include confidence so history can display it
@@ -191,17 +199,19 @@ def predict(req: PredictionRequest):
                         """
                         INSERT INTO predictions (brand_id, title, caption, features, pred_class, created_at, scheduled_date)
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
                         """,
                         (
                             req.brand_id,
-                            f"Prediksi {req.format} - {datetime.date.today().strftime('%d/%m/%y')}",
+                            f"{req.format} prediction - {datetime.date.today().strftime('%d/%m/%y')}",
                             req.caption,
                             psycopg2.extras.Json(json_features),
                             predicted_class.upper(),
                             datetime.datetime.utcnow(),
-                            datetime.date.today()
+                            scheduled_date
                         )
                     )
+                    prediction_id = str(cur.fetchone()[0])
                     conn.commit()
                 conn.close()
             except Exception as log_err:
@@ -227,6 +237,7 @@ def predict(req: PredictionRequest):
             "predicted_class": predicted_class,
             "confidence": confidence,
             "probabilities": probabilities,
+            "prediction_id": prediction_id,
             "model_metadata": {
                 "model_id": metadata.get("id"),
                 "model_type": metadata.get("model_type"),
@@ -293,53 +304,53 @@ def suggest(req: SuggestRequest):
         suggestions.append({
             "parameter": "post_hour",
             "current": req.post_hour,
-            "recommendation": "Pindahkan ke Golden Hour (17:00 - 21:00) untuk meningkatkan jangkauan organik awal.",
-            "impact": "Tinggi"
+            "recommendation": "Move the posting time into the 17:00-21:00 evening window, when audience activity in this niche peaks.",
+            "impact": "High"
         })
-        
+
     # 2. Caption length evaluation
     cap_len = len(req.caption)
     if cap_len < 180:
         suggestions.append({
             "parameter": "caption_length",
             "current": cap_len,
-            "recommendation": "Perpanjang caption minimal 180 karakter untuk membangun narasi (storytelling) yang lebih kuat.",
-            "impact": "Sedang"
+            "recommendation": "Extend the caption to at least 180 characters to build a stronger narrative.",
+            "impact": "Medium"
         })
     elif cap_len > 320:
         suggestions.append({
             "parameter": "caption_length",
             "current": cap_len,
-            "recommendation": "Persingkat caption di bawah 320 karakter agar audiens fokus pada CTA sebelum membaca lipatan teks.",
-            "impact": "Sedang"
+            "recommendation": "Shorten the caption below 320 characters so the call-to-action stays above the fold.",
+            "impact": "Medium"
         })
-        
+
     # 3. Hashtag evaluation
     hashtag_count = features["hashtag_count"]
     if hashtag_count < 3:
         suggestions.append({
             "parameter": "hashtag_count",
             "current": hashtag_count,
-            "recommendation": "Tambahkan tagar hingga 3-8 buah tagar spesifik industri untuk keterbukaan (discoverability).",
-            "impact": "Tinggi"
+            "recommendation": "Add industry-specific hashtags until you have 3-8 to improve discoverability.",
+            "impact": "High"
         })
     elif hashtag_count > 8:
         suggestions.append({
             "parameter": "hashtag_count",
             "current": hashtag_count,
-            "recommendation": "Kurangi jumlah tagar maksimal 8 buah agar postingan tidak terlihat spam di mata algoritma Meta.",
-            "impact": "Rendah"
+            "recommendation": "Reduce hashtags to at most 8 so the post does not read as spam.",
+            "impact": "Low"
         })
-        
+
     # 4. CTA evaluation
     if features["has_cta"] == 0.0:
         suggestions.append({
             "parameter": "has_cta",
-            "current": "Tidak ada",
-            "recommendation": "Tambahkan kalimat ajakan bertindak (CTA) seperti 'Hubungi kami' atau 'Klik link di bio'.",
-            "impact": "Tinggi"
+            "current": "None",
+            "recommendation": "Add an explicit call-to-action such as 'Order now' or 'Click the link in bio'.",
+            "impact": "High"
         })
-        
+
     return {
         "status": "success",
         "features_analyzed": features,
@@ -351,11 +362,12 @@ def get_train_status(job_id: str):
     """Retrieves the status of a background retraining job from database."""
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
-        return {
-            "status": "success", 
-            "completed_at": datetime.datetime.utcnow().isoformat(),
-            "message": "Offline fallback training completed."
-        }
+        # Never fabricate a completed job: without a database there is no job state.
+        raise HTTPException(
+            status_code=503,
+            detail="Job status unavailable: DATABASE_URL is not configured."
+        )
+    conn = None
     try:
         from psycopg2.extras import RealDictCursor
         conn = psycopg2.connect(db_url)
@@ -373,15 +385,15 @@ def get_train_status(job_id: str):
                 if res.get("completed_at"):
                     res["completed_at"] = res["completed_at"].isoformat()
                 return res
-            else:
-                raise HTTPException(status_code=404, detail="Job not found")
+            raise HTTPException(status_code=404, detail="Job not found")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to query train status: {e}")
-        return {
-            "status": "success", 
-            "completed_at": datetime.datetime.utcnow().isoformat(),
-            "message": f"Simulated fallback completed due to DB error: {str(e)}"
-        }
+        raise HTTPException(status_code=503, detail=f"Job status query failed: {e}")
+    finally:
+        if conn:
+            conn.close()
 
 
 # ──────────────────────────────────────────────────────────────────

@@ -202,7 +202,16 @@ class ModelTrainer:
         
         y_train = y_er_train.apply(lambda er: DataPreprocessor.label_performance(er, p33, p67))
         y_test = y_er_test.apply(lambda er: DataPreprocessor.label_performance(er, p33, p67))
-        
+
+        # Guard against degenerate labeling (e.g. many identical engagement
+        # rates collapsing every post into one class): a single-class model
+        # cannot produce meaningful tier probabilities.
+        if y_train.nunique() < 2:
+            raise InsufficientDataError(
+                "Cannot train: engagement rates are too uniform to derive "
+                "HIGH/AVERAGE/LOW classes. Sync more varied historical data first."
+            )
+
         # 5. Initialize RandomForest with regularization (max_depth, min_samples_leaf)
         # to avoid overfitting on small datasets
         model = RandomForestClassifier(
