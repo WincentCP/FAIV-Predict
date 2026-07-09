@@ -1,30 +1,25 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { ArrowRight, Lock, Mail, ShieldCheck } from "lucide-react";
+import { ArrowRight, Lock, Mail } from "lucide-react";
 import { useState } from "react";
 import { Logo } from "@/components/AppShell";
 import { createClient } from "@/lib/supabase/client";
 
+// Pre-filled development/test credentials. They authenticate against the real
+// Supabase Auth project — there is no client-side bypass.
+const DEV_EMAIL = "wincentcoleusphan@gmail.com";
+const DEV_PASSWORD = "skripsisuccess";
+
 export default function Page() {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState("wincentcoleusphan@gmail.com");
-  const [password, setPassword] = useState("skripsisuccess");
+  const [email, setEmail] = useState(DEV_EMAIL);
+  const [password, setPassword] = useState(DEV_PASSWORD);
   const [authError, setAuthError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setAuthError(null);
-
-    // Immediate bypass for pre-filled demo login to avoid any backend/Supabase connection hiccups
-    if (email === "wincentcoleusphan@gmail.com" && password === "skripsisuccess") {
-      document.cookie = "sb-simulated-login=true; path=/";
-      window.location.href = "/dashboard";
-      return;
-    }
 
     try {
       const supabase = createClient();
@@ -34,14 +29,12 @@ export default function Page() {
       });
 
       if (error) {
-        console.error("Supabase auth error:", error.message);
         setAuthError(error.message);
         return;
       }
 
       window.location.href = "/dashboard";
     } catch (err: any) {
-      console.error("Supabase connection failed:", err.message);
       setAuthError(err.message || "Failed to connect to authentication server");
     } finally {
       setLoading(false);
@@ -88,7 +81,7 @@ export default function Page() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {authError && (
-              <div className="rounded-xl bg-primary/10 p-3 text-xs font-medium text-primary text-center">
+              <div className="rounded-xl border border-destructive/25 bg-destructive/[0.06] p-3 text-xs font-medium text-destructive text-center">
                 {authError}
               </div>
             )}
@@ -107,21 +100,7 @@ export default function Page() {
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              hint={
-                <a className="text-xs font-medium text-primary hover:underline" href="#">
-                  Forgot password?
-                </a>
-              }
             />
-
-            <label className="flex items-center gap-2 text-xs text-muted-foreground select-none">
-              <input
-                type="checkbox"
-                defaultChecked
-                className="h-4 w-4 rounded border-border accent-[var(--primary)]"
-              />
-              Keep me signed in for 30 days
-            </label>
 
             <button
               type="submit"
@@ -138,16 +117,8 @@ export default function Page() {
               />
             </button>
 
-            <div className="flex items-center justify-center gap-1.5 pt-1 text-[11px] text-muted-foreground">
-              <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-              Protected by SSO &amp; encrypted at rest
-            </div>
-
-            <p className="text-center text-xs text-muted-foreground">
-              No account?{" "}
-              <Link href="/dashboard" className="font-medium text-primary hover:underline">
-                Request a demo
-              </Link>
+            <p className="pt-1 text-center text-[11px] text-muted-foreground">
+              Accounts are provisioned by the workspace administrator.
             </p>
           </form>
         </div>

@@ -11,15 +11,10 @@ import {
   History,
   Building2,
   Cpu,
-  Search,
-  Bell,
   Sun,
   Moon,
   ChevronDown,
-  BarChart3,
   LogOut,
-  User,
-  Settings,
   Menu,
   X,
 } from "lucide-react";
@@ -44,6 +39,43 @@ const NAV_GROUPS = [
   },
 ] as const;
 
+const THEME_STORAGE_KEY = "faiv-theme";
+
+function UserMenuPanel({
+  displayName,
+  userEmail,
+  onLogout,
+  className,
+}: {
+  displayName: string;
+  userEmail: string;
+  onLogout: () => void;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "z-50 rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-elevated)] backdrop-blur animate-[page-enter_0.15s_ease-out]",
+        className
+      )}
+    >
+      <div className="flex flex-col gap-0.5">
+        <div className="px-2.5 py-1.5 border-b border-border/40 mb-1">
+          <div className="text-xs font-semibold text-foreground">{displayName}</div>
+          <div className="text-[10px] text-muted-foreground max-w-[180px] truncate">{userEmail || "—"}</div>
+        </div>
+        <button
+          onClick={onLogout}
+          className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-semibold text-destructive hover:bg-destructive/10 transition-colors"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Logout
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -60,10 +92,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Restore persisted theme preference.
+  React.useEffect(() => {
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === "dark" || stored === "light") {
+      setTheme(stored);
+    }
+  }, []);
+
   const displayName = userEmail ? userEmail.split("@")[0] : "Account";
   const avatarInitial = displayName ? displayName.charAt(0).toUpperCase() : "?";
 
   const handleLogout = async () => {
+    setIsSidebarMenuOpen(false);
+    setIsTopbarMenuOpen(false);
     try {
       const supabase = createClient();
       await supabase.auth.signOut();
@@ -81,6 +123,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const root = document.documentElement;
     root.classList.remove("dark", "light");
     root.classList.add(theme);
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
 
   React.useEffect(() => {
@@ -239,42 +282,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* User footer */}
           <div ref={sidebarRef} className="relative shrink-0 border-t border-border p-2">
             {isSidebarMenuOpen && (
-              <div className="absolute bottom-full left-2 right-2 mb-2 z-50 rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-elevated)] backdrop-blur animate-[page-enter_0.15s_ease-out]">
-                <div className="flex flex-col gap-0.5">
-                  <div className="px-2.5 py-1.5 border-b border-border/40 mb-1">
-                    <div className="text-xs font-semibold text-foreground">{displayName}</div>
-                    <div className="text-[10px] text-muted-foreground">{userEmail || "—"}</div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setIsSidebarMenuOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
-                  >
-                    <User className="h-3.5 w-3.5" />
-                    Account Settings
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsSidebarMenuOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
-                  >
-                    <Settings className="h-3.5 w-3.5" />
-                    Preferences
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsSidebarMenuOpen(false);
-                      handleLogout();
-                    }}
-                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-semibold text-destructive hover:bg-destructive/10 transition-colors"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                    Logout
-                  </button>
-                </div>
-              </div>
+              <UserMenuPanel
+                displayName={displayName}
+                userEmail={userEmail}
+                onLogout={handleLogout}
+                className="absolute bottom-full left-2 right-2 mb-2"
+              />
             )}
             <div
               onClick={() => setIsSidebarMenuOpen(!isSidebarMenuOpen)}
@@ -300,7 +313,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* ── Main content ── */}
         <div className="flex min-h-screen flex-1 flex-col">
           <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-xl md:px-6">
-            {/* Left: mobile logo + search */}
+            {/* Left: mobile menu + logo */}
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -312,16 +325,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="md:hidden">
                 <Logo />
               </div>
-              <div className="hidden items-center gap-2 rounded-xl border border-border bg-surface/60 px-3 py-2 text-sm text-muted-foreground transition-all focus-within:border-ring focus-within:bg-surface focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,hsl(var(--ring))_15%,transparent)] md:flex">
-                <Search className="h-3.5 w-3.5 shrink-0" />
-                <input
-                  className="w-60 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
-                  placeholder="Search predictions, brands…"
-                />
-                <kbd className="ml-1 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                  ⌘K
-                  </kbd>
-              </div>
             </div>
 
             {/* Right: actions */}
@@ -332,10 +335,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 aria-label="Toggle theme"
               >
                 {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              </button>
-              <button className="relative grid h-9 w-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground ring-focus">
-                <Bell className="h-4 w-4" />
-                <span className="absolute right-2.5 top-2.5 h-1.5 w-1.5 rounded-full bg-primary" />
               </button>
               <div ref={topbarRef} className="relative">
                 <div
@@ -352,42 +351,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform duration-200", isTopbarMenuOpen && "rotate-180")} />
                 </div>
                 {isTopbarMenuOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-48 z-50 rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-elevated)] backdrop-blur animate-[page-enter_0.15s_ease-out]">
-                    <div className="flex flex-col gap-0.5">
-                      <div className="px-2.5 py-1.5 border-b border-border/40 mb-1">
-                        <div className="text-xs font-semibold text-foreground">{displayName}</div>
-                        <div className="text-[10px] text-muted-foreground max-w-[160px] truncate">{userEmail || "—"}</div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setIsTopbarMenuOpen(false);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
-                      >
-                        <User className="h-3.5 w-3.5" />
-                        Account Settings
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsTopbarMenuOpen(false);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors"
-                      >
-                        <Settings className="h-3.5 w-3.5" />
-                        Preferences
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsTopbarMenuOpen(false);
-                          handleLogout();
-                        }}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-semibold text-destructive hover:bg-destructive/10 transition-colors"
-                      >
-                        <LogOut className="h-3.5 w-3.5" />
-                        Logout
-                      </button>
-                    </div>
-                  </div>
+                  <UserMenuPanel
+                    displayName={displayName}
+                    userEmail={userEmail}
+                    onLogout={handleLogout}
+                    className="absolute right-0 top-full mt-2 w-48"
+                  />
                 )}
               </div>
             </div>
