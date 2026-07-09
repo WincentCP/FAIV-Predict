@@ -13,7 +13,6 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
-      - LLM_API_KEY=${LLM_API_KEY}
       - PORT=8000
       - FRONTEND_URL=${FRONTEND_URL}
       # Shared secret enforced on all endpoints (required in production).

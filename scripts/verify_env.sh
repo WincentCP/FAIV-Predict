@@ -24,8 +24,8 @@ LLM_KEY="$(getvar "$FRONTEND_ENV" LLM_API_KEY)"
 DB_URL="$(getvar "$ML_ENV" DATABASE_URL)"
 SERVICE_KEY="$(getvar "$ML_ENV" SUPABASE_KEY)"
 
-LOGIN_EMAIL="${1:-wincentcoleusphan@gmail.com}"
-LOGIN_PASSWORD="${2:-skripsisuccess}"
+LOGIN_EMAIL="${1:-}"
+LOGIN_PASSWORD="${2:-}"
 
 echo "== 1. Supabase project reachability + anon key =="
 if [ -z "$SUPABASE_URL" ] || [ -z "$ANON_KEY" ]; then
@@ -41,14 +41,18 @@ else
   esac
 fi
 
-echo "== 2. Auth login with the development credentials =="
-resp=$(curl -s --max-time 15 -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
-  -H "apikey: $ANON_KEY" -H "Content-Type: application/json" \
-  -d "{\"email\":\"$LOGIN_EMAIL\",\"password\":\"$LOGIN_PASSWORD\"}")
-if echo "$resp" | grep -q '"access_token"'; then
-  pass "signInWithPassword succeeds for $LOGIN_EMAIL"
+echo "== 2. Auth login =="
+if [ -z "$LOGIN_EMAIL" ] || [ -z "$LOGIN_PASSWORD" ]; then
+  warn "no login email/password passed as arguments — skipping the auth login check"
 else
-  fail "login failed: $(echo "$resp" | head -c 200)"
+  resp=$(curl -s --max-time 15 -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+    -H "apikey: $ANON_KEY" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$LOGIN_EMAIL\",\"password\":\"$LOGIN_PASSWORD\"}")
+  if echo "$resp" | grep -q '"access_token"'; then
+    pass "signInWithPassword succeeds for $LOGIN_EMAIL"
+  else
+    fail "login failed: $(echo "$resp" | head -c 200)"
+  fi
 fi
 
 echo "== 3. DATABASE_URL (Postgres DSN for the ML service) =="

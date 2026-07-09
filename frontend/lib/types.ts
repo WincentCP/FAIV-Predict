@@ -5,8 +5,6 @@
 export type Tier = "High" | "Average" | "Low";
 export type ContentFormat = "Reels" | "Carousel" | "Single Image";
 
-export const CONTENT_FORMATS: ContentFormat[] = ["Reels", "Carousel", "Single Image"];
-
 /** Number of historical posts required before a brand graduates to a personal model. */
 export const SAMPLE_TARGET = 200;
 

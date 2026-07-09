@@ -12,9 +12,3 @@ export const NICHES = [
   "Travel",
   "Media",
 ] as const;
-
-export type Niche = (typeof NICHES)[number];
-
-export function isKnownNiche(value: string): boolean {
-  return (NICHES as readonly string[]).includes(value);
-}
