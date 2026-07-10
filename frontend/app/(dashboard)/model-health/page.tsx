@@ -10,7 +10,8 @@ import {
   AlertTriangle,
   X,
   FileText,
-  Activity
+  Activity,
+  Instagram
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -30,12 +31,35 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 350, damping: 25 } },
 };
 
+type IgConnection = {
+  brand: string;
+  niche: string;
+  last_synced: string | null;
+  status: "connected" | "error" | "unreachable";
+  username?: string;
+  followers?: number;
+  error?: string;
+};
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "never";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(diffMs / 86400000);
+  if (days > 1) return `${days} days ago`;
+  if (days === 1) return "yesterday";
+  const hours = Math.floor(diffMs / 3600000);
+  if (hours >= 1) return `${hours}h ago`;
+  return "just now";
+}
+
 export default function ModelHealthPage() {
   const [models, setModels] = useState<MlModel[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retrainingModel, setRetrainingModel] = useState<MlModel | null>(null);
   const [logsOutput, setLogsOutput] = useState<any[] | null>(null);
   const [isTraining, setIsTraining] = useState(false);
+  const [connections, setConnections] = useState<IgConnection[] | null>(null);
+  const [connectionsError, setConnectionsError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchModels() {
@@ -54,7 +78,24 @@ export default function ModelHealthPage() {
         setLoadError("The model registry could not be loaded.");
       }
     }
+    async function fetchConnections() {
+      try {
+        const res = await fetch("/api/instagram-health");
+        const data = await res.json().catch(() => null);
+        if (res.ok && Array.isArray(data?.connections)) {
+          setConnections(data.connections);
+          setConnectionsError(null);
+        } else {
+          setConnections(null);
+          setConnectionsError("Connection health is unavailable (ML service unreachable).");
+        }
+      } catch {
+        setConnections(null);
+        setConnectionsError("Connection health is unavailable (ML service unreachable).");
+      }
+    }
     fetchModels();
+    fetchConnections();
   }, []);
 
   const startRetrain = async (model: MlModel) => {
@@ -206,6 +247,70 @@ export default function ModelHealthPage() {
           value={models.length.toString()}
           tone="destructive"
         />
+      </motion.section>
+
+      {/* Instagram Data Connections */}
+      <motion.section variants={itemVariants} className="space-y-3">
+        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground/70">
+          <Instagram className="h-3.5 w-3.5" />
+          Data Connections
+        </div>
+        {connectionsError && (
+          <div className="rounded-xl border border-border bg-surface/70 p-4 text-xs text-muted-foreground">
+            {connectionsError}
+          </div>
+        )}
+        {connections && connections.length === 0 && (
+          <div className="rounded-xl border border-border bg-surface/70 p-4 text-xs text-muted-foreground">
+            No Instagram accounts are linked. Configure the Graph API credentials in the ML
+            service environment to enable the weekly sync.
+          </div>
+        )}
+        {connections && connections.length > 0 && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {connections.map((c) => {
+              const healthy = c.status === "connected";
+              return (
+                <div
+                  key={c.brand}
+                  className="rounded-2xl border border-border bg-surface/70 backdrop-blur-xl p-5 shadow-[var(--shadow-soft)] flex items-start justify-between gap-4"
+                >
+                  <div className="min-w-0 space-y-1.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm font-bold text-foreground truncate">{c.brand}</span>
+                      <span className="text-[10px] font-semibold text-muted-foreground shrink-0">{c.niche}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {healthy ? (
+                        <>@{c.username} · {c.followers?.toLocaleString()} followers</>
+                      ) : (
+                        <span className="text-destructive" title={c.error}>
+                          {c.status === "error"
+                            ? "Access token rejected — regenerate it in the Meta developer console."
+                            : "Instagram API unreachable."}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] font-semibold text-muted-foreground/70">
+                      Latest synced post: {timeAgo(c.last_synced)}
+                    </div>
+                  </div>
+                  {healthy ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-[10px] font-bold text-emerald-600 uppercase tracking-wide shrink-0">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 border border-destructive/25 px-2.5 py-1 text-[10px] font-bold text-destructive uppercase tracking-wide shrink-0">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      Broken
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </motion.section>
 
       {/* Table grid */}

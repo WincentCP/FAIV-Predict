@@ -425,23 +425,82 @@ def _fetch_ig_posts(ig_id: str, token: str, limit: int = 150) -> list:
                 break
     return posts[:limit]
 
+def _get_brands_config() -> list:
+    """Instagram-connected brands, configured via environment variables."""
+    config = []
+    bison_token = os.getenv("BISON_PAGE_ACCESS_TOKEN")
+    bison_ig = os.getenv("BISON_INSTAGRAM_ID")
+    if bison_token and bison_ig:
+        config.append(("Bison Gym", "Fitness", bison_ig, bison_token))
+
+    lasence_token = os.getenv("LASENCE_PAGE_ACCESS_TOKEN")
+    lasence_ig = os.getenv("LASENCE_INSTAGRAM_ID")
+    if lasence_token and lasence_ig:
+        config.append(("Lasence Bakeshop", "Bakery", lasence_ig, lasence_token))
+    return config
+
+
+@app.get("/instagram/health", dependencies=[Depends(verify_internal_token)])
+def instagram_health():
+    """
+    Connection health for every Instagram-linked brand: verifies each access
+    token against the Graph API live and reports when data was last synced.
+    Surfaces token expiry BEFORE the weekly pipeline silently starts failing.
+    """
+    connections = []
+    last_synced: Dict[str, Optional[str]] = {}
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        try:
+            conn = psycopg2.connect(db_url)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT b.name, MAX(p.created_at) FROM brands b
+                       LEFT JOIN posts p ON p.brand_id = b.id AND p.is_synced
+                       GROUP BY b.name"""
+                )
+                for name, ts in cur.fetchall():
+                    last_synced[name] = ts.isoformat() if ts else None
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Instagram health: last-sync lookup failed: {e}")
+
+    for name, niche, ig_id, token in _get_brands_config():
+        entry: Dict[str, Any] = {
+            "brand": name,
+            "niche": niche,
+            "last_synced": last_synced.get(name),
+        }
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                r = client.get(
+                    f"https://graph.facebook.com/v25.0/{ig_id}",
+                    params={"fields": "username,followers_count", "access_token": token},
+                )
+            if r.status_code == 200:
+                data = r.json()
+                entry.update({
+                    "status": "connected",
+                    "username": data.get("username"),
+                    "followers": data.get("followers_count"),
+                })
+            else:
+                detail = r.json().get("error", {}).get("message", r.text[:200])
+                entry.update({"status": "error", "error": detail})
+        except Exception as e:
+            entry.update({"status": "unreachable", "error": str(e)})
+        connections.append(entry)
+
+    return {"status": "success", "connections": connections}
+
+
 def _sync_and_retrain_pipeline():
     """Full pipeline: sync Instagram data then retrain models for each brand."""
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         return {"status": "error", "message": "DATABASE_URL not configured"}
 
-    brands_config = []
-    bison_token = os.getenv("BISON_PAGE_ACCESS_TOKEN")
-    bison_ig = os.getenv("BISON_INSTAGRAM_ID")
-    if bison_token and bison_ig:
-        brands_config.append(("Bison Gym", "Fitness", bison_ig, bison_token))
-
-    lasence_token = os.getenv("LASENCE_PAGE_ACCESS_TOKEN")
-    lasence_ig = os.getenv("LASENCE_INSTAGRAM_ID")
-    if lasence_token and lasence_ig:
-        brands_config.append(("Lasence Bakeshop", "Bakery", lasence_ig, lasence_token))
-
+    brands_config = _get_brands_config()
     results = []
 
     for name, niche, ig_id, token in brands_config:
