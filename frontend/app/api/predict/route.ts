@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -41,15 +40,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // Session Capturing: forward the Supabase JWT + service-to-service secret.
-    const cookieStore = await cookies();
-    const accessToken = cookieStore.get("sb-access-token")?.value;
+    // Service-to-service secret: the middleware already gates this route behind
+    // a Supabase session; the ML service trusts the shared internal token.
     const backendHeaders: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (accessToken) {
-      backendHeaders["Authorization"] = `Bearer ${accessToken}`;
-    }
     if (INTERNAL_API_TOKEN) {
       backendHeaders["X-Internal-Token"] = INTERNAL_API_TOKEN;
     }

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -35,14 +34,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const cookieStore = await cookies();
-    const accessToken = cookieStore.get("sb-access-token")?.value;
     const backendHeaders: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (accessToken) {
-      backendHeaders["Authorization"] = `Bearer ${accessToken}`;
-    }
     if (INTERNAL_API_TOKEN) {
       backendHeaders["X-Internal-Token"] = INTERNAL_API_TOKEN;
     }

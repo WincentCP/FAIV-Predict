@@ -22,8 +22,17 @@
       "parameters": {
         "method": "POST",
         "url": "http://127.0.0.1:8000/sync/now",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_API_TOKEN }}"
+            }
+          ]
+        },
         "options": {
-          "timeout": 120000
+          "timeout": 300000
         }
       },
       "id": "sync-retrain",
@@ -82,7 +91,7 @@
         "toEmail": "wincentcoleusphan@gmail.com",
         "subject": "=❌ FAIV Predict - Pipeline Gagal ({{ $now.format('dd/MM/yyyy HH:mm') }})",
         "emailType": "html",
-        "html": "=<div style=\"font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f1117; color: #e0e0e0; border-radius: 16px; overflow: hidden;\">\n  <div style=\"background: linear-gradient(135deg, #ef4444, #dc2626); padding: 32px 24px; text-align: center;\">\n    <h1 style=\"color: white; margin: 0; font-size: 24px;\">FAIV Predict</h1>\n    <p style=\"color: rgba(255,255,255,0.8); margin: 8px 0 0;\">Pipeline Error Alert</p>\n  </div>\n  <div style=\"padding: 24px;\">\n    <p>Halo Wincent,</p>\n    <p>Pipeline sync & retrain mengalami <strong>kegagalan</strong> pada {{ $now.format('dd MMMM yyyy, HH:mm') }} WIB.</p>\n    <h3 style=\"color: #ef4444;\">⚠️ Detail Error:</h3>\n    <pre style=\"background: #1a1d2e; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px;\">{{ JSON.stringify($json, null, 2) }}</pre>\n    <p>Silakan periksa token Instagram Graph API atau koneksi database Supabase Anda.</p>\n    <p style=\"color: #9ca3af; font-size: 13px;\">Email ini dikirim secara otomatis oleh sistem FAIV Predict via n8n.</p>\n  </div>\n  <div style=\"padding: 24px;\">",
+        "html": "=<div style=\"font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f1117; color: #e0e0e0; border-radius: 16px; overflow: hidden;\">\n  <div style=\"background: linear-gradient(135deg, #ef4444, #dc2626); padding: 32px 24px; text-align: center;\">\n    <h1 style=\"color: white; margin: 0; font-size: 24px;\">FAIV Predict</h1>\n    <p style=\"color: rgba(255,255,255,0.8); margin: 8px 0 0;\">Pipeline Error Alert</p>\n  </div>\n  <div style=\"padding: 24px;\">\n    <p>Halo Wincent,</p>\n    <p>Pipeline sync & retrain mengalami <strong>kegagalan</strong> pada {{ $now.format('dd MMMM yyyy, HH:mm') }} WIB.</p>\n    <h3 style=\"color: #ef4444;\">⚠️ Detail Error:</h3>\n    <pre style=\"background: #1a1d2e; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px;\">{{ JSON.stringify($json, null, 2) }}</pre>\n    <p>Silakan periksa token Instagram Graph API atau koneksi database Supabase Anda.</p>\n    <p style=\"color: #9ca3af; font-size: 13px;\">Email ini dikirim secara otomatis oleh sistem FAIV Predict via n8n.</p>\n  </div>\n</div>",
         "options": {}
       },
       "id": "email-failure",

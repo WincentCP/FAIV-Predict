@@ -16,7 +16,7 @@ import numpy as np
 import psycopg2
 import psycopg2.extras
 
-from app.preprocessing import DataPreprocessor
+from app.preprocessing import DataPreprocessor, HASHTAG_PATTERN, CTA_PATTERN
 from app.model_loader import ModelLoader, ModelUnavailableError
 from app.train_pipeline import ModelTrainer
 
@@ -401,12 +401,6 @@ def get_train_status(job_id: str):
 # ──────────────────────────────────────────────────────────────────
 import httpx
 
-HASHTAG_PATTERN_SYNC = re.compile(r"#\w+")
-CTA_PATTERN_SYNC = re.compile(
-    r"\b(beli|dapatkan|pesan|kunjungi|klik|daftar|hubungi|contact|order|yuk|promo|diskon|check|checkout|tonton|baca|share|follow)\b",
-    re.IGNORECASE
-)
-
 def _fetch_ig_profile(ig_id: str, token: str) -> int:
     url = f"https://graph.facebook.com/v25.0/{ig_id}"
     params = {"fields": "followers_count", "access_token": token}
@@ -494,8 +488,8 @@ def _sync_and_retrain_pipeline():
                             caption_length, hashtag_count, has_cta, created_at)
                         VALUES (%s,%s,%s,true,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                         (brand_id, caption, er, followers, is_single, is_carousel, is_reels,
-                         post_hour, len(caption), len(HASHTAG_PATTERN_SYNC.findall(caption)),
-                         bool(CTA_PATTERN_SYNC.search(caption)), timestamp)
+                         post_hour, len(caption), len(HASHTAG_PATTERN.findall(caption)),
+                         bool(CTA_PATTERN.search(caption)), timestamp)
                     )
             conn.commit()
             conn.close()
@@ -522,46 +516,6 @@ def _sync_and_retrain_pipeline():
         results.append(brand_result)
 
     return {"status": "success", "timestamp": datetime.datetime.utcnow().isoformat(), "results": results}
-
-
-@app.post("/sync", dependencies=[Depends(verify_internal_token)])
-def sync_instagram_data(background_tasks: BackgroundTasks):
-    """
-    n8n Orchestration Endpoint (Async).
-    Triggers: Sync Instagram Graph API data -> Auto-Retrain models.
-    """
-    job_id = str(uuid.uuid4())
-    db_url = os.getenv("DATABASE_URL")
-    if db_url:
-        try:
-            conn = psycopg2.connect(db_url)
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO model_retrain_jobs (id, status, created_at) VALUES (%s, 'pending', %s)",
-                    (job_id, datetime.datetime.utcnow())
-                )
-                conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.warning(f"Failed to register sync job: {e}")
-
-    def _bg_task():
-        try:
-            _sync_and_retrain_pipeline()
-            if db_url:
-                conn = psycopg2.connect(db_url)
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "UPDATE model_retrain_jobs SET status='success', completed_at=%s, finished_at=%s WHERE id=%s",
-                        (datetime.datetime.utcnow(), datetime.datetime.utcnow(), job_id)
-                    )
-                    conn.commit()
-                conn.close()
-        except Exception as e:
-            logger.error(f"[n8n Pipeline] Job {job_id} failed: {e}")
-
-    background_tasks.add_task(_bg_task)
-    return {"status": "pending", "job_id": job_id, "message": "Sync + retrain pipeline queued."}
 
 
 @app.post("/sync/now", dependencies=[Depends(verify_internal_token)])

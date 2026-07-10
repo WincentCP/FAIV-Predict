@@ -61,7 +61,7 @@
 
 ## 3. Machine Learning Pipeline
 
-1. **Data**: historical posts per brand synced from the Instagram Graph API (`POST /sync`), stored with engagement rate (ER) and extracted features.
+1. **Data**: historical posts per brand synced from the Instagram Graph API (`POST /sync/now`), stored with engagement rate (ER) and extracted features.
 2. **Features (7)**: `is_single_image`, `is_carousel`, `is_reels`, `post_hour`, `caption_length`, `hashtag_count`, `has_cta`.
 3. **Labeling**: ER percentiles (P33/P67) computed **on the training split only** (no leakage) map posts to `LOW / AVERAGE / HIGH`.
 4. **Model**: `RandomForestClassifier(n_estimators=100, max_depth=4, min_samples_leaf=5)` — regularized for small datasets. Training requires ≥ 30 real posts and at least two distinct classes; otherwise it refuses with a clear error.

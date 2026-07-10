@@ -107,6 +107,9 @@ class ModelLoader:
             if not storage_url or "supabase" in supabase_url:
                 bucket_name = "models"
                 download_url = f"{supabase_url.rstrip('/')}/storage/v1/object/authenticated/{bucket_name}/{storage_path.lstrip('/')}"
+                # New-format keys (sb_secret_...) are only valid in the apikey
+                # header; legacy JWT service keys also work as a Bearer token.
+                headers["apikey"] = supabase_key
                 headers["Authorization"] = f"Bearer {supabase_key}"
 
         logger.info(f"Downloading model from {download_url}...")

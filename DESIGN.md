@@ -32,7 +32,7 @@ graph TD
   - `POST /suggest`: deterministic Template Recommendation Engine — parameter adjustments derived from the request's features vs niche baselines.
   - `POST /train`: queues background retraining (`model_retrain_jobs` row + background task).
   - `GET /train/{job_id}`: real job status from the database (`503` when the database is unavailable).
-  - `POST /sync` / `POST /sync/now`: Instagram Graph API data sync + auto-retrain pipeline (n8n orchestration).
+  - `POST /sync/now`: Instagram Graph API data sync + auto-retrain pipeline (n8n orchestration).
 
 ### 2.3 Supabase Database & Storage Buckets
 - **PostgreSQL Database**: 5 core relational tables (`brands`, `posts`, `predictions`, `models`, `model_retrain_jobs`) — see `supabase_schema.sql`.

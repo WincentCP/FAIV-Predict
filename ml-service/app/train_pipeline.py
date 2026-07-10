@@ -139,8 +139,10 @@ class ModelTrainer:
         bucket_name = "models"
         upload_url = f"{supabase_url.rstrip('/')}/storage/v1/object/{bucket_name}/{storage_path.lstrip('/')}"
         
-        # Prepare headers for Supabase API
+        # New-format keys (sb_secret_...) are only valid in the apikey header;
+        # legacy JWT service keys also work as a Bearer token.
         headers = {
+            "apikey": supabase_key,
             "Authorization": f"Bearer {supabase_key}",
             "Content-Type": "application/octet-stream"
         }

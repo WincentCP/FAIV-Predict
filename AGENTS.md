@@ -5,7 +5,7 @@
 FAIV Predict is a two-service app plus a hosted Supabase backend:
 
 - **frontend** (`frontend/`) — Next.js 14 (App Router). Dev server on port **3000**. Also hosts BFF proxy routes under `frontend/app/api/*` that forward to the ML service and to Supabase.
-- **ml-service** (`ml-service/`) — FastAPI + scikit-learn inference engine. Port **8000**. Endpoints: `/predict`, `/suggest`, `/train`, `/train/{job_id}`, `/sync`, `/sync/now` (Swagger at `/docs`).
+- **ml-service** (`ml-service/`) — FastAPI + scikit-learn inference engine. Port **8000**. Endpoints: `/predict`, `/suggest`, `/train`, `/train/{job_id}`, `/sync/now` (Swagger at `/docs`).
 - **Supabase** (hosted Postgres + Auth + Storage) — required for auth and for brand/history/dashboard/model data. No local Supabase container ships with the repo.
 
 Standard commands live in `frontend/package.json` (`dev`/`build`/`lint`/`start`) and `ml-service/Dockerfile`. The startup update script installs deps and creates the local dev env files (see below).
