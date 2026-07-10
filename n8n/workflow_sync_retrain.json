@@ -20,6 +20,92 @@
     },
     {
       "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0,
+              "field": "days"
+            }
+          ]
+        }
+      },
+      "id": "daily-health-trigger",
+      "name": "Daily Token Health Check (07:00 WIB)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 560]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8000/instagram/health",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_API_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "check-token-health",
+      "name": "Check Instagram Token Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 560]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-any-broken",
+              "leftValue": "={{ $json.connections.some(c => c.status !== 'connected') }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-any-broken",
+      "name": "Ada Token Bermasalah?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [700, 560]
+    },
+    {
+      "parameters": {
+        "fromEmail": "faivpredict@gmail.com",
+        "toEmail": "wincentcoleusphan@gmail.com",
+        "subject": "=⚠️ FAIV Predict - Instagram Token Bermasalah ({{ $now.format('dd/MM/yyyy HH:mm') }})",
+        "emailType": "html",
+        "html": "=<div style=\"font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f1117; color: #e0e0e0; border-radius: 16px; overflow: hidden;\">\n  <div style=\"background: linear-gradient(135deg, #f59e0b, #d97706); padding: 32px 24px; text-align: center;\">\n    <h1 style=\"color: white; margin: 0; font-size: 24px;\">FAIV Predict</h1>\n    <p style=\"color: rgba(255,255,255,0.85); margin: 8px 0 0;\">Peringatan Koneksi Instagram</p>\n  </div>\n  <div style=\"padding: 24px;\">\n    <p>Halo Wincent,</p>\n    <p>Pemeriksaan harian mendeteksi <strong>masalah pada koneksi Instagram</strong>. Perbaiki sebelum pipeline mingguan hari Senin agar sinkronisasi tidak gagal.</p>\n    <table style=\"width: 100%; border-collapse: collapse; margin: 16px 0;\">\n      <tr style=\"background: #1a1d2e;\">\n        <th style=\"padding: 12px; text-align: left; border-bottom: 1px solid #2d3348;\">Brand</th>\n        <th style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">Status</th>\n      </tr>\n      {{ $json.connections.map(c => '<tr><td style=\"padding: 12px; border-bottom: 1px solid #2d3348;\">' + c.brand + '</td><td style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">' + (c.status === 'connected' ? '✅ Connected' : '❌ ' + (c.error || c.status)) + '</td></tr>').join('') }}\n    </table>\n    <p>Perbarui access token di Meta Developer Console, lalu ganti nilainya di environment ML service.</p>\n    <p style=\"color: #9ca3af; font-size: 13px;\">Email ini dikirim secara otomatis oleh sistem FAIV Predict via n8n.</p>\n  </div>\n</div>",
+        "options": {}
+      },
+      "id": "email-token-warning",
+      "name": "Email Peringatan Token",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [960, 560]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "http://127.0.0.1:8000/sync/now",
         "sendHeaders": true,
@@ -102,6 +188,40 @@
     }
   ],
   "connections": {
+    "Daily Token Health Check (07:00 WIB)": {
+      "main": [
+        [
+          {
+            "node": "Check Instagram Token Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Instagram Token Health": {
+      "main": [
+        [
+          {
+            "node": "Ada Token Bermasalah?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ada Token Bermasalah?": {
+      "main": [
+        [
+          {
+            "node": "Email Peringatan Token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
     "Weekly Schedule (Senin 06:00 WIB)": {
       "main": [
         [

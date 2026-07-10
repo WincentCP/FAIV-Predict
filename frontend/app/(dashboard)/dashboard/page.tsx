@@ -24,6 +24,8 @@ import {
   BarChart3,
   Users,
   ShieldCheck,
+  Building2,
+  ArrowRight,
 } from "lucide-react";
 import { motion, Variants } from "framer-motion";
 
@@ -83,6 +85,7 @@ const LOCAL_RECENT_PREDICTIONS: any[] = [];
 
 export default function DashboardPage() {
   const [brandsList, setBrandsList] = useState<Brand[]>([]);
+  const [isWorkspaceEmpty, setIsWorkspaceEmpty] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [accuracyTrend, setAccuracyTrend] = useState<{ day: string; accuracy: number }[]>([]);
   const [tierDistribution, setTierDistribution] = useState([
@@ -164,6 +167,7 @@ export default function DashboardPage() {
         if (res.ok) {
           const data = await res.json();
           setBrandsList(data || []);
+          setIsWorkspaceEmpty((data || []).length === 0);
         }
       } catch (err) {
         console.warn("Could not fetch brands on dashboard mount:", err);
@@ -196,6 +200,34 @@ export default function DashboardPage() {
       animate="show"
       className="px-5 py-6 md:px-10 md:py-8 space-y-6 max-w-7xl mx-auto"
     >
+      {/* First-run guidance: shown only when the workspace has no brands yet */}
+      {isWorkspaceEmpty && (
+        <motion.section
+          variants={itemVariants}
+          className="flex flex-col gap-4 rounded-2xl border border-primary/25 bg-primary/[0.04] p-5 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-start gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+              <Building2 className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-foreground">Set up your workspace</div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Register your first brand to unlock predictions. Everything else — models,
+                history, and this dashboard — builds on it.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/niches"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground transition-all hover:bg-primary/90 active:scale-[0.98]"
+          >
+            Register a brand
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </motion.section>
+      )}
+
       {/* HERO — fills viewport, no duplicate KPI strip */}
       <motion.section 
         variants={itemVariants}
