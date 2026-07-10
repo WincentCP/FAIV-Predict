@@ -198,8 +198,8 @@ def predict(req: PredictionRequest):
                     json_features["confidence"] = confidence
                     cur.execute(
                         """
-                        INSERT INTO predictions (brand_id, title, caption, features, pred_class, created_at, scheduled_date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO predictions (brand_id, title, caption, features, pred_class, created_at, scheduled_date, model_version)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (
@@ -209,7 +209,8 @@ def predict(req: PredictionRequest):
                             psycopg2.extras.Json(json_features),
                             predicted_class.upper(),
                             datetime.datetime.utcnow(),
-                            scheduled_date
+                            scheduled_date,
+                            metadata.get("version")
                         )
                     )
                     prediction_id = str(cur.fetchone()[0])

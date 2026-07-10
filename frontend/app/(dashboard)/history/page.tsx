@@ -6,12 +6,15 @@ import { useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
 import { type Tier, type ContentFormat } from "@/lib/types";
-import { Search, Filter, AlertTriangle } from "lucide-react";
+import { Search, Filter, AlertTriangle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type HistoryItem = {
   id: string;
   brand: string;
+  brand_id: string | null;
+  niche: string | null;
+  post_hour: number | null;
   account: string;
   format: ContentFormat;
   caption: string;
@@ -27,6 +30,7 @@ export default function HistoryPage() {
   const [q, setQ] = useState("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [reEvaluating, setReEvaluating] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchHistory() {
@@ -47,6 +51,37 @@ export default function HistoryPage() {
     }
     fetchHistory();
   }, []);
+
+  // Re-run an old prediction through the CURRENT model. The original row is
+  // kept untouched for auditability; the fresh result is saved as a new entry.
+  const reEvaluate = async (h: HistoryItem) => {
+    if (!h.brand_id || reEvaluating) return;
+    setReEvaluating(h.id);
+    try {
+      const res = await fetch("/api/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caption: h.caption,
+          format: h.format,
+          post_hour: h.post_hour ?? 19,
+          brand_id: h.brand_id,
+          niche: h.niche,
+        }),
+      });
+      if (res.ok) {
+        const refreshed = await fetch("/api/history");
+        if (refreshed.ok) {
+          const data = await refreshed.json();
+          setHistory(Array.isArray(data) ? data : []);
+        }
+      }
+    } catch {
+      // service unreachable — the row simply stays as-is
+    } finally {
+      setReEvaluating(null);
+    }
+  };
 
   const uniqueBrandsInHistory = useMemo(() => {
     const list = new Set(history.map((h) => h.brand));
@@ -156,6 +191,7 @@ export default function HistoryPage() {
                 <th className="px-6 py-5">Predicted</th>
                 <th className="px-6 py-5">Actual</th>
                 <th className="px-6 py-5">When</th>
+                <th className="px-6 py-5" />
               </tr>
             </thead>
             <tbody>
@@ -215,12 +251,26 @@ export default function HistoryPage() {
                   <td className="px-6 py-5 align-middle text-[11px] text-muted-foreground whitespace-nowrap">
                     {new Date(h.when).toLocaleString()}
                   </td>
+
+                  {/* Re-evaluate with the current model (original kept for audit) */}
+                  <td className="px-4 py-5 align-middle text-right">
+                    <button
+                      type="button"
+                      onClick={() => reEvaluate(h)}
+                      disabled={!h.brand_id || reEvaluating !== null}
+                      title="Score this draft again with the current model — the original prediction is kept; the fresh result is added as a new entry"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground transition-all hover:bg-surface-2 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RefreshCw className={reEvaluating === h.id ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
+                      Re-evaluate
+                    </button>
+                  </td>
                 </tr>
               ))}
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={8} className="px-6 py-12 text-center text-sm text-muted-foreground">
                     No predictions match these filters.
                   </td>
                 </tr>

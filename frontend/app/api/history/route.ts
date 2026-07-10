@@ -20,6 +20,7 @@ export async function GET() {
         actual_class,
         created_at,
         scheduled_date,
+        brand_id,
         brands (
           name,
           niche
@@ -45,6 +46,8 @@ export async function GET() {
         id: p.id,
         title: p.title || `${format} prediction`,
         brand: p.brands?.name || "Unknown Brand",
+        brand_id: p.brand_id,
+        niche: p.brands?.niche || null,
         account: brandHandle(p.brands?.name || "brand"),
         format,
         caption: p.caption || "",
