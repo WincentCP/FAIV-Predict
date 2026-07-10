@@ -74,3 +74,29 @@ CREATE INDEX IF NOT EXISTS idx_predictions_brand_id ON predictions(brand_id);
 CREATE INDEX IF NOT EXISTS idx_models_brand_id ON models(brand_id);
 CREATE INDEX IF NOT EXISTS idx_models_niche ON models(niche);
 CREATE INDEX IF NOT EXISTS idx_model_retrain_jobs_brand_id ON model_retrain_jobs(brand_id);
+
+-- Row-Level Security
+-- RLS is enabled on every table. The ML service connects as the table owner
+-- (DATABASE_URL) and is not affected. Browser/API access via supabase-js uses
+-- these policies: logged-in users share one workspace (read everything,
+-- register brands); anonymous visitors see nothing.
+ALTER TABLE brands ENABLE ROW LEVEL SECURITY;
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE predictions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE models ENABLE ROW LEVEL SECURITY;
+ALTER TABLE model_retrain_jobs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS authenticated_read ON brands;
+CREATE POLICY authenticated_read ON brands FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS authenticated_read ON posts;
+CREATE POLICY authenticated_read ON posts FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS authenticated_read ON predictions;
+CREATE POLICY authenticated_read ON predictions FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS authenticated_read ON models;
+CREATE POLICY authenticated_read ON models FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS authenticated_read ON model_retrain_jobs;
+CREATE POLICY authenticated_read ON model_retrain_jobs FOR SELECT TO authenticated USING (true);
+
+-- The only browser-side write: registering a brand from the Niches page.
+DROP POLICY IF EXISTS authenticated_insert_brands ON brands;
+CREATE POLICY authenticated_insert_brands ON brands FOR INSERT TO authenticated WITH CHECK (true);
