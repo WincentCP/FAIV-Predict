@@ -51,7 +51,7 @@ class ModelLoader:
                     # Look for active brand-specific model first
                     cur.execute(
                         """
-                        SELECT id, brand_id, niche, model_type, storage_path, storage_url, version, metrics 
+                        SELECT id, brand_id, niche, model_type, storage_path, storage_url, version, accuracy, metrics
                         FROM models 
                         WHERE brand_id = %s AND model_type = 'account'
                         ORDER BY created_at DESC LIMIT 1
@@ -66,7 +66,7 @@ class ModelLoader:
                     # Look for shared niche model
                     cur.execute(
                         """
-                        SELECT id, brand_id, niche, model_type, storage_path, storage_url, version, metrics 
+                        SELECT id, brand_id, niche, model_type, storage_path, storage_url, version, accuracy, metrics
                         FROM models 
                         WHERE niche = %s AND model_type = 'niche' AND brand_id IS NULL
                         ORDER BY created_at DESC LIMIT 1

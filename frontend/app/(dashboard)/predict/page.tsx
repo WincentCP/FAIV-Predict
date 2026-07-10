@@ -67,6 +67,8 @@ interface PredictionResult {
   probs: Array<{ tier: Tier; prob: number }>;
   featureImportances: Record<string, number> | null;
   isPersonalModel: boolean;
+  modelAccuracy: number | null;
+  savedId: string | null;
 }
 
 interface TreRecommendation {
@@ -245,6 +247,11 @@ export default function PredictPage() {
         ],
         featureImportances: data.feature_importances || null,
         isPersonalModel: Boolean(data.model_metadata?.is_personal_model_active),
+        modelAccuracy:
+          typeof data.model_metadata?.accuracy === "number"
+            ? Math.round(data.model_metadata.accuracy * 100)
+            : null,
+        savedId: data.prediction_id ?? null,
       });
       setPredictionSnapshot({
         caption,
@@ -680,6 +687,7 @@ export default function PredictPage() {
                               type="button"
                               onClick={enrichWithAI}
                               disabled={aiState === "loading" || isTyping || caption.trim() === ""}
+                              title={caption.trim() === "" ? "Write a caption first — the AI rewrites your draft, it doesn't start from scratch" : undefined}
                               className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground transition-all hover:bg-primary/95 disabled:opacity-50 active:scale-[0.98] shadow-sm shrink-0"
                             >
                               {aiState === "loading" ? (
@@ -816,12 +824,21 @@ export default function PredictPage() {
                     </div>
 
                     <div className="md:col-span-7 flex flex-col justify-center p-6 border border-border bg-surface/60 rounded-2xl backdrop-blur relative shadow-[var(--shadow-soft)] space-y-4">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <TierBadge tier={prediction.tier} />
                         <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-1 text-[9px] font-bold text-primary uppercase tracking-wide">
                           <Cpu className="h-2.5 w-2.5" />
                           {prediction.isPersonalModel ? "Personal model" : "Niche model"}
                         </span>
+                        {prediction.modelAccuracy !== null && (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-surface-2 border border-border px-2.5 py-1 text-[9px] font-bold text-muted-foreground uppercase tracking-wide"
+                            title="How often this model's tier predictions matched reality when validated on the newest 20% of this data's posts"
+                          >
+                            <Check className="h-2.5 w-2.5" />
+                            {prediction.modelAccuracy}% validated accuracy
+                          </span>
+                        )}
                       </div>
                       <h4 className="text-2xl font-black font-display leading-tight text-foreground">
                         Predicted tier:{" "}
@@ -830,11 +847,26 @@ export default function PredictPage() {
                         </span>
                       </h4>
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        The classifier assigns this draft {prediction.tier.toLowerCase()}-tier engagement
-                        potential with {prediction.confidence}% confidence, relative to this account&apos;s
-                        historical baseline. See <strong className="text-foreground">Diagnose</strong> for the
-                        drivers and <strong className="text-foreground">Optimize</strong> for adjustments.
+                        This draft is predicted to earn <strong className="text-foreground">
+                        {prediction.tier.toLowerCase()}-tier engagement</strong> (likes + comments relative
+                        to this brand&apos;s own posting history — not reach or sales). The model is{" "}
+                        {prediction.confidence}% confident. See{" "}
+                        <strong className="text-foreground">Diagnose</strong> for why, and{" "}
+                        <strong className="text-foreground">Optimize</strong> for what to change.
                       </p>
+                      <div className="space-y-1 pt-1 border-t border-border/40">
+                        {prediction.savedId && (
+                          <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                            <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                            Saved to History — revisit or reschedule it there anytime.
+                          </p>
+                        )}
+                        <p className="text-[10px] text-muted-foreground/80 flex items-center gap-1.5">
+                          <Clock className="h-3 w-3 shrink-0" />
+                          Models retrain weekly on fresh data — re-run predictions older than a week
+                          (or any edited draft) before publishing.
+                        </p>
+                      </div>
                     </div>
                   </div>
 
@@ -957,7 +989,7 @@ export default function PredictPage() {
 
                   <Panel
                     title="Recommendations"
-                    subtitle="Deterministic adjustments computed from your draft's features against niche baselines."
+                    subtitle="Rule-based adjustments from your draft vs this niche's baselines (not AI-generated). Impact levels are priorities, not guarantees — apply changes and re-analyze to see the real effect on the score."
                     actions={
                       treRecs && treRecs.some((r) => AUTO_APPLICABLE.has(r.parameter)) ? (
                         <button

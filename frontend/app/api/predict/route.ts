@@ -98,7 +98,7 @@ export async function POST(request: Request) {
       confidence: prediction.confidence,
       probabilities: prediction.probabilities,
       prediction_id: prediction.prediction_id ?? null,
-      model_metadata: prediction.model_metadata,
+      model_metadata: prediction.model_metadata ?? null,
       feature_importances: prediction.feature_importances,
     });
   } catch (error: any) {

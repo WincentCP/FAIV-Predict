@@ -243,6 +243,9 @@ def predict(req: PredictionRequest):
                 "model_id": metadata.get("id"),
                 "model_type": metadata.get("model_type"),
                 "version": metadata.get("version"),
+                # Validated accuracy from training (newest 20% of posts) so the
+                # UI can show how trustworthy this model has proven to be.
+                "accuracy": float(metadata["accuracy"]) if metadata.get("accuracy") is not None else None,
                 "is_personal_model_active": is_personal_model_active
             },
             "feature_importances": feature_importances
