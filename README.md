@@ -37,11 +37,13 @@
 ```
 
 * **Frontend**: Next.js 14 App Router, Tailwind CSS, TypeScript, framer-motion, Recharts.
-* **BFF proxy**: Next.js route handlers under `frontend/app/api/*` are the only surface the browser talks to. They attach the Supabase session JWT and the `INTERNAL_API_TOKEN` shared secret before forwarding to the private FastAPI service.
+* **BFF proxy**: Next.js route handlers under `frontend/app/api/*` are the only surface the browser talks to. The Supabase middleware gates them behind a login session; they attach the `INTERNAL_API_TOKEN` shared secret before forwarding to the private FastAPI service.
 * **Inference engine**: FastAPI hosting Random Forest classifiers per niche/brand. If no trained model exists it returns an honest `503` — there is no fabricated fallback model.
 * **Storage & Auth**: Supabase Postgres for brands/posts/predictions/model metadata; Supabase Storage for trained `.joblib` bundles; Supabase Auth for login sessions.
 * **Optional LLM**: Google Gemini powers the brand classifier (`/api/classify`) and caption refinement (`/api/refine-caption`). Both report themselves unavailable (`501`) when `LLM_API_KEY` is not configured.
-* **Automation**: an n8n workflow (`n8n/workflow_sync_retrain.json`) calls `POST /sync/now` weekly to pull Instagram Graph API data and retrain models.
+* **Automation**: one n8n workflow (`n8n/workflow_sync_retrain.json`) with two schedules — a **weekly** run (Mon 06:00 WIB) that calls `POST /sync/now` to pull Instagram Graph API data and retrain models, and a **daily** run (07:00 WIB) that calls `GET /instagram/health` and emails a warning if any access token is broken. Both runs email their outcome. n8n needs `INTERNAL_API_TOKEN` in its environment (the HTTP nodes send it as `X-Internal-Token`).
+* **Row-Level Security**: enabled on all tables with policies shipped in the schema — logged-in users share one workspace (read everything, register brands); anonymous keys read nothing; the ML service connects as the table owner and bypasses RLS.
+* **CI**: GitHub Actions (`.github/workflows/ci.yml`) runs frontend lint + type-check + production build and the ML service test suite on every push and PR.
 
 ### BFF API surface
 
@@ -56,6 +58,7 @@
 | `GET /api/dashboard` | Workspace KPI aggregates (503 on database failure) |
 | `GET /api/models` | Trained model registry |
 | `GET/POST /api/train` | Trigger retraining and poll job status |
+| `GET /api/instagram-health` | Live Instagram token validation + data freshness per linked brand |
 
 ---
 
@@ -92,7 +95,7 @@ Other pages:
 * **`/calendar`** — every prediction on its scheduled date. Drag to reschedule (persists), CSV batch import (each row is scored by the real model), CSV export.
 * **`/history`** — filterable prediction log.
 * **`/niches`** — brand registration with optional AI niche classification, real sample counts, and per-niche model status.
-* **`/model-health`** — trained model registry with validation accuracy and manual retrain trigger (job status polled from the real retrain queue).
+* **`/model-health`** — trained model registry with validation accuracy and manual retrain trigger (job status polled from the real retrain queue), plus per-brand **Instagram connection cards**: live token status, follower count, and how fresh the synced data is. An expired token shows up here (and in the daily n8n warning email) before the weekly pipeline would fail on it.
 
 ---
 
@@ -105,8 +108,10 @@ Other pages:
 Copy `.env.example` values into `frontend/.env.local` and `ml-service/.env` (see the file for details). Notes:
 
 * `DATABASE_URL` must be a Postgres DSN, **not** the project `https://` URL.
-* `SUPABASE_KEY` (ML service) should be the service-role key so model artifacts can be uploaded to Storage.
-* `INTERNAL_API_TOKEN` must match between the frontend and the ML service; it is required in production.
+* `SUPABASE_KEY` (ML service) should be a secret/service-role key so model artifacts can be uploaded to Storage.
+* `INTERNAL_API_TOKEN` must match between the frontend, the ML service, and n8n; it is required in production.
+* `BISON_*` / `LASENCE_*` (ML service, optional) link Instagram Business accounts for the sync pipeline; without them `/sync/now` returns empty results and the Model Health page shows no connections.
+* Login accounts are provisioned by an administrator (Supabase dashboard → Authentication → Users → *Add user* with auto-confirm; self-signup requires email confirmation).
 
 ### Run
 ```bash
@@ -130,4 +135,4 @@ cd frontend && npm run lint && npx tsc --noEmit
 
 ---
 
-*Last Updated: 2026-07-09*
+*Last Updated: 2026-07-10*
