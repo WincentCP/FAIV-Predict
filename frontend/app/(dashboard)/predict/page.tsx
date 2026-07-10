@@ -580,7 +580,7 @@ export default function PredictPage() {
                   <div className="grid gap-6 md:grid-cols-12">
                     {/* Left: account + post settings */}
                     <div className="md:col-span-5 space-y-6">
-                      <Panel title="Brand Account" subtitle="The model is selected per brand.">
+                      <Panel title="Brand Account">
                         <select
                           value={accountId ?? ""}
                           onChange={(e) => setAccountId(e.target.value || null)}
@@ -609,11 +609,11 @@ export default function PredictPage() {
                         )}
                       </Panel>
 
-                      <Panel title="Post Configuration" subtitle="Format and publication slot.">
+                      <Panel title="Post Configuration">
                         <div className="space-y-5">
                           <div>
                             <Label>Content Format</Label>
-                            <div className="grid grid-cols-1 gap-3 mt-1.5">
+                            <div className="grid grid-cols-3 gap-2 mt-1.5">
                               {FORMATS.map((f) => {
                                 const active = contentFormat === f.id;
                                 return (
@@ -621,32 +621,22 @@ export default function PredictPage() {
                                     key={f.id}
                                     type="button"
                                     onClick={() => setContentFormat(f.id)}
-                                    className={`group relative flex items-center gap-4 rounded-xl border p-3.5 text-left transition-all active:scale-[0.98] ${
+                                    title={f.hint}
+                                    className={`flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 transition-all active:scale-[0.98] ${
                                       active
-                                        ? "border-primary bg-gradient-to-r from-primary/10 to-primary-glow/5 text-primary shadow-[var(--shadow-glow-purple)]"
-                                        : "border-border bg-surface hover:border-border-strong hover:bg-surface-2/30"
+                                        ? "border-primary bg-primary/10 text-primary"
+                                        : "border-border bg-surface text-muted-foreground hover:border-border-strong hover:text-foreground"
                                     }`}
                                   >
-                                    <span
-                                      className={`grid h-7 w-7 place-items-center rounded-lg transition-all ${
-                                        active
-                                          ? "bg-primary text-primary-foreground"
-                                          : "bg-surface-2 text-muted-foreground group-hover:bg-surface-3"
-                                      }`}
-                                    >
-                                      <f.icon className="h-3.5 w-3.5" />
-                                    </span>
-                                    <div className="flex-1">
-                                      <div className="text-[11px] font-bold text-foreground">{f.label}</div>
-                                      <div className="text-[9px] text-muted-foreground/80">{f.hint}</div>
-                                    </div>
+                                    <f.icon className="h-4 w-4" />
+                                    <span className="text-[10px] font-bold">{f.label}</span>
                                   </button>
                                 );
                               })}
                             </div>
                           </div>
 
-                          <div className="space-y-4 pt-4 border-t border-border/40">
+                          <div className="grid grid-cols-2 gap-3 pt-4 border-t border-border/40">
                             <div>
                               <Label>Post Date</Label>
                               <div className="mt-1.5">
@@ -784,27 +774,6 @@ export default function PredictPage() {
                             </div>
 
                             <CaptionLimitWarning count={stats.charCount} />
-
-                            <div className="mt-4 grid gap-3 grid-cols-3">
-                              <MetricBox
-                                label="Length"
-                                value={`${stats.charCount}`}
-                                hint={stats.charCount >= 180 && stats.charCount <= 320 ? "Optimal" : "Baseline: 180–320"}
-                                status={stats.charCount >= 180 && stats.charCount <= 320 ? "success" : "warning"}
-                              />
-                              <MetricBox
-                                label="Hashtags"
-                                value={stats.hashtags.length.toString()}
-                                hint={stats.hashtags.length >= 3 && stats.hashtags.length <= 8 ? "Optimal" : "Baseline: 3–8"}
-                                status={stats.hashtags.length >= 3 && stats.hashtags.length <= 8 ? "success" : "warning"}
-                              />
-                              <MetricBox
-                                label="CTA"
-                                value={stats.hasCTA ? "Yes" : "No"}
-                                hint={stats.hasCTA ? `"${stats.ctaTerms[0]}"` : "Add a prompt"}
-                                status={stats.hasCTA ? "success" : "warning"}
-                              />
-                            </div>
                           </div>
 
                           {/* AI refinement trigger */}
@@ -1363,35 +1332,6 @@ function Label({ children }: { children: React.ReactNode }) {
   return (
     <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted-foreground/80 mb-1.5">
       {children}
-    </div>
-  );
-}
-
-function MetricBox({
-  label,
-  value,
-  hint,
-  status,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  status?: "success" | "warning" | "error";
-}) {
-  const statusColor =
-    status === "success"
-      ? "text-success bg-success/5 border-success/20"
-      : "text-warning bg-warning/5 border-warning/20";
-
-  return (
-    <div className="rounded-xl border border-border bg-surface-2/40 p-3.5 text-center flex flex-col justify-between">
-      <div className="font-mono text-[8.5px] uppercase tracking-wider text-muted-foreground/85">
-        {label}
-      </div>
-      <div className="mt-2 font-display text-lg font-black tabular-nums text-foreground tracking-tight">{value}</div>
-      <div className={cn("mt-2 rounded-lg border px-2 py-0.5 text-[8.5px] font-bold leading-normal truncate", statusColor)}>
-        {hint}
-      </div>
     </div>
   );
 }

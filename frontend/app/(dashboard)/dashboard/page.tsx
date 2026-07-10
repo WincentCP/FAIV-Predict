@@ -15,7 +15,6 @@ const DashboardChart = dynamic(() => import("@/components/DashboardChart"), {
 
 import {
   ArrowUpRight,
-  ArrowDownRight,
   CalendarRange,
   History,
   AlertTriangle,
@@ -36,8 +35,6 @@ const LOCAL_KPIS = [
     id: "predictions",
     label: "Total Predictions",
     value: "0",
-    delta: "0%",
-    trend: "up" as const,
     sub: "No predictions recorded",
     colorClass: "text-success bg-success/10 border-success/20",
     iconColor: "text-success",
@@ -48,8 +45,6 @@ const LOCAL_KPIS = [
     id: "accounts",
     label: "Active Accounts",
     value: "0",
-    delta: "Active",
-    trend: "up" as const,
     sub: "No brands connected",
     colorClass: "text-chart-3 bg-chart-3/10 border-chart-3/20",
     iconColor: "text-chart-3",
@@ -60,8 +55,6 @@ const LOCAL_KPIS = [
     id: "models",
     label: "Active Models",
     value: "0",
-    delta: "Offline",
-    trend: "up" as const,
     sub: "No models deployed",
     colorClass: "text-primary bg-primary/10 border-primary/20",
     iconColor: "text-primary",
@@ -72,8 +65,6 @@ const LOCAL_KPIS = [
     id: "confidence",
     label: "Average Confidence",
     value: "0%",
-    delta: "N/A",
-    trend: "up" as const,
     sub: "No metrics evaluated",
     colorClass: "text-warning bg-warning/10 border-warning/20",
     iconColor: "text-warning",
@@ -90,9 +81,9 @@ export default function DashboardPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [accuracyTrend, setAccuracyTrend] = useState<{ day: string; accuracy: number }[]>([]);
   const [tierDistribution, setTierDistribution] = useState([
-    { tier: "High" as const, count: 0, color: "var(--primary)" },
-    { tier: "Average" as const, count: 0, color: "var(--warning)" },
-    { tier: "Low" as const, count: 0, color: "color-mix(in oklab, var(--foreground) 35%, transparent)" },
+    { tier: "High" as const, count: 0, color: "hsl(var(--primary))" },
+    { tier: "Average" as const, count: 0, color: "hsl(var(--warning))" },
+    { tier: "Low" as const, count: 0, color: "hsl(var(--foreground) / 0.35)" },
   ]);
 
   const personalCount = useMemo(() => {
@@ -134,9 +125,9 @@ export default function DashboardPage() {
 
           if (data.highCount !== undefined) {
             setTierDistribution([
-              { tier: "High" as const, count: data.highCount, color: "var(--primary)" },
-              { tier: "Average" as const, count: data.avgCount, color: "var(--warning)" },
-              { tier: "Low" as const, count: data.lowCount, color: "color-mix(in oklab, var(--foreground) 35%, transparent)" },
+              { tier: "High" as const, count: data.highCount, color: "hsl(var(--primary))" },
+              { tier: "Average" as const, count: data.avgCount, color: "hsl(var(--warning))" },
+              { tier: "Low" as const, count: data.lowCount, color: "hsl(var(--foreground) / 0.35)" },
             ]);
           }
 
@@ -636,7 +627,7 @@ export default function DashboardPage() {
                       className="h-full rounded-full"
                       style={{
                         background: `linear-gradient(90deg, ${d.color}, color-mix(in oklab, ${d.color} 75%, transparent))`,
-                        boxShadow: `0 0 12px ${d.color}33`,
+                        boxShadow: `0 0 12px color-mix(in oklab, ${d.color} 25%, transparent)`,
                       }}
                     />
                   </div>

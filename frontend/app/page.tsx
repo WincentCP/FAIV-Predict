@@ -2,7 +2,6 @@
 
 import { ArrowRight, Lock, Mail } from "lucide-react";
 import { useState } from "react";
-import { Logo } from "@/components/AppShell";
 import { createClient } from "@/lib/supabase/client";
 
 // Pre-filled development/test credentials. They authenticate against the real
@@ -58,7 +57,6 @@ export default function Page() {
       <div className="relative w-full max-w-sm animate-[fade-in_0.4s_ease-out]">
         {/* Logo + brand */}
         <div className="mb-8 flex flex-col items-center gap-3">
-          <Logo size={44} />
           <div className="text-center">
             <div className="font-display text-xl font-semibold tracking-tight">
               FAIV<span className="text-primary"> Predict</span>

@@ -9,6 +9,7 @@ import {
   Sparkles,
   CalendarRange,
   History,
+  BarChart3,
   Building2,
   Cpu,
   Sun,
@@ -28,6 +29,7 @@ const NAV_GROUPS = [
       { to: "/predict", label: "Prediction", icon: Sparkles },
       { to: "/calendar", label: "Calendar", icon: CalendarRange },
       { to: "/history", label: "History", icon: History },
+      { to: "/insights", label: "Post Insights", icon: BarChart3 },
     ],
   },
   {
@@ -162,7 +164,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <X className="h-4 w-4" />
             </button>
             <div className="flex items-center gap-3 border-b border-border pb-4 mb-4">
-              <Logo />
               <div className="min-w-0 leading-tight">
                 <div className="font-display text-[14px] font-semibold tracking-tight">
                   FAIV<span className="text-primary"> Predict</span>
@@ -224,7 +225,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
           {/* Logo row — same height as topbar */}
           <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border px-4">
-            <Logo />
             <div className="min-w-0 leading-tight">
               <div className="font-display text-[14px] font-semibold tracking-tight">
                 FAIV<span className="text-primary"> Predict</span>
@@ -322,8 +322,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 <Menu className="h-5 w-5" />
               </button>
-              <div className="md:hidden">
-                <Logo />
+              <div className="md:hidden font-display text-sm font-semibold tracking-tight">
+                FAIV<span className="text-primary"> Predict</span>
               </div>
             </div>
 
@@ -365,28 +365,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <main key={pathname} className="flex-1 page-enter">{children}</main>
         </div>
       </div>
-    </div>
-  );
-}
-
-export function Logo({ size = 32 }: { size?: number }) {
-  return (
-    <div
-      className="relative grid shrink-0 place-items-center overflow-hidden rounded-lg bg-primary"
-      style={{
-        width: size,
-        height: size,
-      }}
-    >
-      <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 24 24" fill="none">
-        <path
-          d="M4 20V4h12M4 12h9M16 14l4 4-4 4M20 18H10"
-          stroke="white"
-          strokeWidth="2.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
     </div>
   );
 }

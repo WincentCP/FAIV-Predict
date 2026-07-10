@@ -516,6 +516,77 @@ def instagram_health():
     return {"status": "success", "connections": connections}
 
 
+@app.get("/instagram/posts", dependencies=[Depends(verify_internal_token)])
+def instagram_posts(brand: str, limit: int = 24):
+    """
+    Live post insights for a linked brand: media previews, engagement
+    metrics, and an ER tier graded against the brand's own synced history
+    (same percentile method as training labels). Media URLs are fetched
+    fresh on every call because Instagram CDN URLs expire.
+    """
+    config = {name: (niche, ig_id, token) for name, niche, ig_id, token in _get_brands_config()}
+    if brand not in config:
+        raise HTTPException(status_code=404, detail=f"No Instagram connection configured for '{brand}'.")
+    _, ig_id, token = config[brand]
+    try:
+        followers = _fetch_ig_profile(ig_id, token)
+        params = {
+            "fields": "caption,like_count,comments_count,media_type,media_url,thumbnail_url,permalink,timestamp",
+            "limit": min(max(limit, 1), 50),
+            "access_token": token,
+        }
+        with httpx.Client(timeout=30.0) as client:
+            r = client.get(f"https://graph.facebook.com/v25.0/{ig_id}/media", params=params)
+            r.raise_for_status()
+            media = r.json().get("data", [])
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Instagram API error: HTTP {e.response.status_code}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Instagram API unreachable: {e}")
+
+    p33 = p67 = None
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        try:
+            conn = psycopg2.connect(db_url)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT percentile_cont(0.33) WITHIN GROUP (ORDER BY p.er),
+                              percentile_cont(0.67) WITHIN GROUP (ORDER BY p.er)
+                       FROM posts p JOIN brands b ON p.brand_id = b.id
+                       WHERE b.name = %s""",
+                    (brand,),
+                )
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    p33, p67 = float(row[0]), float(row[1])
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Post insights: percentile lookup failed: {e}")
+
+    posts = []
+    for m in media:
+        likes = m.get("like_count", 0)
+        comments = m.get("comments_count", 0)
+        er = round(((likes + comments) / followers) * 100, 4) if followers else 0.0
+        tier = None
+        if p33 is not None:
+            tier = "Low" if er < p33 else ("Average" if er <= p67 else "High")
+        posts.append({
+            "caption": m.get("caption", ""),
+            "media_type": m.get("media_type"),
+            "media_url": m.get("media_url"),
+            "thumbnail_url": m.get("thumbnail_url"),
+            "permalink": m.get("permalink"),
+            "timestamp": m.get("timestamp"),
+            "likes": likes,
+            "comments": comments,
+            "er": er,
+            "tier": tier,
+        })
+    return {"status": "success", "brand": brand, "followers": followers, "posts": posts}
+
+
 def _sync_and_retrain_pipeline():
     """Full pipeline: sync Instagram data then retrain models for each brand."""
     db_url = os.getenv("DATABASE_URL")
