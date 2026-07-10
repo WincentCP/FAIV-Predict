@@ -67,11 +67,13 @@
 1. **Data**: historical posts per brand synced from the Instagram Graph API (`POST /sync/now`), stored with engagement rate (ER) and extracted features.
 2. **Features (7)**: `is_single_image`, `is_carousel`, `is_reels`, `post_hour`, `caption_length`, `hashtag_count`, `has_cta`.
 3. **Labeling**: ER percentiles (P33/P67) computed **on the training split only** (no leakage) map posts to `LOW / AVERAGE / HIGH`.
+   The train/test split is **chronological (80:20)** — the model trains on older posts and is validated on the newest, mirroring production use and avoiding look-ahead leakage on time-ordered data.
 4. **Model**: `RandomForestClassifier(n_estimators=100, max_depth=4, min_samples_leaf=5)` — regularized for small datasets. Training requires ≥ 30 real posts and at least two distinct classes; otherwise it refuses with a clear error.
 5. **Evaluation**: accuracy, weighted precision/recall/F1 on a held-out 20% split, stored in the `models.metrics` JSONB column.
 6. **Serving**: model bundles (`model + thresholds + feature order`) uploaded to Supabase Storage, registered in the `models` table, downloaded and memory-cached by the inference service.
 7. **Hierarchy**: prediction requests resolve a brand-specific (`account`) model first, falling back to the shared niche model. The response reports which one served the request (`is_personal_model_active`).
 8. **Explainability**: real MDI feature importances are returned with every prediction and drive the Diagnose step's chart and "Why this score" panel.
+9. **Outcome tracking**: each weekly sync matches published posts back to past predictions (normalized exact-caption match per brand), recording the realized engagement rate and tier (`actual_er` / `actual_class`, graded with the same percentile method as training labels). The History page shows Predicted vs Actual side by side; drafts edited before publishing stay honestly "Pending" rather than guessed.
 
 ---
 
@@ -110,7 +112,7 @@ Copy `.env.example` values into `frontend/.env.local` and `ml-service/.env` (see
 * `DATABASE_URL` must be a Postgres DSN, **not** the project `https://` URL.
 * `SUPABASE_KEY` (ML service) should be a secret/service-role key so model artifacts can be uploaded to Storage.
 * `INTERNAL_API_TOKEN` must match between the frontend, the ML service, and n8n; it is required in production.
-* `BISON_*` / `LASENCE_*` (ML service, optional) link Instagram Business accounts for the sync pipeline; without them `/sync/now` returns empty results and the Model Health page shows no connections.
+* `IG_BRANDS_JSON` (ML service, optional) links Instagram Business accounts for the sync pipeline — one JSON array, so onboarding a brand is a config change (legacy `BISON_*` / `LASENCE_*` variables still work). Without it `/sync/now` returns empty results and the Model Health page shows no connections.
 * Login accounts are provisioned by an administrator (Supabase dashboard → Authentication → Users → *Add user* with auto-confirm; self-signup requires email confirmation).
 
 ### Run

@@ -15,6 +15,7 @@ type HistoryItem = {
   format: ContentFormat;
   caption: string;
   tier: Tier;
+  actual: Tier | null;
   confidence: number | null;
   when: string;
 };
@@ -151,7 +152,8 @@ export default function HistoryPage() {
                 <th className="px-6 py-5">Format</th>
                 <th className="px-6 py-5">Caption preview</th>
                 <th className="px-6 py-5 text-center">Confidence</th>
-                <th className="px-6 py-5">Result</th>
+                <th className="px-6 py-5">Predicted</th>
+                <th className="px-6 py-5">Actual</th>
                 <th className="px-6 py-5">When</th>
               </tr>
             </thead>
@@ -188,9 +190,24 @@ export default function HistoryPage() {
                     </span>
                   </td>
 
-                  {/* Tier badge */}
+                  {/* Predicted tier */}
                   <td className="px-6 py-5 align-middle">
                     <TierBadge tier={h.tier} />
+                  </td>
+
+                  {/* Actual tier — recorded when the weekly sync matches the
+                      published post back to this prediction */}
+                  <td className="px-6 py-5 align-middle">
+                    {h.actual ? (
+                      <TierBadge tier={h.actual} />
+                    ) : (
+                      <span
+                        className="text-[10px] font-semibold text-muted-foreground/60"
+                        title="Recorded automatically once the published post is synced from Instagram"
+                      >
+                        Pending
+                      </span>
+                    )}
                   </td>
 
                   {/* Timestamp */}
@@ -202,7 +219,7 @@ export default function HistoryPage() {
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-muted-foreground">
                     No predictions match these filters.
                   </td>
                 </tr>

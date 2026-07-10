@@ -40,7 +40,9 @@ CREATE TABLE IF NOT EXISTS predictions (
     features JSONB NOT NULL, -- Menyimpan parameter input prediction
     pred_class VARCHAR(50) NOT NULL, -- 'HIGH', 'AVERAGE', 'LOW'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    scheduled_date DATE
+    scheduled_date DATE,
+    actual_er NUMERIC,               -- Real ER once the predicted post is synced back
+    actual_class VARCHAR(50)         -- Realized tier, graded with the same percentile method
 );
 
 -- 4. Tabel models

@@ -17,6 +17,7 @@ export async function GET() {
         caption,
         features,
         pred_class,
+        actual_class,
         created_at,
         scheduled_date,
         brands (
@@ -48,6 +49,9 @@ export async function GET() {
         format,
         caption: p.caption || "",
         tier: p.pred_class.charAt(0).toUpperCase() + p.pred_class.slice(1).toLowerCase(),
+        actual: p.actual_class
+          ? p.actual_class.charAt(0).toUpperCase() + p.actual_class.slice(1).toLowerCase()
+          : null,
         confidence,
         post_hour: postHour,
         when: p.created_at,

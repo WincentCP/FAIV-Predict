@@ -10,7 +10,6 @@ import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from typing import Optional, Tuple, Dict, Any
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
@@ -90,10 +89,11 @@ class ModelTrainer:
                     logger.info(f"Querying historical posts for brand ID: {brand_id}")
                     cur.execute(
                         """
-                        SELECT caption, er, is_single_image, is_carousel, is_reels, post_hour, 
-                               follower_count_at_post, caption_length, hashtag_count, has_cta 
-                        FROM posts 
+                        SELECT caption, er, is_single_image, is_carousel, is_reels, post_hour,
+                               follower_count_at_post, caption_length, hashtag_count, has_cta
+                        FROM posts
                         WHERE brand_id = %s
+                        ORDER BY created_at ASC
                         """,
                         (brand_id,)
                     )
@@ -107,6 +107,7 @@ class ModelTrainer:
                         FROM posts p
                         JOIN brands b ON p.brand_id = b.id
                         WHERE b.niche = %s
+                        ORDER BY p.created_at ASC
                         """,
                         (niche,)
                     )
@@ -193,10 +194,13 @@ class ModelTrainer:
         X_df, feature_cols = DataPreprocessor.process_dataframe(df)
         y_er = df["er"].astype(float)
         
-        # 3. Train-Test Split (80:20)
-        X_train, X_test, y_er_train, y_er_test = train_test_split(
-            X_df, y_er, test_size=0.2, random_state=42
-        )
+        # 3. Chronological Train-Test Split (80:20): posts arrive ordered by
+        # created_at, so the model trains on older posts and is validated on
+        # the newest ones — mirroring production use and avoiding the
+        # look-ahead leakage a random split allows on time-ordered data.
+        split_idx = int(len(X_df) * 0.8)
+        X_train, X_test = X_df.iloc[:split_idx], X_df.iloc[split_idx:]
+        y_er_train, y_er_test = y_er.iloc[:split_idx], y_er.iloc[split_idx:]
         
         # 4. Labeling via Percentiles (Calculated exclusively on training set to prevent leakage)
         p33, p67 = DataPreprocessor.calculate_percentile_bounds(y_er_train)
@@ -239,7 +243,8 @@ class ModelTrainer:
             "p33_threshold": p33,
             "p67_threshold": p67,
             "train_samples": len(X_train),
-            "test_samples": len(X_test)
+            "test_samples": len(X_test),
+            "split": "chronological_80_20"
         }
         logger.info(f"Model evaluation metrics: {metrics}")
         

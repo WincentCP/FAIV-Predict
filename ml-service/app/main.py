@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import uuid
 import datetime
 import logging
@@ -426,7 +427,25 @@ def _fetch_ig_posts(ig_id: str, token: str, limit: int = 150) -> list:
     return posts[:limit]
 
 def _get_brands_config() -> list:
-    """Instagram-connected brands, configured via environment variables."""
+    """
+    Instagram-connected brands, configured via environment variables.
+
+    Preferred: IG_BRANDS_JSON — a JSON array of objects with keys
+    "name", "niche", "instagram_id", "access_token" — so onboarding a new
+    brand is a config change, not a code change. The legacy per-brand
+    BISON_*/LASENCE_* variables remain supported as a fallback.
+    """
+    raw = os.getenv("IG_BRANDS_JSON")
+    if raw:
+        try:
+            entries = json.loads(raw)
+            return [
+                (e["name"], e["niche"], e["instagram_id"], e["access_token"])
+                for e in entries
+            ]
+        except (ValueError, KeyError, TypeError) as e:
+            logger.error(f"IG_BRANDS_JSON is malformed ({e}); falling back to legacy variables.")
+
     config = []
     bison_token = os.getenv("BISON_PAGE_ACCESS_TOKEN")
     bison_ig = os.getenv("BISON_INSTAGRAM_ID")
@@ -551,10 +570,43 @@ def _sync_and_retrain_pipeline():
                          bool(CTA_PATTERN.search(caption)), timestamp)
                     )
             conn.commit()
+
+            # Outcome tracking: link past predictions to the real posts they
+            # became (normalized exact-caption match within the brand) and
+            # grade the realized tier with the same percentile method used for
+            # training labels. Drafts edited before publishing stay unmatched
+            # rather than guessed.
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE predictions pr
+                       SET actual_er = p.er
+                       FROM posts p
+                       WHERE pr.brand_id = %s AND p.brand_id = pr.brand_id
+                         AND pr.actual_er IS NULL
+                         AND lower(regexp_replace(pr.caption, '\\s+', ' ', 'g')) =
+                             lower(regexp_replace(p.caption, '\\s+', ' ', 'g'))""",
+                    (brand_id,)
+                )
+                outcomes = cur.rowcount
+                cur.execute(
+                    """WITH bounds AS (
+                           SELECT percentile_cont(0.33) WITHIN GROUP (ORDER BY er) AS p33,
+                                  percentile_cont(0.67) WITHIN GROUP (ORDER BY er) AS p67
+                           FROM posts WHERE brand_id = %s
+                       )
+                       UPDATE predictions SET actual_class =
+                           CASE WHEN actual_er < (SELECT p33 FROM bounds) THEN 'LOW'
+                                WHEN actual_er <= (SELECT p67 FROM bounds) THEN 'AVERAGE'
+                                ELSE 'HIGH' END
+                       WHERE brand_id = %s AND actual_er IS NOT NULL""",
+                    (brand_id, brand_id)
+                )
+            conn.commit()
             conn.close()
             brand_result["sync"]["posts_synced"] = len(posts)
+            brand_result["sync"]["outcomes_recorded"] = outcomes
             brand_result["sync"]["status"] = "success"
-            logger.info(f"[n8n Sync] {name}: {len(posts)} posts synced.")
+            logger.info(f"[n8n Sync] {name}: {len(posts)} posts synced, {outcomes} prediction outcomes recorded.")
 
             try:
                 train_result = ModelTrainer.run_training(brand_id=brand_id)
