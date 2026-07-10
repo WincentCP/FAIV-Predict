@@ -63,6 +63,31 @@ export default function NichesPage() {
     }
   }, []);
 
+  // Per-brand Instagram connection status (matched by brand name).
+  // Failure to load leaves the map empty: the column then shows "Not linked"
+  // guidance rather than blocking the page.
+  const [igStatus, setIgStatus] = useState<
+    Record<string, { status: string; username?: string }>
+  >({});
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/instagram-health");
+        const data = await res.json().catch(() => null);
+        if (res.ok && Array.isArray(data?.connections)) {
+          const map: Record<string, { status: string; username?: string }> = {};
+          for (const c of data.connections) {
+            map[c.brand] = { status: c.status, username: c.username };
+          }
+          setIgStatus(map);
+        }
+      } catch {
+        // leave empty — column falls back to "Not linked"
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
@@ -276,12 +301,13 @@ export default function NichesPage() {
                 </span>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[830px] table-fixed">
+                <table className="w-full min-w-[980px] table-fixed">
                   <thead>
                     <tr className="border-b border-border bg-surface-2/30 text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
                       <th className="w-[160px] px-6 py-5 text-left">Username</th>
                       <th className="w-[180px] px-6 py-5 text-left">Display Name</th>
                       <th className="w-[150px] px-6 py-5 text-left">Linked Niche</th>
+                      <th className="w-[150px] px-6 py-5 text-left">Instagram</th>
                       <th className="w-[100px] px-6 py-5 text-right">Followers</th>
                       <th className="w-[240px] px-6 py-5 text-left">Model Maturity</th>
                     </tr>
@@ -289,7 +315,7 @@ export default function NichesPage() {
                   <tbody className="divide-y divide-border/50">
                     {brands.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-6 py-10 text-center text-xs text-muted-foreground">
+                        <td colSpan={6} className="px-6 py-10 text-center text-xs text-muted-foreground">
                           No brand accounts registered yet.
                         </td>
                       </tr>
@@ -343,6 +369,31 @@ export default function NichesPage() {
                             >
                               {b.niche}
                             </span>
+                          </td>
+                          <td className="px-6 py-5 align-middle">
+                            {igStatus[b.name]?.status === "connected" ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-[10px] font-bold text-emerald-600 max-w-full"
+                                title={`Live Graph API connection verified as @${igStatus[b.name]?.username}`}
+                              >
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                                <span className="truncate">@{igStatus[b.name]?.username}</span>
+                              </span>
+                            ) : igStatus[b.name] ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 border border-destructive/25 px-2.5 py-1 text-[10px] font-bold text-destructive"
+                                title="The access token was rejected — regenerate it in the Meta developer console and update the ML service environment"
+                              >
+                                Token error
+                              </span>
+                            ) : (
+                              <span
+                                className="text-[10px] font-semibold text-muted-foreground/70"
+                                title="Link this brand's Instagram Business account via IG_BRANDS_JSON in the ML service environment — predictions work without it, but weekly data sync and Post Insights need it"
+                              >
+                                Not linked
+                              </span>
+                            )}
                           </td>
                           <td className="px-6 py-5 align-middle text-right">
                             <span className="font-mono text-xs font-bold tabular-nums text-foreground truncate">
