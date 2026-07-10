@@ -17,6 +17,11 @@ services:
       - FRONTEND_URL=${FRONTEND_URL}
       # Shared secret enforced on all endpoints (required in production).
       - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN}
+      # Instagram Graph API credentials for the weekly sync + retrain pipeline.
+      - BISON_INSTAGRAM_ID=${BISON_INSTAGRAM_ID}
+      - BISON_PAGE_ACCESS_TOKEN=${BISON_PAGE_ACCESS_TOKEN}
+      - LASENCE_INSTAGRAM_ID=${LASENCE_INSTAGRAM_ID}
+      - LASENCE_PAGE_ACCESS_TOKEN=${LASENCE_PAGE_ACCESS_TOKEN}
     restart: always
 
   frontend:
