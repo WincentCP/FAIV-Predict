@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithRetry } from "@/lib/fetch-retry";
 import { useState, useEffect } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { type MlModel } from "@/lib/types";
@@ -64,7 +65,7 @@ export default function ModelHealthPage() {
   useEffect(() => {
     async function fetchModels() {
       try {
-        const res = await fetch("/api/models");
+        const res = await fetchWithRetry("/api/models");
         const data = await res.json().catch(() => null);
         if (res.ok && Array.isArray(data)) {
           setModels(data);
@@ -80,7 +81,7 @@ export default function ModelHealthPage() {
     }
     async function fetchConnections() {
       try {
-        const res = await fetch("/api/instagram-health");
+        const res = await fetchWithRetry("/api/instagram-health");
         const data = await res.json().catch(() => null);
         if (res.ok && Array.isArray(data?.connections)) {
           setConnections(data.connections);

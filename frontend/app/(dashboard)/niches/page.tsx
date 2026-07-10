@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithRetry } from "@/lib/fetch-retry";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -44,8 +45,8 @@ export default function NichesPage() {
   const loadData = useCallback(async () => {
     try {
       const [brandsRes, modelsRes] = await Promise.all([
-        fetch("/api/brands"),
-        fetch("/api/models"),
+        fetchWithRetry("/api/brands"),
+        fetchWithRetry("/api/models"),
       ]);
       if (brandsRes.ok) {
         setBrands((await brandsRes.json()) || []);

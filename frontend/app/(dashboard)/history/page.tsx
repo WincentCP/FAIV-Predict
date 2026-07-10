@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithRetry } from "@/lib/fetch-retry";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -30,7 +31,7 @@ export default function HistoryPage() {
   useEffect(() => {
     async function fetchHistory() {
       try {
-        const res = await fetch("/api/history");
+        const res = await fetchWithRetry("/api/history");
         if (res.ok) {
           const data = await res.json();
           setHistory(Array.isArray(data) ? data : []);

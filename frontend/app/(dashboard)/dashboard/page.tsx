@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithRetry } from "@/lib/fetch-retry";
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -104,7 +105,7 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchDashboard() {
       try {
-        const res = await fetch("/api/dashboard");
+        const res = await fetchWithRetry("/api/dashboard");
         if (!res.ok) {
           setLoadError("Workspace metrics could not be loaded right now.");
           return;
@@ -163,7 +164,7 @@ export default function DashboardPage() {
 
     async function fetchBrands() {
       try {
-        const res = await fetch("/api/brands");
+        const res = await fetchWithRetry("/api/brands");
         if (res.ok) {
           const data = await res.json();
           setBrandsList(data || []);

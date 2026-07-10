@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithRetry } from "@/lib/fetch-retry";
 import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -46,6 +47,50 @@ type ImportReport = {
   errors: string[];
 };
 
+type CsvField = "brand" | "format" | "caption" | "date" | "time";
+
+type CsvStage = {
+  fileName: string;
+  headers: string[];
+  rows: string[][];
+  mapping: Record<CsvField, number>; // header index per field, -1 = unmapped
+};
+
+const CSV_FIELDS: { field: CsvField; label: string; required: boolean }[] = [
+  { field: "brand", label: "Brand", required: true },
+  { field: "format", label: "Format", required: true },
+  { field: "caption", label: "Caption", required: true },
+  { field: "date", label: "Date", required: false },
+  { field: "time", label: "Time", required: false },
+];
+
+// Header synonyms so exports from different tools map automatically.
+const CSV_SYNONYMS: Record<CsvField, string[]> = {
+  brand: ["brand", "account", "client", "brand_name", "akun", "brand name"],
+  format: ["format", "type", "media", "media_type", "content_type", "content format"],
+  caption: ["caption", "text", "content", "copy", "teks", "description"],
+  date: ["date", "scheduled", "scheduled_date", "day", "tanggal", "publish date"],
+  time: ["time", "hour", "jam", "post_time", "posting time"],
+};
+
+function detectColumns(headers: string[]): Record<CsvField, number> {
+  // Compare with spacing/punctuation stripped so "Media Type", "media_type",
+  // and "MediaType" all match the same synonym.
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const normalized = headers.map(norm);
+  const mapping = { brand: -1, format: -1, caption: -1, date: -1, time: -1 } as Record<CsvField, number>;
+  for (const field of Object.keys(CSV_SYNONYMS) as CsvField[]) {
+    for (const syn of CSV_SYNONYMS[field]) {
+      const idx = normalized.indexOf(norm(syn));
+      if (idx !== -1) {
+        mapping[field] = idx;
+        break;
+      }
+    }
+  }
+  return mapping;
+}
+
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -73,7 +118,7 @@ export default function CalendarPage() {
 
   const loadPredictions = useCallback(async () => {
     try {
-      const res = await fetch("/api/history");
+      const res = await fetchWithRetry("/api/history");
       if (!res.ok) {
         throw new Error("Could not load predictions");
       }
@@ -102,7 +147,7 @@ export default function CalendarPage() {
 
     async function loadBrands() {
       try {
-        const res = await fetch("/api/brands");
+        const res = await fetchWithRetry("/api/brands");
         if (res.ok) {
           const data = await res.json();
           setBrandsList(data || []);
@@ -137,8 +182,10 @@ export default function CalendarPage() {
     [brandsList]
   );
 
-  // ------- CSV Import: parse rows, run real predictions, reload -------
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ------- CSV Import: upload → detect columns → review → confirm → score -------
+  const [csvStage, setCsvStage] = useState<CsvStage | null>(null);
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (fileRef.current) fileRef.current.value = "";
     if (!file) return;
@@ -148,77 +195,83 @@ export default function CalendarPage() {
     if (rows.length < 2) {
       setImportReport({
         total: 0, predicted: 0, skipped: 0, failed: 0, running: false,
-        errors: ["The file has no data rows. Expected a header row (brand, format, caption, date, time) plus content rows."],
+        errors: ["The file has no data rows. Expected a header row plus content rows."],
       });
       return;
     }
-
-    const header = rows[0].map((h) => h.trim().toLowerCase());
-    const col = (name: string) => header.indexOf(name);
-    const iBrand = col("brand");
-    const iFormat = col("format");
-    const iCaption = col("caption");
-    const iDate = col("date");
-    const iTime = col("time");
-
-    if (iBrand === -1 || iFormat === -1 || iCaption === -1) {
-      setImportReport({
-        total: 0, predicted: 0, skipped: 0, failed: 0, running: false,
-        errors: ["Missing required columns. The header must include: brand, format, caption (optional: date, time)."],
-      });
-      return;
-    }
-
+    const headers = rows[0].map((h) => h.trim());
     const dataRows = rows.slice(1).filter((r) => r.some((c) => c.trim() !== ""));
+    setImportReport(null);
+    setCsvStage({
+      fileName: file.name,
+      headers,
+      rows: dataRows,
+      mapping: detectColumns(headers),
+    });
+  };
+
+  // Row-level validation, recomputed live as the user adjusts column mapping.
+  const csvValidation = useMemo(() => {
+    if (!csvStage) return null;
+    const { rows, mapping } = csvStage;
+    const seenInFile = new Set<string>();
+    const alreadyPredicted = new Set(
+      entries.map((en) => `${en.brand}||${en.caption}`.toLowerCase())
+    );
+    const results = rows.map((row) => {
+      const get = (f: CsvField) => (mapping[f] >= 0 ? (row[mapping[f]] || "").trim() : "");
+      const brandValue = get("brand");
+      const formatValue = get("format");
+      const caption = get("caption");
+      const dateValue = get("date");
+      const timeValue = get("time");
+      const errors: string[] = [];
+      const warnings: string[] = [];
+      if (!caption) errors.push("empty caption");
+      if (!ALLOWED_FORMATS.includes(formatValue as ContentFormat))
+        errors.push(`format "${formatValue || "—"}" must be Reels, Carousel, or Single Image`);
+      const brand = resolveBrand(brandValue);
+      if (!brand) errors.push(`brand "${brandValue || "—"}" is not registered`);
+      if (dateValue && !/^\d{4}-\d{2}-\d{2}$/.test(dateValue))
+        warnings.push("date will be ignored (use YYYY-MM-DD)");
+      if (caption && caption.length < 10) warnings.push("suspiciously short caption");
+      const key = `${brandValue}||${caption}`.toLowerCase();
+      if (caption && seenInFile.has(key)) warnings.push("duplicate of another row in this file");
+      seenInFile.add(key);
+      if (caption && brand && alreadyPredicted.has(`${brand.name}||${caption}`.toLowerCase()))
+        warnings.push("this caption was already predicted before");
+      return { brand, formatValue, caption, dateValue, timeValue, errors, warnings };
+    });
+    return { results, importable: results.filter((r) => r.errors.length === 0) };
+  }, [csvStage, entries, resolveBrand]);
+
+  const runImport = async () => {
+    if (!csvStage || !csvValidation) return;
+    const valid = csvValidation.importable;
+    const skipped = csvValidation.results.length - valid.length;
+    setCsvStage(null);
+
     const report: ImportReport = {
-      total: dataRows.length, predicted: 0, skipped: 0, failed: 0, running: true, errors: [],
+      total: csvValidation.results.length, predicted: 0, skipped, failed: 0, running: true,
+      errors: skipped > 0 ? [`${skipped} row${skipped === 1 ? "" : "s"} excluded during review (validation errors).`] : [],
     };
     setImportReport({ ...report });
 
-    for (let idx = 0; idx < dataRows.length; idx++) {
-      const row = dataRows[idx];
-      const rowLabel = `Row ${idx + 2}`;
-      const formatValue = (row[iFormat] || "").trim();
-      const brandValue = (row[iBrand] || "").trim();
-      const caption = (row[iCaption] || "").trim();
-
-      // Unsupported formats (e.g. Story) are skipped before hitting the model.
-      if (!ALLOWED_FORMATS.includes(formatValue as ContentFormat)) {
-        report.skipped++;
-        report.errors.push(`${rowLabel}: unsupported format "${formatValue}" — skipped.`);
-        setImportReport({ ...report });
-        continue;
-      }
-      if (!caption) {
-        report.skipped++;
-        report.errors.push(`${rowLabel}: empty caption — skipped.`);
-        setImportReport({ ...report });
-        continue;
-      }
-      const brand = resolveBrand(brandValue);
-      if (!brand) {
-        report.failed++;
-        report.errors.push(`${rowLabel}: brand "${brandValue}" is not registered.`);
-        setImportReport({ ...report });
-        continue;
-      }
-
-      const dateValue = iDate !== -1 ? (row[iDate] || "").trim() : "";
-      const timeValue = iTime !== -1 ? (row[iTime] || "").trim() : "";
-      const hourMatch = timeValue.match(/^(\d{1,2})/);
+    for (let idx = 0; idx < valid.length; idx++) {
+      const r = valid[idx];
+      const hourMatch = r.timeValue.match(/^(\d{1,2})/);
       const postHour = hourMatch ? Math.min(23, Math.max(0, parseInt(hourMatch[1], 10))) : 19;
-
       try {
         const res = await fetch("/api/predict", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            caption,
-            format: formatValue,
+            caption: r.caption,
+            format: r.formatValue,
             post_hour: postHour,
-            brand_id: brand.id,
-            niche: brand.niche,
-            scheduled_date: /^\d{4}-\d{2}-\d{2}$/.test(dateValue) ? dateValue : undefined,
+            brand_id: r.brand!.id,
+            niche: r.brand!.niche,
+            scheduled_date: /^\d{4}-\d{2}-\d{2}$/.test(r.dateValue) ? r.dateValue : undefined,
           }),
         });
         const data = await res.json().catch(() => null);
@@ -226,11 +279,11 @@ export default function CalendarPage() {
           report.predicted++;
         } else {
           report.failed++;
-          report.errors.push(`${rowLabel}: ${data?.message || "prediction failed"}.`);
+          report.errors.push(`"${r.caption.slice(0, 40)}…": ${data?.message || "prediction failed"}.`);
         }
       } catch {
         report.failed++;
-        report.errors.push(`${rowLabel}: prediction service unreachable.`);
+        report.errors.push(`"${r.caption.slice(0, 40)}…": prediction service unreachable.`);
       }
       setImportReport({ ...report });
     }
@@ -351,7 +404,7 @@ export default function CalendarPage() {
               type="file"
               accept=".csv"
               className="hidden"
-              onChange={handleImport}
+              onChange={handleFileSelected}
             />
             <button
               type="button"
@@ -433,6 +486,159 @@ export default function CalendarPage() {
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {/* CSV review: nothing imports until the user confirms here */}
+      {csvStage && csvValidation && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-background/75 p-4 backdrop-blur-sm"
+          onClick={() => setCsvStage(null)}
+        >
+          <div
+            className="relative w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border border-border bg-surface/95 backdrop-blur-2xl shadow-[var(--shadow-elevated)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-border p-5 shrink-0">
+              <div>
+                <h3 className="font-display text-base font-bold text-foreground">Review CSV import</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {csvStage.fileName} · {csvStage.rows.length} data row{csvStage.rows.length === 1 ? "" : "s"} —
+                  nothing is imported until you confirm.
+                </p>
+              </div>
+              <button
+                onClick={() => setCsvStage(null)}
+                className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+                aria-label="Cancel import"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-5 overflow-y-auto flex-1">
+              {/* Column mapping */}
+              <div>
+                <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Column mapping <span className="font-normal normal-case">(auto-detected — adjust if wrong)</span>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-5">
+                  {CSV_FIELDS.map(({ field, label, required }) => (
+                    <label key={field} className="block">
+                      <span className="text-[10px] font-semibold text-foreground">
+                        {label}
+                        {required ? <span className="text-destructive"> *</span> : ""}
+                      </span>
+                      <select
+                        value={csvStage.mapping[field]}
+                        onChange={(e) =>
+                          setCsvStage({
+                            ...csvStage,
+                            mapping: { ...csvStage.mapping, [field]: Number(e.target.value) },
+                          })
+                        }
+                        className={cn(
+                          "mt-1 h-9 w-full rounded-lg border bg-surface px-2 text-xs outline-none",
+                          required && csvStage.mapping[field] === -1
+                            ? "border-destructive/50"
+                            : "border-border"
+                        )}
+                      >
+                        <option value={-1}>— not in file —</option>
+                        {csvStage.headers.map((h, i) => (
+                          <option key={i} value={i}>
+                            {h || `Column ${i + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Validation summary */}
+              <div
+                className={cn(
+                  "rounded-xl border p-3.5 text-xs font-semibold",
+                  csvValidation.importable.length === 0
+                    ? "border-destructive/30 bg-destructive/[0.04] text-destructive"
+                    : "border-accent-lime/30 bg-accent-lime/[0.04] text-foreground"
+                )}
+              >
+                {csvValidation.importable.length} of {csvValidation.results.length} rows will be imported
+                and scored.{" "}
+                {csvValidation.results.length - csvValidation.importable.length > 0 &&
+                  `${csvValidation.results.length - csvValidation.importable.length} will be skipped (errors below).`}{" "}
+                {csvValidation.results.some((r) => r.warnings.length > 0) &&
+                  "Rows with warnings still import."}
+              </div>
+
+              {/* Preview table (first 8 rows) */}
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full min-w-[640px] text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-surface-2/40 text-[9px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <th className="px-3 py-2.5 w-8">#</th>
+                      <th className="px-3 py-2.5">Brand</th>
+                      <th className="px-3 py-2.5">Format</th>
+                      <th className="px-3 py-2.5">Caption</th>
+                      <th className="px-3 py-2.5">Date</th>
+                      <th className="px-3 py-2.5">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {csvValidation.results.slice(0, 8).map((r, i) => (
+                      <tr key={i} className={r.errors.length > 0 ? "opacity-60" : undefined}>
+                        <td className="px-3 py-2.5 text-muted-foreground">{i + 1}</td>
+                        <td className="px-3 py-2.5 font-semibold">{r.brand?.name || "—"}</td>
+                        <td className="px-3 py-2.5">{r.formatValue || "—"}</td>
+                        <td className="px-3 py-2.5 max-w-[200px] truncate italic text-muted-foreground">
+                          {r.caption || "—"}
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-[10px]">{r.dateValue || "—"}</td>
+                        <td className="px-3 py-2.5">
+                          {r.errors.length > 0 ? (
+                            <span className="text-[10px] font-bold text-destructive" title={r.errors.join("; ")}>
+                              Skipped: {r.errors[0]}
+                            </span>
+                          ) : r.warnings.length > 0 ? (
+                            <span className="text-[10px] font-bold text-warning" title={r.warnings.join("; ")}>
+                              Warning: {r.warnings[0]}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-emerald-600">Ready</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {csvValidation.results.length > 8 && (
+                  <div className="border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
+                    …and {csvValidation.results.length - 8} more row
+                    {csvValidation.results.length - 8 === 1 ? "" : "s"} (validated the same way).
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-border bg-surface-2/40 p-4 shrink-0">
+              <button
+                onClick={() => setCsvStage(null)}
+                className="rounded-lg border border-border bg-surface px-4 py-2 text-xs font-semibold hover:bg-surface-2"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={runImport}
+                disabled={csvValidation.importable.length === 0}
+                className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95 disabled:opacity-50"
+              >
+                Import {csvValidation.importable.length} post
+                {csvValidation.importable.length === 1 ? "" : "s"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
