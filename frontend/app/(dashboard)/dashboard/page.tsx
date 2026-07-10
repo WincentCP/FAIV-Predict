@@ -290,7 +290,7 @@ export default function DashboardPage() {
               className="font-display text-[40px] font-extrabold leading-[1.05] tracking-tight md:text-[60px]"
             >
               Welcome back to{" "}
-              <span className="text-gradient-primary">FAIV Predict</span>.
+              <span className="text-primary">FAIV Predict</span>.
             </motion.h1>
             
             <motion.h2 

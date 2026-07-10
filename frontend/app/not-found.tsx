@@ -4,7 +4,7 @@ export default function NotFound() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <div className="font-display text-7xl font-semibold text-gradient-primary">404</div>
+        <div className="font-display text-7xl font-semibold text-primary">404</div>
         <h2 className="mt-4 font-display text-xl font-semibold text-foreground">Signal lost</h2>
         <p className="mt-2 text-sm text-muted-foreground">
           That page doesn&apos;t exist or has been moved.
