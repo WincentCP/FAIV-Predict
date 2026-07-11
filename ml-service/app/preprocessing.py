@@ -26,6 +26,7 @@ FEATURE_ORDER_V1 = [
     "post_hour", "caption_length", "hashtag_count", "has_cta",
 ]
 FEATURE_ORDER_V2 = FEATURE_ORDER_V1 + ["is_weekend", "has_question", "emoji_count"]
+NUMERIC_RANGE_FEATURES = ["post_hour", "caption_length", "hashtag_count", "emoji_count"]
 
 class DataPreprocessor:
     """
@@ -84,6 +85,34 @@ class DataPreprocessor:
         """
         order = feature_order or FEATURE_ORDER_V2
         return [float(features.get(name, 0.0)) for name in order]
+
+    @staticmethod
+    def compute_feature_ranges(X_train: pd.DataFrame) -> Dict[str, List[float]]:
+        """Return train-split min/max bounds for numeric OOD checks."""
+        return {
+            col: [float(X_train[col].min()), float(X_train[col].max())]
+            for col in NUMERIC_RANGE_FEATURES
+            if col in X_train.columns
+        }
+
+    @staticmethod
+    def out_of_range_features(
+        features: Dict[str, float], ranges: "Dict[str, List[float]] | None"
+    ) -> List[str]:
+        """List inputs outside the model's train-split bounds.
+
+        Older bundles do not contain ranges, so a missing or empty mapping is
+        intentionally treated as no OOD information rather than an error.
+        """
+        if not ranges:
+            return []
+        return [
+            name
+            for name, bounds in ranges.items()
+            if name in features
+            and len(bounds) == 2
+            and not (float(bounds[0]) <= float(features[name]) <= float(bounds[1]))
+        ]
 
     @classmethod
     def process_dataframe(cls, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
