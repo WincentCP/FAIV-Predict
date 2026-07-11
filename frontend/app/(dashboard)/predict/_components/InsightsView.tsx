@@ -2,9 +2,10 @@
 
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
+import { useState } from "react";
 import { format as formatDate } from "date-fns";
 import {
-  FileText, Calendar, Clock, Check, AlertTriangle, HelpCircle, Activity, RefreshCw, Ruler,
+  FileText, Calendar, Clock, Check, AlertTriangle, HelpCircle, Activity, RefreshCw, Ruler, ChevronDown,
 } from "lucide-react";
 import { TierBadge } from "@/components/TierBadge";
 import { ConfidenceMeter } from "@/components/ConfidenceMeter";
@@ -14,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { Panel } from "./Panel";
 import { TrustStrip } from "./TrustStrip";
 import { MeasuredImprovements, type Counterfactual } from "./MeasuredImprovements";
+import { FormatComparison } from "./FormatComparison";
 
 const FeatureAttributionChart = dynamic(() => import("@/components/FeatureAttributionChart"), {
   ssr: false,
@@ -29,6 +31,7 @@ export interface InsightsPrediction {
   modelVersion: string | null;
   trainedSamples: number | null;
   savedId: string | null;
+  outOfRange: string[];
   counterfactuals: Counterfactual[];
   counterfactualsNote: string | null;
 }
@@ -64,6 +67,10 @@ export function InsightsView(props: {
     whyReasons, mdiChartData, treRecs, treError, onRetryTre, featureLabels,
     autoApplicable, appliedRecs, onToggleRec, anyRecsApplied, onApply, onEditDraft,
   } = props;
+
+  const [showModelThinking, setShowModelThinking] = useState(false);
+  const formatProbes = prediction.counterfactuals.filter((probe) => probe.parameter === "format");
+  const improvementProbes = prediction.counterfactuals.filter((probe) => probe.parameter !== "format");
 
   const tierColorClass =
     prediction.tier === "High"
@@ -150,44 +157,17 @@ export function InsightsView(props: {
         trainedSamples={prediction.trainedSamples}
         modelAccuracy={prediction.modelAccuracy}
         modelVersion={prediction.modelVersion}
+        outOfRange={prediction.outOfRange}
       />
 
       <MeasuredImprovements
-        counterfactuals={prediction.counterfactuals}
+        counterfactuals={improvementProbes}
         note={prediction.counterfactualsNote}
         appliedRecs={appliedRecs}
         onToggle={onToggleRec}
       />
 
-      {/* Evidence */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <WhyThisScore
-          reasons={whyReasons}
-          context="Input signals vs niche baselines, weighted by the model's feature importance."
-        />
-        <Panel
-          title="Model Feature Importance"
-          subtitle="How much each input drives this model's decisions overall (Mean Decrease in Impurity)."
-        >
-          <div className="h-56 w-full mt-2">
-            {mdiChartData.length === 0 ? (
-              <div className="h-full w-full flex flex-col items-center justify-center border border-dashed border-border rounded-xl bg-surface-2/40 p-5 text-center">
-                <Activity className="h-7 w-7 text-muted-foreground/50 mb-2" />
-                <p className="text-xs font-semibold text-foreground">No model weights loaded</p>
-              </div>
-            ) : (
-              <FeatureAttributionChart data={mdiChartData} />
-            )}
-          </div>
-          <div className="mt-4 text-[10px] text-muted-foreground leading-relaxed flex items-start gap-1.5 p-3 rounded-lg bg-surface-2 border border-border/40">
-            <HelpCircle className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
-            <span>
-              Importance shows global influence magnitude — for measured effects on THIS draft, see
-              Measured Improvements above.
-            </span>
-          </div>
-        </Panel>
-      </div>
+      <FormatComparison formatProbes={formatProbes} currentFormat={contentFormat} />
 
       {/* Guideline recommendations (heuristic TRE) */}
       <Panel
@@ -278,6 +258,56 @@ export function InsightsView(props: {
           </div>
         )}
       </Panel>
+
+      <section className="overflow-hidden rounded-2xl border border-border bg-surface/50">
+        <button
+          type="button"
+          aria-expanded={showModelThinking}
+          onClick={() => setShowModelThinking((open) => !open)}
+          className="flex w-full items-center justify-between gap-4 p-5 text-left hover:bg-surface-2/40"
+        >
+          <div>
+            <h3 className="font-display text-sm font-bold text-foreground">How the model thinks</h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Inspect the strongest input signals and the model&apos;s global feature importance.
+            </p>
+          </div>
+          <ChevronDown
+            className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", showModelThinking && "rotate-180")}
+          />
+        </button>
+
+        {showModelThinking && (
+          <div className="grid gap-6 border-t border-border p-5 md:grid-cols-2">
+            <WhyThisScore
+              reasons={whyReasons}
+              context="Input signals vs niche baselines, weighted by the model's feature importance."
+            />
+            <Panel
+              title="Model Feature Importance"
+              subtitle="How much each input drives this model's decisions overall (Mean Decrease in Impurity)."
+            >
+              <div className="h-56 w-full mt-2">
+                {mdiChartData.length === 0 ? (
+                  <div className="h-full w-full flex flex-col items-center justify-center border border-dashed border-border rounded-xl bg-surface-2/40 p-5 text-center">
+                    <Activity className="h-7 w-7 text-muted-foreground/50 mb-2" />
+                    <p className="text-xs font-semibold text-foreground">No model weights loaded</p>
+                  </div>
+                ) : (
+                  <FeatureAttributionChart data={mdiChartData} />
+                )}
+              </div>
+              <div className="mt-4 text-[10px] text-muted-foreground leading-relaxed flex items-start gap-1.5 p-3 rounded-lg bg-surface-2 border border-border/40">
+                <HelpCircle className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
+                <span>
+                  Importance shows global influence magnitude. For measured effects on this draft, see
+                  Measured Improvements above.
+                </span>
+              </div>
+            </Panel>
+          </div>
+        )}
+      </section>
 
       {/* Sticky action bar */}
       <div className="sticky bottom-4 z-10 flex gap-3 rounded-2xl border border-border bg-surface/90 p-4 shadow-[var(--shadow-elevated)] backdrop-blur-xl">
