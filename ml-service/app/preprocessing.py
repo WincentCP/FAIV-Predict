@@ -12,6 +12,21 @@ CTA_PATTERN = re.compile(
 # Hashtag pattern
 HASHTAG_PATTERN = re.compile(r"#\w+")
 
+# Emoji ranges (BMP symbols + supplementary emoji planes)
+EMOJI_PATTERN = re.compile(
+    "[\U0001F300-\U0001F5FF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF"
+    "\U0001F900-\U0001F9FF\U0001FA70-\U0001FAFF☀-➿⬀-⯿️]"
+)
+
+# Feature vector orders. V1 is the 7-feature layout of pre-v2 model
+# artifacts; every trained bundle stores its own order in bundle["features"],
+# which always wins at inference time.
+FEATURE_ORDER_V1 = [
+    "is_single_image", "is_carousel", "is_reels",
+    "post_hour", "caption_length", "hashtag_count", "has_cta",
+]
+FEATURE_ORDER_V2 = FEATURE_ORDER_V1 + ["is_weekend", "has_question", "emoji_count"]
+
 class DataPreprocessor:
     """
     DataPreprocessor handles the feature extraction from social media posts
@@ -19,32 +34,32 @@ class DataPreprocessor:
     """
     
     @staticmethod
-    def extract_features(caption: str, format_type: str, post_hour: int) -> Dict[str, float]:
+    def extract_features(
+        caption: str, format_type: str, post_hour: int, is_weekend: "bool | None" = None
+    ) -> Dict[str, float]:
         """
-        Extracts 7 numerical/boolean features from a post's content and metadata.
-        
-        Features:
-        1. is_single_image (float: 0.0 or 1.0)
-        2. is_carousel (float: 0.0 or 1.0)
-        3. is_reels (float: 0.0 or 1.0)
-        4. post_hour (float: 0.0 - 23.0)
-        5. caption_length (float)
-        6. hashtag_count (float)
-        7. has_cta (float: 0.0 or 1.0)
+        Extracts 10 numerical/boolean features from a post's content and metadata.
+
+        Features (FEATURE_ORDER_V2):
+        1. is_single_image (0.0/1.0)     6. hashtag_count
+        2. is_carousel (0.0/1.0)         7. has_cta (0.0/1.0)
+        3. is_reels (0.0/1.0)            8. is_weekend (0.0/1.0; None -> 0.0)
+        4. post_hour (0.0 - 23.0)        9. has_question (0.0/1.0)
+        5. caption_length               10. emoji_count
         """
         caption = caption or ""
         format_type = format_type or ""
-        
+
         # 1. Format encoding (One-Hot)
         is_single_image = 1.0 if format_type == "Single Image" else 0.0
         is_carousel = 1.0 if format_type == "Carousel" else 0.0
         is_reels = 1.0 if format_type == "Reels" else 0.0
-        
+
         # 2. Text features
         caption_length = float(len(caption))
         hashtag_count = float(len(HASHTAG_PATTERN.findall(caption)))
         has_cta = 1.0 if bool(CTA_PATTERN.search(caption)) else 0.0
-        
+
         return {
             "is_single_image": is_single_image,
             "is_carousel": is_carousel,
@@ -52,24 +67,23 @@ class DataPreprocessor:
             "post_hour": float(post_hour),
             "caption_length": caption_length,
             "hashtag_count": hashtag_count,
-            "has_cta": has_cta
+            "has_cta": has_cta,
+            "is_weekend": 1.0 if is_weekend else 0.0,
+            "has_question": 1.0 if "?" in caption else 0.0,
+            "emoji_count": float(len(EMOJI_PATTERN.findall(caption))),
         }
 
     @staticmethod
-    def features_to_list(features: Dict[str, float]) -> List[float]:
+    def features_to_list(
+        features: Dict[str, float], feature_order: "List[str] | None" = None
+    ) -> List[float]:
         """
-        Converts the features dictionary into an ordered list matching model expectations:
-        [is_single_image, is_carousel, is_reels, post_hour, caption_length, hashtag_count, has_cta]
+        Converts the features dict into an ordered vector. The order MUST come
+        from the model bundle's own stored feature list so that old 7-feature
+        artifacts keep receiving exactly the layout they were trained on.
         """
-        return [
-            features["is_single_image"],
-            features["is_carousel"],
-            features["is_reels"],
-            features["post_hour"],
-            features["caption_length"],
-            features["hashtag_count"],
-            features["has_cta"]
-        ]
+        order = feature_order or FEATURE_ORDER_V2
+        return [float(features.get(name, 0.0)) for name in order]
 
     @classmethod
     def process_dataframe(cls, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
@@ -98,7 +112,17 @@ class DataPreprocessor:
                 has_cta = 1.0 if row["has_cta"] else 0.0
             else:
                 has_cta = 1.0 if bool(CTA_PATTERN.search(caption)) else 0.0
-                
+
+            # is_weekend from the post's timestamp, shifted UTC -> WIB (+7h)
+            # to match the post_hour semantics used by the sync pipeline.
+            is_weekend = 0.0
+            if "created_at" in row and not pd.isna(row["created_at"]):
+                try:
+                    ts = pd.to_datetime(row["created_at"], utc=True) + pd.Timedelta(hours=7)
+                    is_weekend = 1.0 if ts.dayofweek >= 5 else 0.0
+                except (ValueError, TypeError):
+                    is_weekend = 0.0
+
             processed_data.append({
                 "is_single_image": is_single_image,
                 "is_carousel": is_carousel,
@@ -106,13 +130,13 @@ class DataPreprocessor:
                 "post_hour": post_hour,
                 "caption_length": caption_length,
                 "hashtag_count": hashtag_count,
-                "has_cta": has_cta
+                "has_cta": has_cta,
+                "is_weekend": is_weekend,
+                "has_question": 1.0 if "?" in caption else 0.0,
+                "emoji_count": float(len(EMOJI_PATTERN.findall(caption))),
             })
-            
-        feature_cols = [
-            "is_single_image", "is_carousel", "is_reels", 
-            "post_hour", "caption_length", "hashtag_count", "has_cta"
-        ]
+
+        feature_cols = list(FEATURE_ORDER_V2)
         return pd.DataFrame(processed_data)[feature_cols], feature_cols
 
     @staticmethod

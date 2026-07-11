@@ -17,7 +17,7 @@ import numpy as np
 import psycopg2
 import psycopg2.extras
 
-from app.preprocessing import DataPreprocessor, HASHTAG_PATTERN, CTA_PATTERN
+from app.preprocessing import DataPreprocessor, HASHTAG_PATTERN, CTA_PATTERN, FEATURE_ORDER_V1
 from app.model_loader import ModelLoader, ModelUnavailableError
 from app.train_pipeline import ModelTrainer
 
@@ -143,6 +143,89 @@ def run_training_job_async(job_id: str, brand_id: Optional[str], niche: Optional
             conn.close()
 
 
+def build_counterfactuals(model, base_features, feature_order, classes, base_probs):
+    """
+    What-if analysis: re-scores single-feature variants of the SAME draft with
+    the SAME model and reports the measured change in P(High). This is
+    evidence, not heuristics — probes that show no gain are reported honestly.
+    Probes only touch features the loaded model was actually trained on.
+    """
+    class_list = [str(c).upper() for c in classes]
+    if "HIGH" not in class_list:
+        return [], (
+            "This model's training data produced no High tier, so what-if "
+            "analysis is unavailable for it."
+        )
+    hi = class_list.index("HIGH")
+    base_high = round(float(base_probs[hi]) * 100, 1)
+    base_class = str(classes[int(np.argmax(base_probs))]).upper()
+
+    probes = []  # (parameter, change, from_value, to_value, overrides)
+    hour = int(base_features.get("post_hour", 0))
+    for h in (9, 12, 17, 19, 21):
+        if h != hour:
+            probes.append(("post_hour", f"Move posting time to {h}:00", hour, h, {"post_hour": float(h)}))
+    if base_features.get("has_cta", 0.0) == 0.0:
+        probes.append(("has_cta", "Add a call-to-action", "No", "Yes", {"has_cta": 1.0}))
+    tags = base_features.get("hashtag_count", 0.0)
+    if tags < 3 or tags > 8:
+        probes.append(("hashtag_count", "Use 5 hashtags", int(tags), 5, {"hashtag_count": 5.0}))
+    length = base_features.get("caption_length", 0.0)
+    if length < 180 or length > 320:
+        probes.append(("caption_length", "Bring the caption to ~250 characters", int(length), 250, {"caption_length": 250.0}))
+    fmt_flags = {"Reels": "is_reels", "Carousel": "is_carousel", "Single Image": "is_single_image"}
+    current_fmt = next((n for n, f in fmt_flags.items() if base_features.get(f, 0.0) == 1.0), None)
+    for name, flag in fmt_flags.items():
+        if name != current_fmt:
+            probes.append(("format", f"Switch format to {name}", current_fmt or "—", name,
+                           {v: (1.0 if v == flag else 0.0) for v in fmt_flags.values()}))
+    if "is_weekend" in feature_order:
+        wk = base_features.get("is_weekend", 0.0)
+        probes.append((
+            "is_weekend",
+            "Schedule for a weekend" if wk == 0.0 else "Schedule for a weekday",
+            "Weekday" if wk == 0.0 else "Weekend",
+            "Weekend" if wk == 0.0 else "Weekday",
+            {"is_weekend": 0.0 if wk else 1.0},
+        ))
+
+    if not probes:
+        return [], None
+
+    matrix = []
+    for _, _, _, _, overrides in probes:
+        variant = dict(base_features)
+        variant.update(overrides)
+        matrix.append(DataPreprocessor.features_to_list(variant, feature_order))
+    prob_rows = model.predict_proba(matrix)
+
+    results = []
+    for (parameter, change, from_value, to_value, _), row in zip(probes, prob_rows):
+        to_high = round(float(row[hi]) * 100, 1)
+        new_class = str(classes[int(np.argmax(row))]).upper()
+        results.append({
+            "parameter": parameter,
+            "change": change,
+            "from_value": from_value,
+            "to_value": to_value,
+            "from_prob_high": base_high,
+            "to_prob_high": to_high,
+            "delta_high": round(to_high - base_high, 1),
+            "new_predicted_class": new_class.title(),
+            "tier_changed": new_class != base_class,
+        })
+
+    # Keep only the single best posting-hour probe — four near-identical hour
+    # rows would drown the rest of the list.
+    hour_rows = [r for r in results if r["parameter"] == "post_hour"]
+    if hour_rows:
+        best = max(hour_rows, key=lambda r: r["to_prob_high"])
+        results = [r for r in results if r["parameter"] != "post_hour"] + [best]
+
+    results.sort(key=lambda r: r["delta_high"], reverse=True)
+    return results, None
+
+
 @app.post("/predict", dependencies=[Depends(verify_internal_token)])
 def predict(req: PredictionRequest):
     """
@@ -158,14 +241,26 @@ def predict(req: PredictionRequest):
             # Honest "no trained model yet" signal instead of a fabricated result
             raise HTTPException(status_code=503, detail=str(mue))
 
-        # 2. Extract features using preprocessor
+        # 2. Extract features using preprocessor. The weekend flag comes from
+        # the scheduled date (falling back to today), matching training-side
+        # semantics.
+        sched_date = datetime.date.today()
+        if req.scheduled_date:
+            try:
+                sched_date = datetime.date.fromisoformat(req.scheduled_date)
+            except ValueError:
+                logger.warning(f"Invalid scheduled_date '{req.scheduled_date}', using today.")
         features = DataPreprocessor.extract_features(
-            caption=req.caption, 
-            format_type=req.format, 
-            post_hour=req.post_hour
+            caption=req.caption,
+            format_type=req.format,
+            post_hour=req.post_hour,
+            is_weekend=sched_date.weekday() >= 5,
         )
-        
-        feature_vector = [DataPreprocessor.features_to_list(features)]
+
+        # The bundle's own stored feature list drives vector order so old
+        # 7-feature artifacts keep working after the feature set grew.
+        feature_order = bundle.get("features") or FEATURE_ORDER_V1
+        feature_vector = [DataPreprocessor.features_to_list(features, feature_order)]
         
         # Extract components from bundle
         model = bundle["model"]
@@ -223,16 +318,31 @@ def predict(req: PredictionRequest):
         is_personal_model_active = metadata.get("model_type") == "account"
 
         # 5. Extract real MDI (Mean Decrease in Impurity) feature importances from RF model
-        feature_names = bundle.get("features", [
-            "is_single_image", "is_carousel", "is_reels",
-            "post_hour", "caption_length", "hashtag_count", "has_cta"
-        ])
+        feature_names = feature_order
         feature_importances = {}
         if hasattr(model, "feature_importances_"):
             mdi_raw = model.feature_importances_
             for i, name in enumerate(feature_names):
                 if i < len(mdi_raw):
                     feature_importances[name] = round(float(mdi_raw[i]), 4)
+
+        # 6. Counterfactual what-if analysis: measured P(High) deltas for
+        # single-feature changes to this exact draft.
+        counterfactuals, cf_note = build_counterfactuals(
+            model, features, feature_order, classes, probs_raw
+        )
+
+        # Training-set size for the trust display (metrics may be a JSON string
+        # depending on the driver).
+        trained_samples = None
+        metrics_blob = metadata.get("metrics")
+        if isinstance(metrics_blob, str):
+            try:
+                metrics_blob = json.loads(metrics_blob)
+            except ValueError:
+                metrics_blob = None
+        if isinstance(metrics_blob, dict):
+            trained_samples = metrics_blob.get("train_samples")
 
         return {
             "status": "success",
@@ -247,9 +357,13 @@ def predict(req: PredictionRequest):
                 # Validated accuracy from training (newest 20% of posts) so the
                 # UI can show how trustworthy this model has proven to be.
                 "accuracy": float(metadata["accuracy"]) if metadata.get("accuracy") is not None else None,
-                "is_personal_model_active": is_personal_model_active
+                "is_personal_model_active": is_personal_model_active,
+                "feature_names": feature_order,
+                "trained_samples": trained_samples
             },
-            "feature_importances": feature_importances
+            "feature_importances": feature_importances,
+            "counterfactuals": counterfactuals,
+            "counterfactuals_note": cf_note
         }
     except HTTPException:
         raise

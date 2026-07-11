@@ -13,7 +13,7 @@
 
 * **Real-time predictive classifier** — hierarchical Random Forest models (shared **niche model** → dedicated **personal model** once a brand accumulates 200 historical posts).
 * **Calibration workspace** — test format, posting time, caption length, hashtag density, and CTA presence to see what shapes the score.
-* **Explainability** — Mean Decrease in Impurity (MDI) feature-importance charts straight from the trained model, plus deterministic Template Recommendation Engine (TRE) suggestions.
+* **Explainability** — global MDI feature-importance charts *and* per-draft counterfactual "what-if" analysis measured by the real model, distinguished from heuristic Template Recommendation Engine (TRE) guidance.
 
 ### What it is NOT
 * 🚫 Not a generative AI copywriter (AI caption refinement is an optional, clearly-labeled Gemini helper).
@@ -65,31 +65,28 @@
 ## 3. Machine Learning Pipeline
 
 1. **Data**: historical posts per brand synced from the Instagram Graph API (`POST /sync/now`), stored with engagement rate (ER) and extracted features.
-2. **Features (7)**: `is_single_image`, `is_carousel`, `is_reels`, `post_hour`, `caption_length`, `hashtag_count`, `has_cta`.
+2. **Features (10)**: `is_single_image`, `is_carousel`, `is_reels`, `post_hour`, `caption_length`, `hashtag_count`, `has_cta`, `is_weekend`, `has_question`, `emoji_count` — all derived from real stored posts. The model bundle stores its own feature order, so older 7-feature artifacts keep serving correctly after the feature set grows.
 3. **Labeling**: ER percentiles (P33/P67) computed **on the training split only** (no leakage) map posts to `LOW / AVERAGE / HIGH`.
    The train/test split is **chronological (80:20)** — the model trains on older posts and is validated on the newest, mirroring production use and avoiding look-ahead leakage on time-ordered data.
 4. **Model**: `RandomForestClassifier(n_estimators=100, max_depth=4, min_samples_leaf=5)` — regularized for small datasets. Training requires ≥ 30 real posts and at least two distinct classes; otherwise it refuses with a clear error.
 5. **Evaluation**: accuracy, weighted precision/recall/F1 on a held-out 20% split, stored in the `models.metrics` JSONB column.
 6. **Serving**: model bundles (`model + thresholds + feature order`) uploaded to Supabase Storage, registered in the `models` table, downloaded and memory-cached by the inference service.
 7. **Hierarchy**: prediction requests resolve a brand-specific (`account`) model first, falling back to the shared niche model. The response reports which one served the request (`is_personal_model_active`).
-8. **Explainability**: real MDI feature importances are returned with every prediction and drive the Diagnose step's chart and "Why this score" panel.
+8. **Explainability**: two complementary layers. **Global** — real MDI feature importances returned with every prediction drive the importance chart and "Why this score" signals. **Local (counterfactual / what-if)** — after predicting, the model re-scores ~6–8 single-feature variants of the *same* draft in one batched `predict_proba` call and returns the measured change in P(High) for each (e.g. "Switch format to Reels: 7% → 58%"). These are evidence, not heuristics; changes with no measured gain are reported honestly, and a model whose classes lack a High tier returns an explicit "unavailable" note rather than fabricated numbers.
 9. **Outcome tracking**: each weekly sync matches published posts back to past predictions (normalized exact-caption match per brand), recording the realized engagement rate and tier (`actual_er` / `actual_class`, graded with the same percentile method as training labels). The History page shows Predicted vs Actual side by side; drafts edited before publishing stay honestly "Pending" rather than guessed.
 
 ---
 
 ## 4. Product Flow
 
-The core flow lives on **`/predict`** as four connected steps with a persistent stepper ([FlowStepper.tsx](./frontend/components/FlowStepper.tsx)):
+The core flow lives on **`/predict`** as two focused views:
 
 ```
-Predict (compose) → Result (tier + confidence + probabilities)
-                  → Diagnose (MDI + signal review) → Optimize (TRE) → re-analyze
+Compose (draft the post) → Insights (everything the model has to say, one screen)
 ```
 
-* **Predict** — pick the brand, format (`Reels` / `Carousel` / `Single Image`), schedule, and caption. Live caption intelligence (length, hashtags, CTA detection) updates as you type.
-* **Result** — tier badge, confidence dial, and the full class-probability distribution.
-* **Diagnose** — the model's MDI feature importances plus a signal review of your inputs against niche baselines.
-* **Optimize** — deterministic TRE recommendations from the ML service; actionable ones can be staged and applied for one-click re-analysis.
+* **Compose** — one column: a compact setup strip (brand + format + schedule), the caption as the hero input with live signals (length, hashtags, CTA, question, emoji), and an optional collapsed **AI Assistant** (Gemini concept analysis + caption refinement — clearly labelled as *not* affecting the score).
+* **Insights** — a single scrollable screen: the verdict (tier, confidence dial, class probabilities), a **Trust strip** stating exactly what the score is based on (personal vs niche model, training-set size, validated accuracy, model version), **Measured Improvements** (counterfactual what-if results ranked by measured effect), evidence (MDI chart + "Why this score"), and **Guideline Recommendations** (heuristic TRE, badged "Guideline" to distinguish them from measured evidence). Actionable changes stage for one-click Apply & Re-Analyze — the posting-hour change uses the *measured* best hour from the what-if analysis.
 
 Other pages:
 
@@ -137,4 +134,4 @@ cd frontend && npm run lint && npx tsc --noEmit
 
 ---
 
-*Last Updated: 2026-07-10*
+*Last Updated: 2026-07-11*

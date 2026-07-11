@@ -90,7 +90,7 @@ class ModelTrainer:
                     cur.execute(
                         """
                         SELECT caption, er, is_single_image, is_carousel, is_reels, post_hour,
-                               follower_count_at_post, caption_length, hashtag_count, has_cta
+                               follower_count_at_post, caption_length, hashtag_count, has_cta, created_at
                         FROM posts
                         WHERE brand_id = %s
                         ORDER BY created_at ASC
@@ -102,8 +102,8 @@ class ModelTrainer:
                     logger.info(f"Querying historical posts for niche: {niche}")
                     cur.execute(
                         """
-                        SELECT p.caption, p.er, p.is_single_image, p.is_carousel, p.is_reels, p.post_hour, 
-                               p.follower_count_at_post, p.caption_length, p.hashtag_count, p.has_cta 
+                        SELECT p.caption, p.er, p.is_single_image, p.is_carousel, p.is_reels, p.post_hour,
+                               p.follower_count_at_post, p.caption_length, p.hashtag_count, p.has_cta, p.created_at
                         FROM posts p
                         JOIN brands b ON p.brand_id = b.id
                         WHERE b.niche = %s

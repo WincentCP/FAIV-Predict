@@ -1,0 +1,219 @@
+"use client";
+
+import { motion } from "framer-motion";
+import { Film, LayoutGrid, Image as ImageIcon, Activity, AlertTriangle, RefreshCw, Sparkles } from "lucide-react";
+import { DatePicker, TimePicker } from "@/components/DateTimePicker";
+import { ModelMaturity } from "@/components/ModelMaturity";
+import {
+  analyzeCaption,
+  CaptionMeter,
+  CaptionSignals,
+  CaptionLimitWarning,
+  CAPTION_MAX,
+} from "@/components/CaptionIntel";
+import { type ContentFormat, type Brand } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { Panel, Label } from "./Panel";
+import { AiToolsAccordion } from "./AiToolsAccordion";
+
+const FORMATS: { id: ContentFormat; icon: typeof Film }[] = [
+  { id: "Reels", icon: Film },
+  { id: "Carousel", icon: LayoutGrid },
+  { id: "Single Image", icon: ImageIcon },
+];
+
+export function ComposeView(props: {
+  brandsList: Brand[];
+  brandsError: string | null;
+  accountId: string | null;
+  setAccountId: (id: string | null) => void;
+  account: Brand | null;
+  contentFormat: ContentFormat;
+  setContentFormat: (f: ContentFormat) => void;
+  scheduledAt: Date;
+  setScheduledAt: (d: Date) => void;
+  caption: string;
+  setCaption: (c: string) => void;
+  visualConcept: string;
+  setVisualConcept: (v: string) => void;
+  predictError: string | null;
+  optimizationsApplied: boolean;
+  isFormValid: boolean;
+  isPredictionStale: boolean;
+  submitting: boolean;
+  tooLong: boolean;
+  onAnalyze: () => void;
+}) {
+  const {
+    brandsList, brandsError, accountId, setAccountId, account,
+    contentFormat, setContentFormat, scheduledAt, setScheduledAt,
+    caption, setCaption, visualConcept, setVisualConcept,
+    predictError, optimizationsApplied, isFormValid, isPredictionStale,
+    submitting, tooLong, onAnalyze,
+  } = props;
+  const stats = analyzeCaption(caption);
+
+  return (
+    <motion.div
+      key="view-compose"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -12 }}
+      transition={{ type: "spring", stiffness: 350, damping: 28 }}
+      className="mx-auto max-w-3xl space-y-5"
+    >
+      {predictError && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 flex items-start gap-3">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="text-xs font-bold text-destructive">Prediction failed</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">{predictError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onAnalyze}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold hover:bg-surface-2 shrink-0"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Retry
+          </button>
+        </div>
+      )}
+
+      {optimizationsApplied && (
+        <div className="rounded-xl border border-primary/20 bg-primary/[0.02] p-4 flex items-center gap-3">
+          <Sparkles className="h-4 w-4 text-primary shrink-0" />
+          <div className="text-xs text-foreground font-semibold">
+            Optimizations applied — run <span className="text-primary">Analyze Post</span> to re-score.
+          </div>
+        </div>
+      )}
+
+      {/* Config strip: everything the model needs besides the caption */}
+      <Panel title="Post Setup">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label>Brand</Label>
+            <select
+              value={accountId ?? ""}
+              onChange={(e) => setAccountId(e.target.value || null)}
+              disabled={brandsList.length === 0}
+              className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs font-semibold outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary/20 disabled:opacity-60"
+            >
+              {brandsList.length === 0 ? (
+                <option value="">No brand accounts available</option>
+              ) : (
+                brandsList.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} · {b.niche}
+                  </option>
+                ))
+              )}
+            </select>
+            {brandsList.length === 0 ? (
+              <p className="mt-2 text-xs text-destructive font-semibold">
+                {brandsError || "No brand accounts yet. Register one under Niche Management."}
+              </p>
+            ) : (
+              account && (
+                <div className="mt-2">
+                  <ModelMaturity samples={account.samples ?? 0} variant="compact" />
+                </div>
+              )
+            )}
+          </div>
+
+          <div>
+            <Label>Format</Label>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1">
+              {FORMATS.map((f) => {
+                const active = contentFormat === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setContentFormat(f.id)}
+                    aria-pressed={active}
+                    className={cn(
+                      "flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-[10px] font-bold transition-all",
+                      active
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <f.icon className="h-3 w-3" />
+                    {f.id}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <Label>Post Date</Label>
+            <DatePicker value={scheduledAt} onChange={setScheduledAt} />
+          </div>
+          <div>
+            <Label>Post Time</Label>
+            <TimePicker value={scheduledAt} onChange={setScheduledAt} />
+          </div>
+        </div>
+      </Panel>
+
+      {/* Caption: the hero input */}
+      <Panel title="Caption">
+        <div className="flex items-center justify-end mb-2">
+          <CaptionMeter count={stats.charCount} />
+        </div>
+        <div className="rounded-xl border border-border bg-surface transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 overflow-hidden shadow-inner">
+          <textarea
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            rows={8}
+            maxLength={CAPTION_MAX + 100}
+            className="w-full resize-none bg-transparent p-4 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/40 text-foreground/90"
+            placeholder="Write your caption…"
+          />
+          <div className="border-t border-border px-4 py-3 bg-surface-2/40">
+            <CaptionSignals stats={stats} />
+          </div>
+        </div>
+        <CaptionLimitWarning count={stats.charCount} />
+      </Panel>
+
+      <AiToolsAccordion
+        visualConcept={visualConcept}
+        setVisualConcept={setVisualConcept}
+        caption={caption}
+        brandName={account?.name}
+        format={contentFormat}
+        onReplaceCaption={setCaption}
+      />
+
+      {/* Sticky action bar */}
+      <div className="sticky bottom-4 z-10 flex flex-col gap-3 rounded-2xl border border-border bg-surface/90 p-4 shadow-[var(--shadow-elevated)] backdrop-blur-xl md:flex-row md:items-center md:justify-between">
+        <div className="text-xs text-muted-foreground">
+          {!isFormValid ? (
+            <span className="text-warning font-semibold">
+              Select a brand and write a caption to run the analysis.
+            </span>
+          ) : isPredictionStale ? (
+            <span className="text-warning font-semibold">
+              Inputs changed — re-analyze to refresh the result.
+            </span>
+          ) : (
+            <span>Caption, format, and timing feed the model.</span>
+          )}
+        </div>
+        <button
+          onClick={onAnalyze}
+          disabled={submitting || tooLong || !isFormValid}
+          className="flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-primary px-8 text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 md:w-auto"
+        >
+          <Activity className="h-4.5 w-4.5" />
+          Analyze Post
+        </button>
+      </div>
+    </motion.div>
+  );
+}

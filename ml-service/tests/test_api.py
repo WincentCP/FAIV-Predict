@@ -87,3 +87,94 @@ def test_train_status_without_db_is_honest():
         return  # a real database is configured in this environment
     response = client.get("/train/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 503
+
+
+# ── v2 feature set + counterfactuals ────────────────────────────────────────
+
+from app.preprocessing import DataPreprocessor, FEATURE_ORDER_V1, FEATURE_ORDER_V2
+from app.main import build_counterfactuals
+
+
+def test_extract_features_returns_ten_features():
+    f = DataPreprocessor.extract_features(
+        "Ada promo hari ini? Yuk order 🎉🎉 #promo", "Reels", 19, is_weekend=True
+    )
+    assert set(f.keys()) == set(FEATURE_ORDER_V2)
+    assert f["is_weekend"] == 1.0
+    assert f["has_question"] == 1.0
+    assert f["emoji_count"] == 2.0
+    # Legacy 3-arg call keeps working and defaults the weekend flag off.
+    legacy = DataPreprocessor.extract_features("plain caption", "Carousel", 9)
+    assert legacy["is_weekend"] == 0.0
+
+
+def test_features_to_list_respects_bundle_order():
+    f = DataPreprocessor.extract_features("hi #a #b", "Carousel", 12, is_weekend=True)
+    v1 = DataPreprocessor.features_to_list(f, FEATURE_ORDER_V1)
+    assert len(v1) == 7  # old artifacts get exactly their trained layout
+    v2 = DataPreprocessor.features_to_list(f, FEATURE_ORDER_V2)
+    assert len(v2) == 10
+    shuffled = ["has_cta", "post_hour", "is_reels"]
+    assert DataPreprocessor.features_to_list(f, shuffled) == [
+        f["has_cta"], f["post_hour"], f["is_reels"]
+    ]
+
+
+def test_process_dataframe_weekend_across_wib_boundary():
+    import pandas as pd
+    df = pd.DataFrame([
+        # Friday 20:00 UTC = Saturday 03:00 WIB -> weekend
+        {"caption": "a", "is_single_image": True, "is_carousel": False, "is_reels": False,
+         "post_hour": 3, "created_at": "2026-07-03T20:00:00+00:00"},
+        # Monday 08:00 UTC = Monday 15:00 WIB -> weekday
+        {"caption": "b", "is_single_image": True, "is_carousel": False, "is_reels": False,
+         "post_hour": 15, "created_at": "2026-07-06T08:00:00+00:00"},
+    ])
+    X, cols = DataPreprocessor.process_dataframe(df)
+    assert cols == FEATURE_ORDER_V2
+    assert list(X["is_weekend"]) == [1.0, 0.0]
+
+
+def _tiny_model(classes=("HIGH", "AVERAGE", "LOW"), n_features=10):
+    import numpy as np
+    from sklearn.ensemble import RandomForestClassifier
+    rng = np.random.RandomState(0)
+    X = rng.rand(60, n_features)
+    y = [classes[i % len(classes)] for i in range(60)]
+    m = RandomForestClassifier(n_estimators=10, max_depth=3, random_state=0)
+    m.fit(X, y)
+    return m
+
+
+def test_build_counterfactuals_measured_and_honest():
+    model = _tiny_model()
+    base = DataPreprocessor.extract_features("short", "Reels", 9, is_weekend=False)
+    base_snapshot = dict(base)
+    vec = [DataPreprocessor.features_to_list(base, FEATURE_ORDER_V2)]
+    probs = model.predict_proba(vec)[0]
+    cfs, note = build_counterfactuals(model, base, FEATURE_ORDER_V2, model.classes_, probs)
+    assert note is None and len(cfs) > 0
+    assert base == base_snapshot  # input must not be mutated
+    deltas = [c["delta_high"] for c in cfs]
+    assert deltas == sorted(deltas, reverse=True)
+    assert sum(1 for c in cfs if c["parameter"] == "post_hour") <= 1
+    for c in cfs:
+        assert round(c["to_prob_high"] - c["from_prob_high"], 1) == c["delta_high"]
+
+
+def test_build_counterfactuals_respects_v1_order_and_missing_high():
+    # v1-order model must not receive an is_weekend probe
+    model7 = _tiny_model(n_features=7)
+    base = DataPreprocessor.extract_features("short", "Reels", 9)
+    vec = [DataPreprocessor.features_to_list(base, FEATURE_ORDER_V1)]
+    probs = model7.predict_proba(vec)[0]
+    cfs, note = build_counterfactuals(model7, base, FEATURE_ORDER_V1, model7.classes_, probs)
+    assert note is None
+    assert all(c["parameter"] != "is_weekend" for c in cfs)
+
+    # A model whose classes lack HIGH yields an honest empty result
+    model2 = _tiny_model(classes=("AVERAGE", "LOW"), n_features=10)
+    vec10 = [DataPreprocessor.features_to_list(base, FEATURE_ORDER_V2)]
+    probs2 = model2.predict_proba(vec10)[0]
+    cfs2, note2 = build_counterfactuals(model2, base, FEATURE_ORDER_V2, model2.classes_, probs2)
+    assert cfs2 == [] and note2 is not None
