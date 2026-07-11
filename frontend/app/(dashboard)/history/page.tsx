@@ -71,15 +71,15 @@ export default function HistoryPage() {
           scheduled_date: h.scheduled_date || undefined,
         }),
       });
-      if (res.ok) {
-        const refreshed = await fetch("/api/history");
-        if (refreshed.ok) {
-          const data = await refreshed.json();
-          setHistory(Array.isArray(data) ? data : []);
-        }
-      }
-    } catch {
-      // service unreachable — the row simply stays as-is
+      const result = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(result?.message || "The current model could not re-evaluate this prediction.");
+      const refreshed = await fetch("/api/history");
+      if (!refreshed.ok) throw new Error("The new prediction was saved, but history could not be refreshed.");
+      const data = await refreshed.json();
+      setHistory(Array.isArray(data) ? data : []);
+      setLoadError(null);
+    } catch (error: any) {
+      setLoadError(error.message || "Re-evaluation failed. Try again in a moment.");
     } finally {
       setReEvaluating(null);
     }
