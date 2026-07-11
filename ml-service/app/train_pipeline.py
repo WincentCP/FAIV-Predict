@@ -259,7 +259,8 @@ class ModelTrainer:
             "model": model,
             "p33": p33,
             "p67": p67,
-            "features": feature_cols
+            "features": feature_cols,
+            "feature_ranges": DataPreprocessor.compute_feature_ranges(X_train),
         }
         joblib.dump(model_bundle, local_path)
         logger.info(f"Saved local model bundle to {local_path}")
