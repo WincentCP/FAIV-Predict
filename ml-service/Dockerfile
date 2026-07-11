@@ -1,31 +1,19 @@
-# Use an official Python runtime as a parent image
-FROM python:3.10-slim
+FROM python:3.12-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PORT=8000
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8000
 
-# Set the working directory in the container
 WORKDIR /workspace
 
-# Install system dependencies (needed for compiling psycopg2 or scikit-learn if wheels aren't found)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy the requirements file into the container at /workspace
-COPY requirements.txt .
-
-# Install Python dependencies
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application source code into the container
 COPY app/ ./app/
 
-# Expose the application port
-EXPOSE 8000
+RUN useradd --create-home --uid 10001 faiv \
+    && chown -R faiv:faiv /workspace
+USER faiv
 
-# Run the FastAPI server using Uvicorn
+EXPOSE 8000
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]

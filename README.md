@@ -103,7 +103,7 @@ Instagram connection health is shown per brand on **`/niches`**. The daily n8n c
 ## 5. Getting Started
 
 ### Prerequisites
-`Node.js 18.18+`, `Python 3.10+`, and a Supabase project (run [supabase_schema.sql](./supabase_schema.sql) in its SQL editor).
+`Node.js 20+`, `Python 3.12`, and a Supabase project (run [supabase_schema.sql](./supabase_schema.sql) in its SQL editor).
 
 ### Environment
 Copy `.env.example` values into `frontend/.env.local` and `ml-service/.env` (see the file for details). Notes:

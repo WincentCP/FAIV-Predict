@@ -13,10 +13,9 @@ jobs:
       run:
         working-directory: frontend
     env:
-      # Dummy values so the production build compiles without real secrets.
-      # Real deployments supply live values via their own env configuration.
+      # Compile-only values; no production data or secrets are used in CI.
       NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-compile-only
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,6 +24,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - run: npm audit --audit-level=moderate
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm run build
@@ -38,8 +38,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
-          cache-dependency-path: ml-service/requirements.txt
-      - run: pip install -r requirements.txt
+          cache-dependency-path: |
+            ml-service/requirements.txt
+            ml-service/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
