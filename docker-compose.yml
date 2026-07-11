@@ -74,16 +74,10 @@ services:
       - N8N_DIAGNOSTICS_ENABLED=false
       - N8N_PERSONALIZATION_ENABLED=false
       - N8N_VERSION_NOTIFICATIONS_ENABLED=false
-      # Required because this operator-only workflow reads deployment secrets
-      # through $env. Keep the editor private and access-controlled.
-      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=true
       - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-false}
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=168
-      - FAIV_ML_URL=http://ml-service:8000
-      - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
-      - NOTIFICATION_FROM_EMAIL=${NOTIFICATION_FROM_EMAIL:-}
-      - NOTIFICATION_TO_EMAIL=${NOTIFICATION_TO_EMAIL:-}
     volumes:
       - n8n_data:/home/node/.n8n
       - ./n8n/workflow_sync_retrain.json:/workflows/workflow_sync_retrain.json:ro
