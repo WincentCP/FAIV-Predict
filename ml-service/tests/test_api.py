@@ -120,6 +120,33 @@ def test_features_to_list_respects_bundle_order():
     ]
 
 
+def test_feature_ranges_use_train_split_numeric_columns_only():
+    import pandas as pd
+    X_train = pd.DataFrame({
+        "post_hour": [8.0, 19.0, 12.0],
+        "caption_length": [10.0, 120.0, 45.0],
+        "hashtag_count": [0.0, 5.0, 2.0],
+        "has_cta": [0.0, 1.0, 0.0],
+    })
+    assert DataPreprocessor.compute_feature_ranges(X_train) == {
+        "post_hour": [8.0, 19.0],
+        "caption_length": [10.0, 120.0],
+        "hashtag_count": [0.0, 5.0],
+    }
+
+
+def test_out_of_range_detection_and_old_bundle_skip():
+    features = {"post_hour": 22.0, "caption_length": 80.0, "hashtag_count": 2.0}
+    ranges = {
+        "post_hour": [8.0, 19.0],
+        "caption_length": [10.0, 120.0],
+        "hashtag_count": [0.0, 5.0],
+    }
+    assert DataPreprocessor.out_of_range_features(features, ranges) == ["post_hour"]
+    assert DataPreprocessor.out_of_range_features(features, None) == []
+    assert DataPreprocessor.out_of_range_features(features, {}) == []
+
+
 def test_process_dataframe_weekend_across_wib_boundary():
     import pandas as pd
     df = pd.DataFrame([
@@ -158,6 +185,9 @@ def test_build_counterfactuals_measured_and_honest():
     deltas = [c["delta_high"] for c in cfs]
     assert deltas == sorted(deltas, reverse=True)
     assert sum(1 for c in cfs if c["parameter"] == "post_hour") <= 1
+    format_probes = [c for c in cfs if c["parameter"] == "format"]
+    assert len(format_probes) == 2
+    assert len({c["to_value"] for c in format_probes}) == 2
     for c in cfs:
         assert round(c["to_prob_high"] - c["from_prob_high"], 1) == c["delta_high"]
 
