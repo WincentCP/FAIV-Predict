@@ -99,6 +99,7 @@ export async function POST(request: Request) {
       probabilities: prediction.probabilities,
       prediction_id: prediction.prediction_id ?? null,
       model_metadata: prediction.model_metadata ?? null,
+      out_of_range: prediction.out_of_range ?? [],
       counterfactuals: prediction.counterfactuals ?? [],
       counterfactuals_note: prediction.counterfactuals_note ?? null,
       feature_importances: prediction.feature_importances,
