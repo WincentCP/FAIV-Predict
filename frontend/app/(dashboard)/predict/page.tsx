@@ -184,6 +184,7 @@ export default function PredictPage() {
             ? data.model_metadata.trained_samples
             : null,
         savedId: data.prediction_id ?? null,
+        outOfRange: Array.isArray(data.out_of_range) ? data.out_of_range : [],
         counterfactuals: Array.isArray(data.counterfactuals) ? data.counterfactuals : [],
         counterfactualsNote: data.counterfactuals_note ?? null,
       });
@@ -218,15 +219,25 @@ export default function PredictPage() {
       const hourProbe = prediction?.counterfactuals.find((c: Counterfactual) => c.parameter === "post_hour");
       const bestHour = typeof hourProbe?.to_value === "number" ? hourProbe.to_value : 19;
       const d = new Date(scheduledAt);
-      d.setHours(bestHour, 0, 0, 0);
+      d.setHours(bestHour);
       setScheduledAt(d);
     }
     let nextCaption = caption;
     if (appliedRecs.has_cta && !stats.hasCTA) {
-      nextCaption += "\n\nSave this for later!";
+      nextCaption += "\n\nShare this with someone who needs it!";
     }
     if (appliedRecs.hashtag_count && stats.hashtags.length < 3) {
       nextCaption += "\n#explore #community #tips";
+    } else if (appliedRecs.hashtag_count && stats.hashtags.length > 8) {
+      let hashtagIndex = 0;
+      nextCaption = nextCaption
+        .replace(/#\w+/g, (tag) => {
+          hashtagIndex += 1;
+          return hashtagIndex <= 5 ? tag : "";
+        })
+        .replace(/[ \t]{2,}/g, " ")
+        .replace(/[ \t]+\n/g, "\n")
+        .trimEnd();
     }
     setCaption(nextCaption);
     setOptimizationsApplied(true);
@@ -312,7 +323,7 @@ export default function PredictPage() {
         label: weekend ? "Scheduled on a weekend" : "Scheduled on a weekday",
         detail: "Day type is a model input learned from this data's posting history.",
         weight: fi.is_weekend,
-        direction: "positive" as const,
+        direction: "neutral" as const,
       });
     }
     if (fi.has_question !== undefined) {
@@ -328,7 +339,7 @@ export default function PredictPage() {
         label: `${snapshotStats.emojiCount} emoji in the caption`,
         detail: "Emoji density is a model input feature.",
         weight: fi.emoji_count,
-        direction: snapshotStats.emojiCount > 0 ? ("positive" as const) : ("negative" as const),
+        direction: "neutral" as const,
       });
     }
     return reasons;
