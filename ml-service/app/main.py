@@ -260,6 +260,9 @@ def predict(req: PredictionRequest):
         # The bundle's own stored feature list drives vector order so old
         # 7-feature artifacts keep working after the feature set grew.
         feature_order = bundle.get("features") or FEATURE_ORDER_V1
+        out_of_range = DataPreprocessor.out_of_range_features(
+            features, bundle.get("feature_ranges")
+        )
         feature_vector = [DataPreprocessor.features_to_list(features, feature_order)]
         
         # Extract components from bundle
@@ -362,6 +365,7 @@ def predict(req: PredictionRequest):
                 "trained_samples": trained_samples
             },
             "feature_importances": feature_importances,
+            "out_of_range": out_of_range,
             "counterfactuals": counterfactuals,
             "counterfactuals_note": cf_note
         }
