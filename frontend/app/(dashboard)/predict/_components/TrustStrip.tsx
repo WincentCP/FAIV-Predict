@@ -1,6 +1,13 @@
 "use client";
 
-import { Cpu, Check, Database, Tag } from "lucide-react";
+import { Cpu, Check, Database, Tag, AlertTriangle } from "lucide-react";
+
+const OOD_LABELS: Record<string, string> = {
+  post_hour: "Posting time",
+  caption_length: "Caption length",
+  hashtag_count: "Hashtag count",
+  emoji_count: "Emoji count",
+};
 
 /**
  * One quiet row stating exactly what this score is based on — model scope,
@@ -12,11 +19,13 @@ export function TrustStrip({
   trainedSamples,
   modelAccuracy,
   modelVersion,
+  outOfRange,
 }: {
   isPersonalModel: boolean;
   trainedSamples: number | null;
   modelAccuracy: number | null;
   modelVersion: string | null;
+  outOfRange: string[];
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-surface/50 p-4 text-[10px] font-bold backdrop-blur">
@@ -31,6 +40,16 @@ export function TrustStrip({
           trained on {trainedSamples} real posts
         </Chip>
       )}
+      {trainedSamples !== null && trainedSamples < 50 && (
+        <WarningChip>
+          early model — trained on under 50 posts; treat scores as directional
+        </WarningChip>
+      )}
+      {outOfRange.map((feature) => (
+        <WarningChip key={feature}>
+          {OOD_LABELS[feature] || feature} is outside anything this model trained on
+        </WarningChip>
+      ))}
       {modelAccuracy !== null && (
         <Chip
           icon={<Check className="h-3 w-3" />}
@@ -45,6 +64,15 @@ export function TrustStrip({
         </Chip>
       )}
     </div>
+  );
+}
+
+function WarningChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-700 dark:text-amber-300">
+      <AlertTriangle className="h-3 w-3" />
+      {children}
+    </span>
   );
 }
 
