@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +13,23 @@ const ALLOWED_FORMATS = ["Reels", "Carousel", "Single Image"];
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { caption, format, post_hour, brand_id, niche, scheduled_date } = body;
+    const { caption, format, post_hour, brand_id, scheduled_date } = body;
+
+    const supabase = await createClient();
+    const user = await getRequestUser(supabase);
+    if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
+    if (typeof brand_id !== "string" || !brand_id) {
+      return NextResponse.json({ status: "error", message: "A registered brand is required." }, { status: 400 });
+    }
+    const { data: ownedBrand, error: brandError } = await supabase
+      .from("brands")
+      .select("id, niche")
+      .eq("id", brand_id)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+    if (brandError || !ownedBrand) {
+      return NextResponse.json({ status: "error", message: "Brand not found in this workspace." }, { status: 404 });
+    }
 
     // Input validation — reject malformed requests before they hit the model.
     if (typeof caption !== "string" || !caption.trim()) {
@@ -33,11 +51,15 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (scheduled_date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(scheduled_date))) {
-      return NextResponse.json(
-        { status: "error", message: "'scheduled_date' must be an ISO date (YYYY-MM-DD)." },
-        { status: 400 }
-      );
+    if (scheduled_date !== undefined && scheduled_date !== null) {
+      const value = String(scheduled_date);
+      const parsed = new Date(`${value}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+        return NextResponse.json(
+          { status: "error", message: "'scheduled_date' must be a real ISO date (YYYY-MM-DD)." },
+          { status: 400 }
+        );
+      }
     }
 
     // Service-to-service secret: the middleware already gates this route behind
@@ -59,8 +81,9 @@ export async function POST(request: Request) {
           format,
           post_hour: hour,
           brand_id: brand_id || null,
-          niche: niche || null,
+          niche: ownedBrand.niche,
           scheduled_date: scheduled_date || null,
+          created_by: user.id,
         }),
       });
     } catch (netErr: any) {

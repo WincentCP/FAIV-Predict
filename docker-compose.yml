@@ -6,8 +6,6 @@ services:
       context: ./ml-service
       dockerfile: Dockerfile
     ports:
-      # Bind to localhost only: the ML service is internal and must not be
-      # exposed publicly. The frontend reaches it over the compose network.
       - "127.0.0.1:8000:8000"
     environment:
       - DATABASE_URL=${DATABASE_URL}
@@ -15,14 +13,8 @@ services:
       - SUPABASE_KEY=${SUPABASE_KEY}
       - PORT=8000
       - FRONTEND_URL=${FRONTEND_URL}
-      # Shared secret enforced on all endpoints (required in production).
       - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN}
-      # Instagram Graph API credentials for the weekly sync + retrain pipeline.
       - IG_BRANDS_JSON=${IG_BRANDS_JSON}
-      - BISON_INSTAGRAM_ID=${BISON_INSTAGRAM_ID}
-      - BISON_PAGE_ACCESS_TOKEN=${BISON_PAGE_ACCESS_TOKEN}
-      - LASENCE_INSTAGRAM_ID=${LASENCE_INSTAGRAM_ID}
-      - LASENCE_PAGE_ACCESS_TOKEN=${LASENCE_PAGE_ACCESS_TOKEN}
     restart: always
 
   frontend:
@@ -30,7 +22,6 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        # NEXT_PUBLIC_* must be available at build time to be inlined.
         - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
     ports:

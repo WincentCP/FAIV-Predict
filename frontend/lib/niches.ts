@@ -1,7 +1,9 @@
-// Canonical niche taxonomy — the single source of truth for the UI and the
-// AI brand classifier. Values must match the `brands.niche` / `models.niche`
+// Controlled primary industry cohorts — the single source of truth for the UI
+// and AI-assisted suggestion. One brand belongs to one benchmark cohort so
+// small thesis datasets are not fragmented by multi-label or embedding-based
+// taxonomies. Values must match the `brands.niche` / `models.niche`
 // strings stored in Supabase: the ML service looks niche models up by this
-// exact string (the Instagram sync pipeline registers "Bakery" and "Fitness").
+// exact string when selecting a shared cohort model.
 export const NICHES = [
   "Bakery",
   "Fitness",

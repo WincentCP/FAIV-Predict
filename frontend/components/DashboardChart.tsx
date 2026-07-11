@@ -27,9 +27,9 @@ export default function DashboardChart({ data }: DashboardChartProps) {
         </defs>
         <CartesianGrid stroke="hsl(var(--foreground) / 0.04)" vertical={false} />
         <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" fontSize={10} fontWeight={600} tickLine={false} axisLine={false} />
-        <YAxis domain={[78, 91]} stroke="hsl(var(--muted-foreground))" fontSize={10} fontWeight={600} tickLine={false} axisLine={false} />
+        <YAxis domain={[0, 100]} stroke="hsl(var(--muted-foreground))" fontSize={10} fontWeight={600} tickLine={false} axisLine={false} />
         <Tooltip
-          formatter={(value: any) => [`${value}%`, "Success Rate"]}
+          formatter={(value: any) => [`${value}%`, "Validation accuracy"]}
           contentStyle={{
             background: "hsl(var(--surface))",
             border: "1px solid hsl(var(--border-strong))",

@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import pytest
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.main import app
+from app.model_loader import ModelLoader, ModelUnavailableError
 
 client = TestClient(app)
 
@@ -26,65 +28,51 @@ def test_predict_requires_internal_token_when_configured():
     })
     assert resp.status_code == 401
 
-def test_predict_endpoint_no_model_is_honest():
+def test_predict_endpoint_no_model_is_honest(monkeypatch):
     """
     Without a configured database / trained model, the service must return an
     honest 503 (no fabricated fallback prediction).
     """
+    # Tests must never read a developer's attached/shared database.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     payload = {
         "caption": "Get our exclusive discount of 20% now! Order today by visiting our bio links. #promo #discount #shopping",
         "format": "Carousel",
         "post_hour": 19,
         "brand_id": "bfd6dbca-613d-4950-8b1e-45ad7dcf1088",
+        "created_by": "15663b0a-d1fc-4cb9-bac2-bb0251307441",
         "niche": "Fashion"
       }
     response = client.post("/predict", json=payload)
     assert response.status_code == 503
     assert "detail" in response.json()
 
-def test_suggest_endpoint():
-    """Verify that the template recommendation engine returns proper heuristics advice."""
-    payload = {
-        "caption": "A short draft post.",
-        "format": "Single Image",
-        "post_hour": 9,
-        "brand_id": "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
-    }
-    response = client.post("/suggest", json=payload)
-    assert response.status_code == 200
-    
-    data = response.json()
-    assert data["status"] == "success"
-    assert "features_analyzed" in data
-    assert "recommendations" in data
-    
-    # Assert details are returned
-    recs = data["recommendations"]
-    assert len(recs) > 0
-    # The hour 9 is outside peak window (17-21) and caption is short, should recommend changes
-    parameters_flagged = [r["parameter"] for r in recs]
-    assert "post_hour" in parameters_flagged
-    assert "caption_length" in parameters_flagged
-    assert "has_cta" in parameters_flagged
 
-def test_train_endpoint():
-    """Verify that retraining queueing works asynchronously."""
+def test_predict_rejects_impossible_schedule_before_inference():
+    response = client.post("/predict", json={
+        "caption": "A real draft",
+        "format": "Carousel",
+        "post_hour": 10,
+        "scheduled_date": "2026-02-31",
+        "brand_id": "bfd6dbca-613d-4950-8b1e-45ad7dcf1088",
+        "created_by": "15663b0a-d1fc-4cb9-bac2-bb0251307441",
+        "niche": "Fashion",
+    })
+    assert response.status_code == 400
+
+def test_train_endpoint_without_db_refuses_untrackable_job(monkeypatch):
+    """A job that cannot be persisted must never be reported as queued."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     payload = {
         "brand_id": "bfd6dbca-613d-4950-8b1e-45ad7dcf1088",
         "niche": "Fashion"
     }
     response = client.post("/train", json=payload)
-    assert response.status_code == 200
-    
-    data = response.json()
-    assert data["status"] == "pending"
-    assert "job_id" in data
-    assert "message" in data
+    assert response.status_code == 503
 
-def test_train_status_without_db_is_honest():
+def test_train_status_without_db_is_honest(monkeypatch):
     """Without a database there is no job state — the service must not fabricate success."""
-    if os.getenv("DATABASE_URL"):
-        return  # a real database is configured in this environment
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     response = client.get("/train/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 503
 
@@ -92,7 +80,13 @@ def test_train_status_without_db_is_honest():
 # ── v2 feature set + counterfactuals ────────────────────────────────────────
 
 from app.preprocessing import DataPreprocessor, FEATURE_ORDER_V1, FEATURE_ORDER_V2
-from app.main import build_counterfactuals
+from app.main import (
+    build_counterfactuals,
+    _get_brands_config,
+    _media_insight_value,
+    _media_insight_values,
+    _upsert_instagram_media,
+)
 
 
 def test_extract_features_returns_ten_features():
@@ -208,3 +202,83 @@ def test_build_counterfactuals_respects_v1_order_and_missing_high():
     probs2 = model2.predict_proba(vec10)[0]
     cfs2, note2 = build_counterfactuals(model2, base, FEATURE_ORDER_V2, model2.classes_, probs2)
     assert cfs2 == [] and note2 is not None
+
+
+def test_meta_insight_payload_parsing_preserves_zero_and_multiple_metrics():
+    payload = {
+        "data": [
+            {"name": "reach", "total_value": {"value": 125}},
+            {"name": "saved", "values": [{"value": 0}]},
+        ]
+    }
+    assert _media_insight_value({"data": [payload["data"][0]]}) == 125.0
+    assert _media_insight_values(payload) == {"reach": 125.0, "saved": 0.0}
+
+
+def test_instagram_config_requires_explicit_json(monkeypatch):
+    """An absent explicit mapping must remain disconnected."""
+    monkeypatch.delenv("IG_BRANDS_JSON", raising=False)
+    assert _get_brands_config() == []
+
+
+def test_instagram_config_validates_and_rejects_duplicate_bindings(monkeypatch):
+    brand_id = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
+    monkeypatch.setenv(
+        "IG_BRANDS_JSON",
+        json.dumps([{"brand_id": brand_id, "instagram_id": "1784", "access_token": "token"}]),
+    )
+    config = _get_brands_config()
+    assert config == [{"brand_id": brand_id, "instagram_id": "1784", "access_token": "token"}]
+
+    monkeypatch.setenv("IG_BRANDS_JSON", json.dumps([
+        {"brand_id": brand_id, "instagram_id": "1784", "access_token": "a"},
+        {"brand_id": brand_id, "instagram_id": "1785", "access_token": "b"},
+    ]))
+    assert _get_brands_config() == []
+
+
+def test_instagram_media_sync_updates_by_source_id_without_deleting_history():
+    class Cursor:
+        def __init__(self):
+            self.calls = []
+            self.fetchone_values = [("post-row", 100)]
+
+        def execute(self, query, params):
+            self.calls.append((query, params))
+
+        def fetchone(self):
+            return self.fetchone_values.pop(0)
+
+    cursor = Cursor()
+    result = _upsert_instagram_media(cursor, "brand-id", {
+        "id": "ig-media-1",
+        "caption": "Verified post #one",
+        "like_count": 10,
+        "comments_count": 5,
+        "media_type": "IMAGE",
+        "timestamp": "2026-07-01T12:00:00+0000",
+    }, current_followers=1000)
+
+    assert result == "updated"
+    assert all("DELETE FROM posts" not in query for query, _ in cursor.calls)
+    update_query, update_params = cursor.calls[-1]
+    assert "instagram_media_id" in update_query
+    assert update_params[2] == 15.0  # preserved 100-follower snapshot, not current 1,000
+    assert update_params[3] == 100
+
+
+def test_model_loader_rejects_artifact_without_verified_post_provenance(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setattr(ModelLoader, "get_model_metadata", classmethod(lambda cls, brand_id=None, niche=None: {
+        "id": "model-id",
+        "model_type": "account",
+        "storage_url": "https://storage.invalid/model",
+        "storage_path": "account/model.joblib",
+        "version": "1",
+    }))
+    monkeypatch.setattr(ModelLoader, "download_model", classmethod(lambda cls, *args: "/tmp/model.joblib"))
+    monkeypatch.setattr("app.model_loader.joblib.load", lambda path: {"model": object()})
+    ModelLoader._model_cache.clear()
+
+    with pytest.raises(ModelUnavailableError, match="provenance"):
+        ModelLoader.load_model(brand_id="brand-id")

@@ -32,13 +32,13 @@ export async function POST(request: Request) {
     Pilih 3 kategori paling cocok dari daftar kategori whitelisted berikut:
     ${NICHES.join("\n")}
 
-    Format output harus berupa JSON array valid berisi tepat 3 objek dengan keys: "niche", "match" (angka float antara 0.0 s.d. 1.0 mewakili tingkat kecocokan), dan "reason" (kalimat penjelasan singkat dalam Bahasa Indonesia). Nilai "niche" harus persis sama dengan salah satu kategori whitelisted. Jangan sertakan markdown formatting backticks atau teks lain selain JSON array.
+    Urutkan dari kategori paling cocok ke paling rendah. Format output harus berupa JSON array valid berisi tepat 3 objek dengan keys: "niche" dan "reason" (kalimat penjelasan singkat dalam Bahasa Indonesia). Nilai "niche" harus persis sama dengan salah satu kategori whitelisted. Jangan membuat confidence/probability karena skor tersebut tidak terkalibrasi. Jangan sertakan markdown formatting backticks atau teks lain selain JSON array.
 
     Contoh format output:
     [
-      { "niche": "Bakery", "match": 0.95, "reason": "Brand menjual produk roti dan kue secara langsung." },
-      { "niche": "Food & Beverage", "match": 0.70, "reason": "Brand beroperasi di industri kuliner." },
-      { "niche": "Fashion", "match": 0.10, "reason": "Kecocokan rendah karena tidak menjual pakaian." }
+      { "niche": "Bakery", "reason": "Brand menjual produk roti dan kue secara langsung." },
+      { "niche": "Food & Beverage", "reason": "Brand beroperasi di industri kuliner." },
+      { "niche": "Fashion", "reason": "Kategori alternatif, tetapi kurang spesifik dibanding Bakery." }
     ]`;
 
     const geminiRes = await fetch(
@@ -70,10 +70,13 @@ export async function POST(request: Request) {
             (p: any) =>
               p &&
               (NICHES as readonly string[]).includes(p.niche) &&
-              typeof p.match === "number"
+              typeof p.reason === "string"
           );
           if (valid.length > 0) {
-            return NextResponse.json(valid.slice(0, 3));
+            return NextResponse.json(valid.slice(0, 3).map((p: any) => ({
+              niche: p.niche,
+              reason: p.reason.slice(0, 240),
+            })));
           }
         }
       } catch {

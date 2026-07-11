@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useState } from "react";
 import { format as formatDate } from "date-fns";
 import {
-  FileText, Calendar, Clock, Check, AlertTriangle, HelpCircle, Activity, RefreshCw, Ruler, ChevronDown,
+  FileText, Calendar, Clock, Check, AlertTriangle, HelpCircle, Activity, ChevronDown,
 } from "lucide-react";
 import { TierBadge } from "@/components/TierBadge";
 import { ConfidenceMeter } from "@/components/ConfidenceMeter";
@@ -36,13 +36,6 @@ export interface InsightsPrediction {
   counterfactualsNote: string | null;
 }
 
-export interface TreRecommendation {
-  parameter: string;
-  current: string | number;
-  recommendation: string;
-  impact: string;
-}
-
 export function InsightsView(props: {
   prediction: InsightsPrediction;
   isPredictionStale: boolean;
@@ -51,11 +44,6 @@ export function InsightsView(props: {
   contentFormat: ContentFormat;
   whyReasons: WhyReason[];
   mdiChartData: { name: string; importance: number; rawPct: number }[];
-  treRecs: TreRecommendation[] | null;
-  treError: string | null;
-  onRetryTre: () => void;
-  featureLabels: Record<string, string>;
-  autoApplicable: Set<string>;
   appliedRecs: Record<string, boolean>;
   onToggleRec: (parameter: string) => void;
   anyRecsApplied: boolean;
@@ -64,8 +52,7 @@ export function InsightsView(props: {
 }) {
   const {
     prediction, isPredictionStale, brandName, scheduledAt, contentFormat,
-    whyReasons, mdiChartData, treRecs, treError, onRetryTre, featureLabels,
-    autoApplicable, appliedRecs, onToggleRec, anyRecsApplied, onApply, onEditDraft,
+    whyReasons, mdiChartData, appliedRecs, onToggleRec, anyRecsApplied, onApply, onEditDraft,
   } = props;
 
   const [showModelThinking, setShowModelThinking] = useState(false);
@@ -169,96 +156,6 @@ export function InsightsView(props: {
 
       <FormatComparison formatProbes={formatProbes} currentFormat={contentFormat} />
 
-      {/* Guideline recommendations (heuristic TRE) */}
-      <Panel
-        title="Guideline Recommendations"
-        subtitle="Rule-based advice from this niche's baselines (not AI-generated, not measured on this draft). Use Measured Improvements above for evidence-backed changes."
-      >
-        {treError ? (
-          <div className="rounded-xl border border-warning/30 bg-warning/[0.03] p-4 flex items-start gap-3">
-            <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
-            <p className="flex-1 text-xs text-muted-foreground">{treError}</p>
-            <button
-              type="button"
-              onClick={onRetryTre}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold hover:bg-surface-2 shrink-0"
-            >
-              <RefreshCw className="h-3 w-3" />
-              Retry
-            </button>
-          </div>
-        ) : treRecs === null ? (
-          <div className="space-y-3">
-            {[1, 2].map((i) => (
-              <div key={i} className="h-16 animate-pulse rounded-2xl bg-surface-2" />
-            ))}
-          </div>
-        ) : treRecs.length === 0 ? (
-          <div className="rounded-xl border border-accent-lime/30 bg-accent-lime/[0.04] p-4 flex items-center gap-3">
-            <Check className="h-4.5 w-4.5 text-accent-lime-strong shrink-0" />
-            <p className="text-xs font-semibold text-foreground">
-              All measurable parameters already sit within this niche&apos;s baselines.
-            </p>
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            {treRecs.map((rec) => {
-              const canApply = autoApplicable.has(rec.parameter);
-              const isApplied = appliedRecs[rec.parameter] || false;
-              return (
-                <article
-                  key={rec.parameter}
-                  className={cn(
-                    "rounded-2xl border bg-surface p-4 transition-all",
-                    isApplied ? "border-emerald-500/30 bg-emerald-500/[0.01]" : "border-border hover:border-border-strong"
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="min-w-0 space-y-1.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-surface-3 border border-border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
-                          <Ruler className="h-2.5 w-2.5" />
-                          Guideline
-                        </span>
-                        <span className="rounded-lg bg-surface-3 border border-border/60 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">
-                          {featureLabels[rec.parameter] || rec.parameter}
-                        </span>
-                      </div>
-                      <p className="text-xs font-medium text-foreground leading-relaxed">{rec.recommendation}</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        Current: <span className="font-mono font-bold">{String(rec.current)}</span>
-                      </p>
-                    </div>
-                    {canApply ? (
-                      <button
-                        type="button"
-                        onClick={() => onToggleRec(rec.parameter)}
-                        aria-pressed={isApplied}
-                        className={cn(
-                          "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out outline-none",
-                          isApplied ? "bg-emerald-500" : "bg-surface-3"
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
-                            isApplied ? "translate-x-5" : "translate-x-0"
-                          )}
-                        />
-                      </button>
-                    ) : (
-                      <span className="shrink-0 rounded-full border border-border px-2 py-1 text-[9px] font-bold uppercase tracking-wide text-muted-foreground/70">
-                        Manual edit
-                      </span>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </Panel>
-
       <section className="overflow-hidden rounded-2xl border border-border bg-surface/50">
         <button
           type="button"
@@ -269,7 +166,7 @@ export function InsightsView(props: {
           <div>
             <h3 className="font-display text-sm font-bold text-foreground">How the model thinks</h3>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Inspect the strongest input signals and the model&apos;s global feature importance.
+              Inspect the observed inputs and the model&apos;s global feature importance. Direction is shown only where measured.
             </p>
           </div>
           <ChevronDown
@@ -281,7 +178,7 @@ export function InsightsView(props: {
           <div className="grid gap-6 border-t border-border p-5 md:grid-cols-2">
             <WhyThisScore
               reasons={whyReasons}
-              context="Input signals vs niche baselines, weighted by the model's feature importance."
+              context="Observed input values, weighted by the model's global feature importance. Importance is magnitude, not positive/negative direction."
             />
             <Panel
               title="Model Feature Importance"

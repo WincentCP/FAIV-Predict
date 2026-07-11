@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -10,13 +12,24 @@ const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const brand = searchParams.get("brand");
-    if (!brand) {
+    const brandId = searchParams.get("brand_id");
+    if (!brandId) {
       return NextResponse.json(
-        { status: "error", message: "Parameter 'brand' is required." },
+        { status: "error", message: "Parameter 'brand_id' is required." },
         { status: 400 }
       );
     }
+
+    const supabase = await createClient();
+    const user = await getRequestUser(supabase);
+    if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
+    const { data: ownedBrand } = await supabase
+      .from("brands")
+      .select("id, name")
+      .eq("id", brandId)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+    if (!ownedBrand) return NextResponse.json({ status: "error", message: "Brand not found in this workspace." }, { status: 404 });
 
     const backendHeaders: Record<string, string> = {};
     if (INTERNAL_API_TOKEN) {
@@ -26,7 +39,7 @@ export async function GET(request: Request) {
     let mlResponse;
     try {
       mlResponse = await fetch(
-        `${FASTAPI_URL}/instagram/posts?brand=${encodeURIComponent(brand)}`,
+        `${FASTAPI_URL}/instagram/posts?brand_id=${encodeURIComponent(ownedBrand.id)}`,
         { headers: backendHeaders }
       );
     } catch (netErr: any) {

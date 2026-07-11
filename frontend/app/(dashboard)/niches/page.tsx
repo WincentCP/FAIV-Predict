@@ -63,7 +63,7 @@ export default function NichesPage() {
     }
   }, []);
 
-  // Per-brand Instagram connection status (matched by brand name).
+  // Per-brand Instagram connection status (matched by immutable brand UUID).
   // Failure to load leaves the map empty: the column then shows "Not linked"
   // guidance rather than blocking the page.
   const [igStatus, setIgStatus] = useState<
@@ -78,7 +78,9 @@ export default function NichesPage() {
         if (res.ok && Array.isArray(data?.connections)) {
           const map: Record<string, { status: string; username?: string }> = {};
           for (const c of data.connections) {
-            map[c.brand] = { status: c.status, username: c.username };
+            if (typeof c.brand_id === "string") {
+              map[c.brand_id] = { status: c.status, username: c.username };
+            }
           }
           setIgStatus(map);
         }
@@ -113,7 +115,7 @@ export default function NichesPage() {
       });
   }, [brands, models]);
 
-  const graduatedCount = brands.filter((b) => (b.samples ?? 0) >= SAMPLE_TARGET).length;
+  const graduatedCount = brands.filter((b) => b.model_type === "personal").length;
 
   return (
     <motion.div
@@ -130,9 +132,9 @@ export default function NichesPage() {
 
       <motion.div variants={itemVariants}>
         <SectionHeader
-          eyebrow="Category & Account Workspace"
-          title="Niche & Brand Management"
-          description="Register brand accounts and monitor their progress toward a dedicated personal model."
+          eyebrow="Benchmark Cohorts & Accounts"
+          title="Industry Cohorts & Brand Accounts"
+          description="Each brand has one controlled industry cohort for understandable benchmarking. AI may suggest a cohort, but the user confirms it."
           actions={
             <button
               onClick={() => setShowAddBrand(true)}
@@ -177,7 +179,7 @@ export default function NichesPage() {
           icon={Cpu}
         />
         <SummaryCard
-          label="Personal Model Graduates"
+          label="Personal Models Active"
           value={`${graduatedCount}`}
           tone="violet"
           icon={Check}
@@ -187,7 +189,7 @@ export default function NichesPage() {
       {/* ── Underline Tabs ── */}
       <motion.div variants={itemVariants} className="flex gap-2 border-b border-border pb-px">
         {(["brands", "niches"] as const).map((tab) => {
-          const labels = { niches: "Niche Overview", brands: "Brand Accounts" };
+        const labels = { niches: "Industry Cohorts", brands: "Brand Accounts" };
           const active = activeTab === tab;
           return (
             <button
@@ -226,20 +228,20 @@ export default function NichesPage() {
               <div className="flex items-center justify-between border-b border-border px-6 py-5 bg-surface-2/10">
                 <div className="flex items-center gap-2">
                   <Building2 className="h-4.5 w-4.5 text-primary" />
-                  <span className="text-sm font-semibold">{nicheRows.length} niche categories</span>
+                  <span className="text-sm font-semibold">{nicheRows.length} industry cohorts</span>
                 </div>
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider bg-surface-3 border border-border px-2.5 py-1 rounded-lg">
-                  Shared models per niche
+                  Shared models per cohort
                 </span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] table-fixed">
                   <thead>
                     <tr className="border-b border-border bg-surface-2/30 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                      <th className="w-[180px] px-6 py-5 text-left">Niche</th>
+                      <th className="w-[180px] px-6 py-5 text-left">Industry Cohort</th>
                       <th className="w-[120px] px-6 py-5 text-right">Brands</th>
                       <th className="w-[140px] px-6 py-5 text-right">Total Samples</th>
-                      <th className="w-[220px] px-6 py-5 text-left">Niche Model</th>
+                      <th className="w-[220px] px-6 py-5 text-left">Cohort Model</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/50">
@@ -263,7 +265,7 @@ export default function NichesPage() {
                           {row.model ? (
                             <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-lime/10 border border-accent-lime/30 px-2.5 py-1 text-[10px] font-bold text-accent-lime-strong">
                               <Check className="h-3 w-3" />
-                              Trained · {row.model.baselineAccuracy.toFixed(1)}% acc · {row.model.trained}
+                              Trained · {row.model.baselineAccuracy !== null ? `${row.model.baselineAccuracy.toFixed(1)}% acc` : "accuracy unavailable"} · {row.model.trained}
                             </span>
                           ) : (
                             <span className="inline-flex items-center rounded-full bg-surface-3 border border-border px-2.5 py-1 text-[10px] font-bold text-muted-foreground">
@@ -306,7 +308,7 @@ export default function NichesPage() {
                     <tr className="border-b border-border bg-surface-2/30 text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
                       <th className="w-[160px] px-6 py-5 text-left">Username</th>
                       <th className="w-[180px] px-6 py-5 text-left">Display Name</th>
-                      <th className="w-[150px] px-6 py-5 text-left">Linked Niche</th>
+                      <th className="w-[150px] px-6 py-5 text-left">Industry Cohort</th>
                       <th className="w-[150px] px-6 py-5 text-left">Instagram</th>
                       <th className="w-[100px] px-6 py-5 text-right">Followers</th>
                       <th className="w-[240px] px-6 py-5 text-left">Model Maturity</th>
@@ -324,17 +326,23 @@ export default function NichesPage() {
                       const samples = b.samples ?? 0;
                       const pct = Math.min(100, Math.round((samples / SAMPLE_TARGET) * 100));
                       const handle = brandHandle(b.name);
+                      const personalActive = b.model_type === "personal";
                       let barColor = "bg-amber-400";
-                      let label = "Niche fallback (cold start)";
+                      let label = "Cohort model (cold start)";
                       let labelColor = "text-amber-600 dark:text-amber-400";
                       let animated = false;
                       let glowing = false;
 
-                      if (samples >= SAMPLE_TARGET) {
+                      if (personalActive) {
                         barColor = "bg-accent-lime";
                         label = "Personal model active";
                         labelColor = "text-[oklch(0.42_0.18_130)] dark:text-[oklch(0.82_0.20_130)]";
                         glowing = true;
+                      } else if (samples >= SAMPLE_TARGET) {
+                        barColor = "bg-primary";
+                        label = "Eligible — training pending";
+                        labelColor = "text-primary";
+                        animated = true;
                       } else if (samples >= 100) {
                         barColor = "bg-primary";
                         label = "Learning — accumulating data";
@@ -371,15 +379,15 @@ export default function NichesPage() {
                             </span>
                           </td>
                           <td className="px-6 py-5 align-middle">
-                            {igStatus[b.name]?.status === "connected" ? (
+                            {igStatus[b.id]?.status === "connected" ? (
                               <span
                                 className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-[10px] font-bold text-emerald-600 max-w-full"
-                                title={`Live Graph API connection verified as @${igStatus[b.name]?.username}`}
+                                title={`Live Graph API connection verified as @${igStatus[b.id]?.username}`}
                               >
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
-                                <span className="truncate">@{igStatus[b.name]?.username}</span>
+                                <span className="truncate">@{igStatus[b.id]?.username}</span>
                               </span>
-                            ) : igStatus[b.name] ? (
+                            ) : igStatus[b.id] ? (
                               <span
                                 className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 border border-destructive/25 px-2.5 py-1 text-[10px] font-bold text-destructive"
                                 title="The access token was rejected — regenerate it in the Meta developer console and update the ML service environment"
@@ -389,7 +397,7 @@ export default function NichesPage() {
                             ) : (
                               <span
                                 className="text-[10px] font-semibold text-muted-foreground/70"
-                                title="Link this brand's Instagram Business account via IG_BRANDS_JSON in the ML service environment — predictions work without it, but weekly data sync and Post Insights need it"
+                                title="Link this brand's Instagram Business account via IG_BRANDS_JSON in the ML service environment — predictions work without it, but weekly data sync and Insights need it"
                               >
                                 Not linked
                               </span>
@@ -397,7 +405,7 @@ export default function NichesPage() {
                           </td>
                           <td className="px-6 py-5 align-middle text-right">
                             <span className="font-mono text-xs font-bold tabular-nums text-foreground truncate">
-                              {(b.followers ?? 0).toLocaleString()}
+                              {typeof b.followers === "number" ? b.followers.toLocaleString() : "Not synced"}
                             </span>
                           </td>
                           <td className="px-6 py-5 align-middle">
@@ -412,7 +420,7 @@ export default function NichesPage() {
                                   <span
                                     className={cn(
                                       "h-1.5 w-1.5 rounded-full shrink-0",
-                                      samples >= SAMPLE_TARGET
+                                      personalActive
                                         ? "bg-accent-lime animate-pulse"
                                         : samples >= 100
                                         ? "bg-primary"
@@ -435,7 +443,7 @@ export default function NichesPage() {
                                     glowing &&
                                       "shadow-[0_0_8px_2px_color-mix(in_oklab,hsl(var(--accent-lime))_60%,transparent)]"
                                   )}
-                                  style={{ width: `${pct}%` }}
+                                  style={{ width: `${personalActive ? 100 : pct}%` }}
                                 >
                                   {animated && (
                                     <span className="absolute inset-0 -translate-x-full animate-[shimmer_2s_linear_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent" />
@@ -470,12 +478,11 @@ export default function NichesPage() {
 
 // ─── AI Brand Classifier Dialog ───────────────────────────────────────────────
 type AiState = "idle" | "loading" | "done" | "manual";
-type NicheSuggestion = { niche: string; match: number; reason: string };
+type NicheSuggestion = { niche: string; reason: string };
 
 function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSaveSuccess: () => void }) {
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
-  const [followers, setFollowers] = useState("");
   const [aiState, setAiState] = useState<AiState>("idle");
   const [aiError, setAiError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<NicheSuggestion[]>([]);
@@ -537,7 +544,6 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
         body: JSON.stringify({
           name,
           niche: picked,
-          followers: followers ? Number(followers) : 0,
         }),
       });
       if (res.ok) {
@@ -560,7 +566,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
   const manualPicker = (
     <div className="space-y-1.5">
       <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
-        Select niche
+        Select industry cohort
       </div>
       <div className="relative">
         <select
@@ -602,9 +608,9 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
               <Users className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <h2 className="font-display text-base font-bold tracking-tight">Register New Brand</h2>
+              <h2 className="font-display text-base font-bold tracking-tight">Create Brand Workspace</h2>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
-                Describe the business — AI suggests the best niche, or pick one manually.
+                Create the workspace record first. Instagram remains disconnected until Meta authorization and a successful sync.
               </p>
             </div>
           </div>
@@ -627,21 +633,8 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Lasence Bakeshop"
+                placeholder="e.g. Northstar Bakery"
                 className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_color-mix(in_oklab,hsl(var(--ring))_16%,transparent)]"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                Followers (optional)
-              </label>
-              <input
-                value={followers}
-                onChange={(e) => setFollowers(e.target.value.replace(/[^\d]/g, ""))}
-                inputMode="numeric"
-                placeholder="e.g. 5400"
-                className="h-10 w-full rounded-lg border border-border bg-surface px-3 font-mono text-sm outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_color-mix(in_oklab,hsl(var(--ring))_16%,transparent)]"
               />
             </div>
 
@@ -700,7 +693,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
               }}
               className="w-full text-center text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors"
             >
-              Skip AI and pick a niche manually
+              Skip AI and select an industry cohort manually
             </button>
           </div>
 
@@ -712,9 +705,9 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                   <Users className="h-5 w-5 text-muted-foreground/50" />
                 </div>
                 <div className="text-center">
-                  <p className="text-sm font-semibold text-muted-foreground">AI Classification Ready</p>
+                  <p className="text-sm font-semibold text-muted-foreground">Industry suggestion ready</p>
                   <p className="mt-1 max-w-[220px] text-[11px] text-muted-foreground/70">
-                    Fill in the business profile and click <em>Analyze with AI</em>, or pick the niche manually.
+                    Fill in the business profile and request a suggestion, or select the cohort manually.
                   </p>
                 </div>
               </div>
@@ -756,10 +749,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                         {topMatch?.niche}
                       </div>
                       <div className="mt-0.5 text-[11px] font-semibold text-muted-foreground">
-                        Match Confidence:{" "}
-                        <span className="font-mono font-bold tabular-nums text-foreground">
-                          {Math.round((topMatch?.match ?? 0) * 100)}%
-                        </span>
+                        Ranked first by the AI assistant · confirm or override below
                       </div>
                     </div>
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
@@ -777,7 +767,6 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                   </div>
                   {suggestions.map((s) => {
                     const active = picked === s.niche;
-                    const pct = Math.round(s.match * 100);
                     return (
                       <button
                         key={s.niche}
@@ -800,16 +789,8 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-semibold text-foreground">{s.niche}</div>
-                          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-3">
-                            <div
-                              className={cn("h-full rounded-full transition-all", active ? "bg-primary" : "bg-muted-foreground/30")}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
+                          <div className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-muted-foreground">{s.reason}</div>
                         </div>
-                        <span className="shrink-0 font-mono text-[11px] font-bold tabular-nums text-foreground">
-                          {pct}%
-                        </span>
                       </button>
                     );
                   })}
@@ -817,7 +798,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
 
                 <div className="space-y-1.5">
                   <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Override niche
+                    Override industry cohort
                   </div>
                   <div className="relative">
                     <select

@@ -1,37 +1,41 @@
 {
-  "name": "FAIV Predict - Auto Sync & Retrain Pipeline",
+  "name": "FAIV Predict - Verified Sync and Retrain",
   "nodes": [
     {
       "parameters": {
         "rule": {
           "interval": [
             {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [1],
               "triggerAtHour": 6,
               "triggerAtMinute": 0
             }
           ]
         }
       },
-      "id": "schedule-trigger",
-      "name": "Weekly Schedule (Senin 06:00 WIB)",
+      "id": "weekly-schedule",
+      "name": "Weekly Sync (Monday 06:00 WIB)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [220, 300]
+      "position": [220, 260]
     },
     {
       "parameters": {
         "rule": {
           "interval": [
             {
+              "field": "days",
+              "daysInterval": 1,
               "triggerAtHour": 7,
-              "triggerAtMinute": 0,
-              "field": "days"
+              "triggerAtMinute": 0
             }
           ]
         }
       },
-      "id": "daily-health-trigger",
-      "name": "Daily Token Health Check (07:00 WIB)",
+      "id": "daily-health",
+      "name": "Daily Connection Health (07:00 WIB)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [220, 560]
@@ -39,7 +43,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "http://127.0.0.1:8000/instagram/health",
+        "url": "={{ $env.FAIV_ML_URL || 'http://127.0.0.1:8000' }}/instagram/health",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -49,65 +53,55 @@
             }
           ]
         },
-        "options": {
-          "timeout": 60000
-        }
+        "options": { "timeout": 60000 }
       },
-      "id": "check-token-health",
-      "name": "Check Instagram Token Health",
+      "id": "health-request",
+      "name": "Check Instagram Connections",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 560]
+      "position": [470, 560]
     },
     {
       "parameters": {
         "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
           "conditions": [
             {
-              "id": "condition-any-broken",
-              "leftValue": "={{ $json.connections.some(c => c.status !== 'connected') }}",
+              "id": "any-unhealthy",
+              "leftValue": "={{ $json.connections.length === 0 || $json.connections.some(c => c.status !== 'connected') }}",
               "rightValue": true,
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
             }
           ],
           "combinator": "and"
         },
         "options": {}
       },
-      "id": "check-any-broken",
-      "name": "Ada Token Bermasalah?",
+      "id": "health-condition",
+      "name": "Any Connection Unhealthy?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [700, 560]
+      "position": [720, 560]
     },
     {
       "parameters": {
-        "fromEmail": "faivpredict@gmail.com",
-        "toEmail": "wincentcoleusphan@gmail.com",
-        "subject": "=⚠️ FAIV Predict - Instagram Token Bermasalah ({{ $now.format('dd/MM/yyyy HH:mm') }})",
+        "fromEmail": "={{ $env.NOTIFICATION_FROM_EMAIL }}",
+        "toEmail": "={{ $env.NOTIFICATION_TO_EMAIL }}",
+        "subject": "=FAIV Predict: Instagram connection needs attention ({{ $now.format('dd/MM/yyyy HH:mm') }})",
         "emailType": "html",
-        "html": "=<div style=\"font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f1117; color: #e0e0e0; border-radius: 16px; overflow: hidden;\">\n  <div style=\"background: linear-gradient(135deg, #f59e0b, #d97706); padding: 32px 24px; text-align: center;\">\n    <h1 style=\"color: white; margin: 0; font-size: 24px;\">FAIV Predict</h1>\n    <p style=\"color: rgba(255,255,255,0.85); margin: 8px 0 0;\">Peringatan Koneksi Instagram</p>\n  </div>\n  <div style=\"padding: 24px;\">\n    <p>Halo Wincent,</p>\n    <p>Pemeriksaan harian mendeteksi <strong>masalah pada koneksi Instagram</strong>. Perbaiki sebelum pipeline mingguan hari Senin agar sinkronisasi tidak gagal.</p>\n    <table style=\"width: 100%; border-collapse: collapse; margin: 16px 0;\">\n      <tr style=\"background: #1a1d2e;\">\n        <th style=\"padding: 12px; text-align: left; border-bottom: 1px solid #2d3348;\">Brand</th>\n        <th style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">Status</th>\n      </tr>\n      {{ $json.connections.map(c => '<tr><td style=\"padding: 12px; border-bottom: 1px solid #2d3348;\">' + c.brand + '</td><td style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">' + (c.status === 'connected' ? '✅ Connected' : '❌ ' + (c.error || c.status)) + '</td></tr>').join('') }}\n    </table>\n    <p>Perbarui access token di Meta Developer Console, lalu ganti nilainya di environment ML service.</p>\n    <p style=\"color: #9ca3af; font-size: 13px;\">Email ini dikirim secara otomatis oleh sistem FAIV Predict via n8n.</p>\n  </div>\n</div>",
+        "html": "=<h2>Instagram connection health</h2><p>One or more verified brand connections need attention before the next sync.</p><table border=\"1\" cellpadding=\"8\" cellspacing=\"0\"><tr><th>Brand</th><th>Status</th></tr>{{ $json.connections.map(c => '<tr><td>' + c.brand + '</td><td>' + c.status + (c.error ? ': ' + c.error : '') + '</td></tr>').join('') }}</table><p>Review the server-side Meta credential configuration. No user-facing data was substituted.</p>",
         "options": {}
       },
-      "id": "email-token-warning",
-      "name": "Email Peringatan Token",
+      "id": "health-email",
+      "name": "Send Connection Warning",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [960, 560]
+      "position": [970, 520]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://127.0.0.1:8000/sync/now",
+        "url": "={{ $env.FAIV_ML_URL || 'http://127.0.0.1:8000' }}/sync/now",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -117,159 +111,95 @@
             }
           ]
         },
-        "options": {
-          "timeout": 300000
-        }
+        "options": { "timeout": 300000 }
       },
-      "id": "sync-retrain",
-      "name": "Sync Instagram + Retrain Models",
+      "id": "sync-request",
+      "name": "Sync Instagram and Retrain",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 300]
+      "position": [470, 260]
     },
     {
       "parameters": {
         "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
           "conditions": [
             {
-              "id": "condition-success",
+              "id": "pipeline-success",
               "leftValue": "={{ $json.status }}",
               "rightValue": "success",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "operator": { "type": "string", "operation": "equals" }
             }
           ],
           "combinator": "and"
         },
         "options": {}
       },
-      "id": "check-status",
-      "name": "Pipeline Berhasil?",
+      "id": "sync-condition",
+      "name": "Pipeline Fully Successful?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [700, 300]
+      "position": [720, 260]
     },
     {
       "parameters": {
-        "fromEmail": "faivpredict@gmail.com",
-        "toEmail": "wincentcoleusphan@gmail.com",
-        "subject": "=✅ FAIV Predict - Sync & Retrain Berhasil ({{ $now.format('dd/MM/yyyy HH:mm') }})",
+        "fromEmail": "={{ $env.NOTIFICATION_FROM_EMAIL }}",
+        "toEmail": "={{ $env.NOTIFICATION_TO_EMAIL }}",
+        "subject": "=FAIV Predict: verified sync completed ({{ $now.format('dd/MM/yyyy HH:mm') }})",
         "emailType": "html",
-        "html": "=<div style=\"font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f1117; color: #e0e0e0; border-radius: 16px; overflow: hidden;\">\n  <div style=\"background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 32px 24px; text-align: center;\">\n    <h1 style=\"color: white; margin: 0; font-size: 24px;\">FAIV Predict</h1>\n    <p style=\"color: rgba(255,255,255,0.8); margin: 8px 0 0;\">Pipeline Sync & Retrain Selesai</p>\n  </div>\n  <div style=\"padding: 24px;\">\n    <p>Halo Wincent,</p>\n    <p>Pipeline otomatis n8n telah selesai dijalankan pada <strong>{{ $now.format('dd MMMM yyyy, HH:mm') }} WIB</strong>.</p>\n    <h3 style=\"color: #8b5cf6;\">📊 Hasil Sinkronisasi & Pelatihan Model:</h3>\n    <table style=\"width: 100%; border-collapse: collapse; margin: 16px 0;\">\n      <tr style=\"background: #1a1d2e;\">\n        <th style=\"padding: 12px; text-align: left; border-bottom: 1px solid #2d3348;\">Brand</th>\n        <th style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">Posts</th>\n        <th style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">Status</th>\n      </tr>\n      {{ $json.results.map(r => '<tr><td style=\"padding: 12px; border-bottom: 1px solid #2d3348;\">' + r.brand + '</td><td style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">' + (r.sync.posts_synced || 'N/A') + '</td><td style=\"padding: 12px; text-align: center; border-bottom: 1px solid #2d3348;\">' + (r.train.status === 'success' ? '✅ ' + (r.train.accuracy * 100).toFixed(1) + '%' : '❌ Failed') + '</td></tr>').join('') }}\n    </table>\n    <p style=\"color: #9ca3af; font-size: 13px;\">Email ini dikirim secara otomatis oleh sistem FAIV Predict via n8n.</p>\n  </div>\n</div>",
+        "html": "=<h2>Sync and retraining completed</h2><table border=\"1\" cellpadding=\"8\" cellspacing=\"0\"><tr><th>Brand</th><th>Posts</th><th>Training</th></tr>{{ $json.results.map(r => '<tr><td>' + r.brand + '</td><td>' + (r.sync.posts_synced ?? 0) + '</td><td>' + r.train.status + (r.train.scope ? ' (' + r.train.scope + ')' : '') + '</td></tr>').join('') }}</table>",
         "options": {}
       },
-      "id": "email-success",
-      "name": "Email Notifikasi Sukses",
+      "id": "success-email",
+      "name": "Send Success Summary",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [960, 220]
+      "position": [970, 180]
     },
     {
       "parameters": {
-        "fromEmail": "faivpredict@gmail.com",
-        "toEmail": "wincentcoleusphan@gmail.com",
-        "subject": "=❌ FAIV Predict - Pipeline Gagal ({{ $now.format('dd/MM/yyyy HH:mm') }})",
+        "fromEmail": "={{ $env.NOTIFICATION_FROM_EMAIL }}",
+        "toEmail": "={{ $env.NOTIFICATION_TO_EMAIL }}",
+        "subject": "=FAIV Predict: sync requires attention ({{ $now.format('dd/MM/yyyy HH:mm') }})",
         "emailType": "html",
-        "html": "=<div style=\"font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f1117; color: #e0e0e0; border-radius: 16px; overflow: hidden;\">\n  <div style=\"background: linear-gradient(135deg, #ef4444, #dc2626); padding: 32px 24px; text-align: center;\">\n    <h1 style=\"color: white; margin: 0; font-size: 24px;\">FAIV Predict</h1>\n    <p style=\"color: rgba(255,255,255,0.8); margin: 8px 0 0;\">Pipeline Error Alert</p>\n  </div>\n  <div style=\"padding: 24px;\">\n    <p>Halo Wincent,</p>\n    <p>Pipeline sync & retrain mengalami <strong>kegagalan</strong> pada {{ $now.format('dd MMMM yyyy, HH:mm') }} WIB.</p>\n    <h3 style=\"color: #ef4444;\">⚠️ Detail Error:</h3>\n    <pre style=\"background: #1a1d2e; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px;\">{{ JSON.stringify($json, null, 2) }}</pre>\n    <p>Silakan periksa token Instagram Graph API atau koneksi database Supabase Anda.</p>\n    <p style=\"color: #9ca3af; font-size: 13px;\">Email ini dikirim secara otomatis oleh sistem FAIV Predict via n8n.</p>\n  </div>\n</div>",
+        "html": "=<h2>Sync or retraining was not fully successful</h2><p>Status: {{ $json.status }}</p><pre>{{ JSON.stringify($json.results, null, 2) }}</pre>",
         "options": {}
       },
-      "id": "email-failure",
-      "name": "Email Notifikasi Gagal",
+      "id": "failure-email",
+      "name": "Send Failure Summary",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [960, 420]
+      "position": [970, 340]
     }
   ],
   "connections": {
-    "Daily Token Health Check (07:00 WIB)": {
+    "Weekly Sync (Monday 06:00 WIB)": {
+      "main": [[{ "node": "Sync Instagram and Retrain", "type": "main", "index": 0 }]]
+    },
+    "Sync Instagram and Retrain": {
+      "main": [[{ "node": "Pipeline Fully Successful?", "type": "main", "index": 0 }]]
+    },
+    "Pipeline Fully Successful?": {
       "main": [
-        [
-          {
-            "node": "Check Instagram Token Health",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Send Success Summary", "type": "main", "index": 0 }],
+        [{ "node": "Send Failure Summary", "type": "main", "index": 0 }]
       ]
     },
-    "Check Instagram Token Health": {
-      "main": [
-        [
-          {
-            "node": "Ada Token Bermasalah?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Daily Connection Health (07:00 WIB)": {
+      "main": [[{ "node": "Check Instagram Connections", "type": "main", "index": 0 }]]
     },
-    "Ada Token Bermasalah?": {
-      "main": [
-        [
-          {
-            "node": "Email Peringatan Token",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        []
-      ]
+    "Check Instagram Connections": {
+      "main": [[{ "node": "Any Connection Unhealthy?", "type": "main", "index": 0 }]]
     },
-    "Weekly Schedule (Senin 06:00 WIB)": {
-      "main": [
-        [
-          {
-            "node": "Sync Instagram + Retrain Models",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Sync Instagram + Retrain Models": {
-      "main": [
-        [
-          {
-            "node": "Pipeline Berhasil?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Pipeline Berhasil?": {
-      "main": [
-        [
-          {
-            "node": "Email Notifikasi Sukses",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Email Notifikasi Gagal",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Any Connection Unhealthy?": {
+      "main": [[{ "node": "Send Connection Warning", "type": "main", "index": 0 }], []]
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "timezone": "Asia/Jakarta"
   },
   "tags": [
-    {
-      "name": "FAIV Predict",
-      "id": "faiv-predict"
-    }
+    { "name": "FAIV Predict", "id": "faiv-predict" }
   ]
 }

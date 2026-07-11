@@ -22,8 +22,10 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(BASE_DIR, "models_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# Minimum number of real historical posts required to train a model.
+# Shared cohort models can pool data across brands. A personal model needs a
+# materially larger history so it does not overfit one account's small sample.
 MIN_TRAINING_SAMPLES = 30
+MIN_ACCOUNT_TRAINING_SAMPLES = 200
 
 
 class InsufficientDataError(Exception):
@@ -93,6 +95,8 @@ class ModelTrainer:
                                follower_count_at_post, caption_length, hashtag_count, has_cta, created_at
                         FROM posts
                         WHERE brand_id = %s
+                          AND source = 'instagram_graph'
+                          AND instagram_media_id IS NOT NULL
                         ORDER BY created_at ASC
                         """,
                         (brand_id,)
@@ -107,6 +111,8 @@ class ModelTrainer:
                         FROM posts p
                         JOIN brands b ON p.brand_id = b.id
                         WHERE b.niche = %s
+                          AND p.source = 'instagram_graph'
+                          AND p.instagram_media_id IS NOT NULL
                         ORDER BY p.created_at ASC
                         """,
                         (niche,)
@@ -118,12 +124,16 @@ class ModelTrainer:
                 "Cannot train: the historical posts database is unreachable. "
                 "Configure DATABASE_URL and sync real data first."
             )
+        finally:
+            if conn:
+                conn.close()
 
-        if len(data) < MIN_TRAINING_SAMPLES:
+        required_samples = MIN_ACCOUNT_TRAINING_SAMPLES if brand_id else MIN_TRAINING_SAMPLES
+        if len(data) < required_samples:
             raise InsufficientDataError(
                 f"Cannot train: only {len(data)} real posts found for "
                 f"{'brand ' + str(brand_id) if brand_id else 'niche ' + str(niche)}; "
-                f"at least {MIN_TRAINING_SAMPLES} are required. Sync more data first."
+                f"at least {required_samples} are required. Sync more data first."
             )
 
         return pd.DataFrame(data)
@@ -244,7 +254,10 @@ class ModelTrainer:
             "p67_threshold": p67,
             "train_samples": len(X_train),
             "test_samples": len(X_test),
-            "split": "chronological_80_20"
+            "split": "chronological_80_20",
+            "data_source": "instagram_graph",
+            "identity_key": "instagram_media_id",
+            "verified_posts": len(df),
         }
         logger.info(f"Model evaluation metrics: {metrics}")
         
@@ -261,6 +274,11 @@ class ModelTrainer:
             "p67": p67,
             "features": feature_cols,
             "feature_ranges": DataPreprocessor.compute_feature_ranges(X_train),
+            "data_provenance": {
+                "source": "instagram_graph",
+                "identity_key": "instagram_media_id",
+                "verified_posts": len(df),
+            },
         }
         joblib.dump(model_bundle, local_path)
         logger.info(f"Saved local model bundle to {local_path}")
@@ -273,7 +291,10 @@ class ModelTrainer:
         storage_url = cls.upload_to_supabase_storage(local_path, storage_path)
         
         if not storage_url:
-            storage_url = f"file:///{local_path.replace(os.sep, '/')}"
+            raise RuntimeError(
+                "Training produced a model, but the artifact could not be stored durably. "
+                "No model was registered."
+            )
             
         # 9. Register in models database table & update brand maturity
         conn = None
@@ -309,7 +330,8 @@ class ModelTrainer:
                 conn.commit()
                 logger.info(f"Registered model in DB with ID: {model_db_id}")
         except Exception as e:
-            logger.warning(f"Could not write model details to database: {e}")
+            logger.error(f"Could not register model details in database: {e}")
+            raise RuntimeError("Model artifact exists, but database registration failed.") from e
         finally:
             if conn:
                 conn.close()

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { format as formatDate } from "date-fns";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
@@ -10,7 +10,7 @@ import { type WhyReason } from "@/components/WhyThisScore";
 import { type ContentFormat, type Tier, type Brand } from "@/lib/types";
 import { ViewSwitch, type PredictView } from "./_components/ViewSwitch";
 import { ComposeView } from "./_components/ComposeView";
-import { InsightsView, type InsightsPrediction, type TreRecommendation } from "./_components/InsightsView";
+import { InsightsView, type InsightsPrediction } from "./_components/InsightsView";
 import { type Counterfactual } from "./_components/MeasuredImprovements";
 
 // Labels for the real model feature keys returned by the ML service.
@@ -24,9 +24,6 @@ const FEATURE_LABELS: Record<string, string> = {
   has_question: "Question Prompt",
   emoji_count: "Emoji Count",
 };
-
-// Parameters the UI can stage automatically on "Apply & Re-Analyze".
-const AUTO_APPLICABLE = new Set(["post_hour", "has_cta", "hashtag_count"]);
 
 export default function PredictPage() {
   const [view, setView] = useState<PredictView>("compose");
@@ -53,11 +50,7 @@ export default function PredictPage() {
   const [submitting, setSubmitting] = useState(false);
   const [optimizationsApplied, setOptimizationsApplied] = useState(false);
 
-  // TRE recommendations from the ML service
-  const [treRecs, setTreRecs] = useState<TreRecommendation[] | null>(null);
-  const [treError, setTreError] = useState<string | null>(null);
-
-  // Staged changes (shared by Measured Improvements + Guideline lists)
+  // Staged changes from measured counterfactuals.
   const [appliedRecs, setAppliedRecs] = useState<Record<string, boolean>>({});
 
   // Feature importances kept separately for the evidence panels
@@ -118,26 +111,6 @@ export default function PredictPage() {
     setOptimizationsApplied(false);
   }, [caption, contentFormat, scheduledAt, accountId]);
 
-  const fetchTreRecommendations = useCallback(
-    async (payload: { caption: string; format: ContentFormat; post_hour: number }) => {
-      setTreRecs(null);
-      setTreError(null);
-      try {
-        const res = await fetch("/api/suggest", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...payload, brand_id: account?.id, niche: account?.niche }),
-        });
-        if (!res.ok) throw new Error("Recommendation service unavailable");
-        const data = await res.json();
-        setTreRecs(Array.isArray(data.recommendations) ? data.recommendations : []);
-      } catch {
-        setTreError("Recommendations are unavailable right now.");
-      }
-    },
-    [account]
-  );
-
   const handlePredict = async () => {
     if (!isFormValid || submitting) return;
     setSubmitting(true);
@@ -196,12 +169,6 @@ export default function PredictPage() {
         accountId,
       });
       setView("insights");
-
-      fetchTreRecommendations({
-        caption,
-        format: contentFormat,
-        post_hour: scheduledAt.getHours(),
-      });
     } catch {
       setPredictError("Could not reach the prediction service. Please try again.");
     } finally {
@@ -267,9 +234,9 @@ export default function PredictPage() {
       .sort((a, b) => b.importance - a.importance);
   }, [featureImportances]);
 
-  // "Why this score" — input signals vs the niche guidelines, weighted by the
-  // model's real global feature importances. New v2 features appear only when
-  // the serving model was trained on them.
+  // "Why this score" lists the observed model inputs and their real global
+  // feature importance. Importance has no sign, so every item is deliberately
+  // neutral; measured direction belongs only in the counterfactual panel.
   const whyReasons = useMemo<WhyReason[]>(() => {
     const fi = featureImportances;
     if (!fi) return [];
@@ -278,18 +245,12 @@ export default function PredictPage() {
       : scheduledAt.getHours();
     const snapshotStats = analyzeCaption(predictionSnapshot?.caption ?? caption);
     const snapDate = predictionSnapshot ? new Date(predictionSnapshot.scheduledAt) : scheduledAt;
-    const inWindow = postHour >= 17 && postHour <= 21;
-    const goodHashtags = snapshotStats.hashtags.length >= 3 && snapshotStats.hashtags.length <= 8;
-    const goodLength = snapshotStats.charCount >= 180 && snapshotStats.charCount <= 320;
-
     const reasons: WhyReason[] = [
       {
-        label: inWindow
-          ? `Posted at ${postHour}:00 — inside the 17:00–21:00 activity window`
-          : `Posted at ${postHour}:00 — outside the 17:00–21:00 activity window`,
-        detail: "Evening hours carry the highest audience activity in this niche's history.",
+        label: `Scheduled at ${String(postHour).padStart(2, "0")}:00`,
+        detail: "Posting hour is an input used by this trained model.",
         weight: fi.post_hour ?? 0,
-        direction: inWindow ? ("positive" as const) : ("negative" as const),
+        direction: "neutral" as const,
       },
       {
         label: snapshotStats.hasCTA
@@ -297,23 +258,19 @@ export default function PredictPage() {
           : "No call-to-action detected",
         detail: "An explicit save/comment/share prompt is a model input feature.",
         weight: fi.has_cta ?? 0,
-        direction: snapshotStats.hasCTA ? ("positive" as const) : ("negative" as const),
+        direction: "neutral" as const,
       },
       {
-        label: goodHashtags
-          ? `${snapshotStats.hashtags.length} hashtags — within the 3–8 baseline`
-          : `${snapshotStats.hashtags.length} hashtags — outside the 3–8 baseline`,
+        label: `${snapshotStats.hashtags.length} hashtags detected`,
         detail: "Hashtag count feeds the model directly.",
         weight: fi.hashtag_count ?? 0,
-        direction: goodHashtags ? ("positive" as const) : ("negative" as const),
+        direction: "neutral" as const,
       },
       {
-        label: goodLength
-          ? `${snapshotStats.charCount} characters — within the 180–320 baseline`
-          : `${snapshotStats.charCount} characters — outside the 180–320 baseline`,
+        label: `${snapshotStats.charCount} caption characters`,
         detail: "Caption length feeds the model directly.",
         weight: fi.caption_length ?? 0,
-        direction: goodLength ? ("positive" as const) : ("negative" as const),
+        direction: "neutral" as const,
       },
     ];
 
@@ -331,7 +288,7 @@ export default function PredictPage() {
         label: snapshotStats.hasQuestion ? "Caption asks the audience a question" : "No question in the caption",
         detail: "Question prompts are a model input feature.",
         weight: fi.has_question,
-        direction: snapshotStats.hasQuestion ? ("positive" as const) : ("negative" as const),
+        direction: "neutral" as const,
       });
     }
     if (fi.emoji_count !== undefined) {
@@ -427,17 +384,6 @@ export default function PredictPage() {
               contentFormat={contentFormat}
               whyReasons={whyReasons}
               mdiChartData={mdiChartData}
-              treRecs={treRecs}
-              treError={treError}
-              onRetryTre={() =>
-                fetchTreRecommendations({
-                  caption: predictionSnapshot?.caption ?? caption,
-                  format: predictionSnapshot?.contentFormat ?? contentFormat,
-                  post_hour: new Date(predictionSnapshot?.scheduledAt ?? scheduledAt.getTime()).getHours(),
-                })
-              }
-              featureLabels={FEATURE_LABELS}
-              autoApplicable={AUTO_APPLICABLE}
               appliedRecs={appliedRecs}
               onToggleRec={handleToggleRec}
               anyRecsApplied={anyRecsApplied}

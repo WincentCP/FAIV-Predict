@@ -4,15 +4,10 @@ import { ArrowRight, Lock, Mail } from "lucide-react";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-// Pre-filled development/test credentials. They authenticate against the real
-// Supabase Auth project — there is no client-side bypass.
-const DEV_EMAIL = "wincentcoleusphan@gmail.com";
-const DEV_PASSWORD = "skripsisuccess";
-
 export default function Page() {
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState(DEV_EMAIL);
-  const [password, setPassword] = useState(DEV_PASSWORD);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {

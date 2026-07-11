@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getRequestUser, getOwnedBrands } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +11,10 @@ const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
 
 export async function GET() {
   try {
+    const supabase = await createClient();
+    const user = await getRequestUser(supabase);
+    if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
+    const ownedIds = new Set((await getOwnedBrands(supabase, user.id)).map((brand) => brand.id));
     const backendHeaders: Record<string, string> = {};
     if (INTERNAL_API_TOKEN) {
       backendHeaders["X-Internal-Token"] = INTERNAL_API_TOKEN;
@@ -36,7 +42,12 @@ export async function GET() {
     }
 
     const data = await mlResponse.json();
-    return NextResponse.json(data);
+    return NextResponse.json({
+      ...data,
+      connections: Array.isArray(data?.connections)
+        ? data.connections.filter((connection: any) => ownedIds.has(connection.brand_id))
+        : [],
+    });
   } catch (error: any) {
     console.error("[BFF InstagramHealth] Fatal error:", error);
     return NextResponse.json(

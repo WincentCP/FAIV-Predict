@@ -6,7 +6,7 @@ const PROTECTED_PREFIXES = [
   "/predict",
   "/calendar",
   "/history",
-  "/model-health",
+  "/insights",
   "/niches",
 ];
 

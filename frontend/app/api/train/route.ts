@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,17 @@ export async function GET(request: Request) {
         { status: 400 }
       );
     }
+
+    const supabase = await createClient();
+    const user = await getRequestUser(supabase);
+    if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
+    const { data: job } = await supabase
+      .from("model_retrain_jobs")
+      .select("id, brands!inner(owner_id)")
+      .eq("id", job_id)
+      .eq("brands.owner_id", user.id)
+      .maybeSingle();
+    if (!job) return NextResponse.json({ status: "error", message: "Retrain job not found." }, { status: 404 });
 
     const backendHeaders: Record<string, string> = {};
     if (INTERNAL_API_TOKEN) {
@@ -51,7 +64,20 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { brand_id, niche } = body;
+    const { brand_id } = body;
+    const supabase = await createClient();
+    const user = await getRequestUser(supabase);
+    if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
+    if (typeof brand_id !== "string" || !brand_id) {
+      return NextResponse.json({ status: "error", message: "A registered brand is required." }, { status: 400 });
+    }
+    const { data: ownedBrand } = await supabase
+      .from("brands")
+      .select("id, niche")
+      .eq("id", brand_id)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+    if (!ownedBrand) return NextResponse.json({ status: "error", message: "Brand not found in this workspace." }, { status: 404 });
 
     const backendHeaders: Record<string, string> = {
       "Content-Type": "application/json",
@@ -66,7 +92,7 @@ export async function POST(request: Request) {
       headers: backendHeaders,
       body: JSON.stringify({
         brand_id: brand_id || null,
-        niche: niche || null
+        niche: ownedBrand.niche
       }),
     });
 

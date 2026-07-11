@@ -2,10 +2,8 @@
 
 import { fetchWithRetry } from "@/lib/fetch-retry";
 import { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import { SectionHeader } from "@/components/SectionHeader";
-import { TierBadge } from "@/components/TierBadge";
-import { type Tier, type ContentFormat, type Brand, brandHandle } from "@/lib/types";
+import { type ContentFormat, type Brand, brandHandle } from "@/lib/types";
 import {
   UploadCloud,
   Download,
@@ -28,26 +26,29 @@ import { cn } from "@/lib/utils";
 type CalendarEntry = {
   id: string;
   date: string; // YYYY-MM-DD
-  time: string | null; // HH:00 from the prediction's post_hour feature
+  time: string | null;
   account: string;
   brand: string;
   format: ContentFormat;
   caption: string;
   title: string;
-  tier: Tier;
-  confidence: number | null;
+  brand_id: string | null;
+  visualReference: string;
+  voiceOver: "Need" | "No Need" | "Done" | null;
+  pic: string;
+  status: "Need Shooting" | "Need Design" | "Need Editing" | "Screening" | "Ready to Post" | "Posted" | null;
 };
 
 type ImportReport = {
   total: number;
-  predicted: number;
+  imported: number;
   skipped: number;
   failed: number;
   running: boolean;
   errors: string[];
 };
 
-type CsvField = "brand" | "format" | "caption" | "date" | "time";
+type CsvField = "number" | "brand" | "format" | "contentDetails" | "visualReference" | "caption" | "voiceOver" | "pic" | "status" | "date" | "time";
 
 type CsvStage = {
   fileName: string;
@@ -56,21 +57,44 @@ type CsvStage = {
   mapping: Record<CsvField, number>; // header index per field, -1 = unmapped
 };
 
+const CALENDAR_STATUSES = [
+  "Need Shooting",
+  "Need Design",
+  "Need Editing",
+  "Screening",
+  "Ready to Post",
+  "Posted",
+] as const;
+
+const VOICE_OVER_VALUES = ["Need", "No Need", "Done"] as const;
+
 const CSV_FIELDS: { field: CsvField; label: string; required: boolean }[] = [
-  { field: "brand", label: "Brand", required: true },
-  { field: "format", label: "Format", required: true },
-  { field: "caption", label: "Caption", required: true },
-  { field: "date", label: "Date", required: false },
+  { field: "number", label: "No.", required: false },
+  { field: "date", label: "Posting Date", required: true },
   { field: "time", label: "Time", required: false },
+  { field: "brand", label: "Brand", required: false },
+  { field: "format", label: "Type", required: false },
+  { field: "contentDetails", label: "Content Details", required: false },
+  { field: "visualReference", label: "Visual Reference", required: false },
+  { field: "caption", label: "Caption", required: false },
+  { field: "voiceOver", label: "Voice Over", required: false },
+  { field: "pic", label: "PIC", required: false },
+  { field: "status", label: "Status", required: false },
 ];
 
 // Header synonyms so exports from different tools map automatically.
 const CSV_SYNONYMS: Record<CsvField, string[]> = {
+  number: ["no", "no.", "number", "nomor", "#"],
   brand: ["brand", "account", "client", "brand_name", "akun", "brand name"],
   format: ["format", "type", "media", "media_type", "content_type", "content format"],
   caption: ["caption", "text", "content", "copy", "teks", "description"],
-  date: ["date", "scheduled", "scheduled_date", "day", "tanggal", "publish date"],
+  date: ["date", "scheduled", "scheduled_date", "day", "tanggal", "publish date", "posting date", "tanggal posting"],
   time: ["time", "hour", "jam", "post_time", "posting time"],
+  contentDetails: ["content details", "content detail", "details", "detail konten", "judul", "topic"],
+  visualReference: ["visual reference", "visual", "reference", "referensi visual", "link visual"],
+  voiceOver: ["voice over", "voiceover", "vo"],
+  pic: ["pic", "person in charge", "owner", "assignee"],
+  status: ["status", "workflow status", "progress"],
 };
 
 function detectColumns(headers: string[]): Record<CsvField, number> {
@@ -78,7 +102,9 @@ function detectColumns(headers: string[]): Record<CsvField, number> {
   // and "MediaType" all match the same synonym.
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const normalized = headers.map(norm);
-  const mapping = { brand: -1, format: -1, caption: -1, date: -1, time: -1 } as Record<CsvField, number>;
+  const mapping = Object.fromEntries(
+    (Object.keys(CSV_SYNONYMS) as CsvField[]).map((field) => [field, -1])
+  ) as Record<CsvField, number>;
   for (const field of Object.keys(CSV_SYNONYMS) as CsvField[]) {
     for (const syn of CSV_SYNONYMS[field]) {
       const idx = normalized.indexOf(norm(syn));
@@ -91,13 +117,26 @@ function detectColumns(headers: string[]): Record<CsvField, number> {
   return mapping;
 }
 
+function detectHeaderRow(rows: string[][]): number {
+  let bestIndex = 0;
+  let bestScore = -1;
+  rows.slice(0, 20).forEach((row, index) => {
+    const mapping = detectColumns(row.map((cell) => String(cell || "").trim()));
+    const matched = Object.values(mapping).filter((column) => column >= 0).length;
+    const score = matched + (mapping.date >= 0 ? 4 : 0) + (mapping.caption >= 0 ? 1 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
 const WEEK_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const ALLOWED_FORMATS: ContentFormat[] = ["Reels", "Carousel", "Single Image"];
-
 const today = new Date();
 const yyyy = today.getFullYear();
 const mm = today.getMonth();
@@ -116,34 +155,37 @@ export default function CalendarPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const loadPredictions = useCallback(async () => {
+  const loadCalendar = useCallback(async () => {
     try {
-      const res = await fetchWithRetry("/api/history");
+      const res = await fetchWithRetry("/api/calendar");
       if (!res.ok) {
-        throw new Error("Could not load predictions");
+        throw new Error("Could not load calendar entries");
       }
       const data = await res.json();
-      const mapped: CalendarEntry[] = (data || []).map((p: any) => ({
-        id: p.id,
-        date: p.scheduled_date ? p.scheduled_date : p.when.split("T")[0],
-        time: typeof p.post_hour === "number" ? `${String(p.post_hour).padStart(2, "0")}:00` : null,
-        account: p.account || "@unknown",
-        brand: p.brand || "Unknown Brand",
-        format: p.format as ContentFormat,
-        caption: p.caption,
-        title: p.title || "",
-        tier: p.tier as Tier,
-        confidence: p.confidence ?? null,
+      const mapped: CalendarEntry[] = (data || []).map((entry: any) => ({
+        id: entry.id,
+        date: entry.posting_date,
+        time: entry.posting_time ? String(entry.posting_time).slice(0, 5) : null,
+        account: entry.brands?.name ? brandHandle(entry.brands.name) : "Unassigned",
+        brand: entry.brands?.name || "Unassigned",
+        brand_id: entry.brand_id || null,
+        format: normalizeFormat(entry.content_type),
+        caption: entry.caption || "",
+        title: entry.content_details || "",
+        visualReference: entry.visual_reference || "",
+        voiceOver: entry.voice_over || null,
+        pic: entry.pic || "",
+        status: entry.status || null,
       }));
       setEntries(mapped);
       setLoadError(null);
     } catch {
-      setLoadError("The prediction history could not be loaded.");
+      setLoadError("The content calendar could not be loaded. Apply the ownership migration if this is the first production run.");
     }
   }, []);
 
   useEffect(() => {
-    loadPredictions();
+    loadCalendar();
 
     async function loadBrands() {
       try {
@@ -157,7 +199,7 @@ export default function CalendarPage() {
       }
     }
     loadBrands();
-  }, [loadPredictions]);
+  }, [loadCalendar]);
 
   const monthEntries = useMemo(
     () =>
@@ -182,7 +224,7 @@ export default function CalendarPage() {
     [brandsList]
   );
 
-  // ------- CSV Import: upload → detect columns → review → confirm → score -------
+  // ------- CSV/XLSX Import: parse → detect columns → review → confirm -------
   const [csvStage, setCsvStage] = useState<CsvStage | null>(null);
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -190,17 +232,42 @@ export default function CalendarPage() {
     if (fileRef.current) fileRef.current.value = "";
     if (!file) return;
 
-    const text = await file.text();
-    const rows = parseCsv(text);
+    let rows: string[][];
+    try {
+      if (/\.xlsx$/i.test(file.name)) {
+        const ExcelJS = await import("exceljs");
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(await file.arrayBuffer() as any);
+        const sheet = workbook.worksheets[0];
+        if (!sheet) throw new Error("The workbook has no readable worksheet.");
+        rows = [];
+        sheet.eachRow({ includeEmpty: true }, (row) => {
+          const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+          rows.push(values.map(excelCellToString));
+        });
+      } else {
+        rows = parseCsv(await file.text());
+      }
+    } catch (error: any) {
+      setImportReport({
+        total: 0, imported: 0, skipped: 0, failed: 0, running: false,
+        errors: [error.message || "The spreadsheet could not be read."],
+      });
+      return;
+    }
     if (rows.length < 2) {
       setImportReport({
-        total: 0, predicted: 0, skipped: 0, failed: 0, running: false,
+        total: 0, imported: 0, skipped: 0, failed: 0, running: false,
         errors: ["The file has no data rows. Expected a header row plus content rows."],
       });
       return;
     }
-    const headers = rows[0].map((h) => h.trim());
-    const dataRows = rows.slice(1).filter((r) => r.some((c) => c.trim() !== ""));
+    const headerIndex = detectHeaderRow(rows);
+    const headers = rows[headerIndex].map((h) => String(h || "").trim());
+    const dataRows = rows
+      .slice(headerIndex + 1)
+      .map((row) => row.map((cell) => String(cell || "")))
+      .filter((r) => r.some((c) => c.trim() !== ""));
     setImportReport(null);
     setCsvStage({
       fileName: file.name,
@@ -215,32 +282,40 @@ export default function CalendarPage() {
     if (!csvStage) return null;
     const { rows, mapping } = csvStage;
     const seenInFile = new Set<string>();
-    const alreadyPredicted = new Set(
-      entries.map((en) => `${en.brand}||${en.caption}`.toLowerCase())
+    const existingEntries = new Set(
+      entries.map((entry) => `${entry.date}||${entry.brand}||${entry.caption}`.toLowerCase())
     );
     const results = rows.map((row) => {
       const get = (f: CsvField) => (mapping[f] >= 0 ? (row[mapping[f]] || "").trim() : "");
       const brandValue = get("brand");
-      const formatValue = get("format");
+      const formatRaw = get("format");
+      const formatValue = normalizeFormat(formatRaw);
       const caption = get("caption");
-      const dateValue = get("date");
+      const dateValue = normalizeDate(get("date"));
       const timeValue = get("time");
+      const contentDetails = get("contentDetails");
+      const visualReference = get("visualReference");
+      const voiceOver = normalizeVoiceOver(get("voiceOver"));
+      const pic = get("pic");
+      const status = normalizeStatus(get("status"));
       const errors: string[] = [];
       const warnings: string[] = [];
-      if (!caption) errors.push("empty caption");
-      if (!ALLOWED_FORMATS.includes(formatValue as ContentFormat))
-        errors.push(`format "${formatValue || "—"}" must be Reels, Carousel, or Single Image`);
-      const brand = resolveBrand(brandValue);
-      if (!brand) errors.push(`brand "${brandValue || "—"}" is not registered`);
-      if (dateValue && !/^\d{4}-\d{2}-\d{2}$/.test(dateValue))
-        warnings.push("date will be ignored (use YYYY-MM-DD)");
+      if (!dateValue) errors.push("posting date is missing or not recognized");
+      if (!formatRaw) warnings.push("content type missing; defaulted to Single Image");
+      const brand = brandValue ? resolveBrand(brandValue) : undefined;
+      if (brandValue && !brand) warnings.push(`brand "${brandValue}" is not registered; imported as unassigned`);
+      if (get("voiceOver") && !voiceOver) warnings.push("voice-over value ignored; use Need, No Need, or Done");
+      if (get("status") && !status) warnings.push("status value ignored because it is not in the supported workflow");
       if (caption && caption.length < 10) warnings.push("suspiciously short caption");
-      const key = `${brandValue}||${caption}`.toLowerCase();
+      const key = `${dateValue}||${brandValue}||${caption}`.toLowerCase();
       if (caption && seenInFile.has(key)) warnings.push("duplicate of another row in this file");
       seenInFile.add(key);
-      if (caption && brand && alreadyPredicted.has(`${brand.name}||${caption}`.toLowerCase()))
-        warnings.push("this caption was already predicted before");
-      return { brand, formatValue, caption, dateValue, timeValue, errors, warnings };
+      if (dateValue && existingEntries.has(`${dateValue}||${brand?.name || "Unassigned"}||${caption}`.toLowerCase()))
+        warnings.push("a matching calendar entry already exists");
+      return {
+        brand, formatValue, caption, dateValue, timeValue, contentDetails,
+        visualReference, voiceOver, pic, status, errors, warnings,
+      };
     });
     return { results, importable: results.filter((r) => r.errors.length === 0) };
   }, [csvStage, entries, resolveBrand]);
@@ -252,50 +327,56 @@ export default function CalendarPage() {
     setCsvStage(null);
 
     const report: ImportReport = {
-      total: csvValidation.results.length, predicted: 0, skipped, failed: 0, running: true,
+      total: csvValidation.results.length, imported: 0, skipped, failed: 0, running: true,
       errors: skipped > 0 ? [`${skipped} row${skipped === 1 ? "" : "s"} excluded during review (validation errors).`] : [],
     };
     setImportReport({ ...report });
 
-    for (let idx = 0; idx < valid.length; idx++) {
-      const r = valid[idx];
-      const hourMatch = r.timeValue.match(/^(\d{1,2})/);
-      const postHour = hourMatch ? Math.min(23, Math.max(0, parseInt(hourMatch[1], 10))) : 19;
+    if (valid.length === 0) {
+      report.running = false;
+      report.errors.push("No importable rows remain. Review the posting-date mapping and validation messages.");
+      setImportReport({ ...report });
+      return;
+    }
+
+    const payloads = valid.map((row) => ({
+      brand_id: row.brand?.id || null,
+      posting_date: row.dateValue,
+      posting_time: normalizeTime(row.timeValue),
+      content_type: row.formatValue,
+      content_details: row.contentDetails,
+      visual_reference: row.visualReference,
+      caption: row.caption,
+      voice_over: row.voiceOver,
+      pic: row.pic,
+      status: row.status,
+    }));
+    for (let start = 0; start < payloads.length; start += 500) {
+      const batch = payloads.slice(start, start + 500);
       try {
-        const res = await fetch("/api/predict", {
+        const res = await fetch("/api/calendar", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            caption: r.caption,
-            format: r.formatValue,
-            post_hour: postHour,
-            brand_id: r.brand!.id,
-            niche: r.brand!.niche,
-            scheduled_date: /^\d{4}-\d{2}-\d{2}$/.test(r.dateValue) ? r.dateValue : undefined,
-          }),
+          body: JSON.stringify({ entries: batch }),
         });
         const data = await res.json().catch(() => null);
-        if (res.ok && data?.predicted_class) {
-          report.predicted++;
-        } else {
-          report.failed++;
-          report.errors.push(`"${r.caption.slice(0, 40)}…": ${data?.message || "prediction failed"}.`);
-        }
-      } catch {
-        report.failed++;
-        report.errors.push(`"${r.caption.slice(0, 40)}…": prediction service unreachable.`);
+        if (!res.ok) throw new Error(data?.message || "calendar import failed");
+        report.imported += Array.isArray(data?.entries) ? data.entries.length : batch.length;
+      } catch (error: any) {
+        report.failed += batch.length;
+        report.errors.push(`Rows ${start + 1}–${start + batch.length}: ${error.message || "import failed"}`);
       }
       setImportReport({ ...report });
     }
 
     report.running = false;
     setImportReport({ ...report });
-    await loadPredictions();
+    await loadCalendar();
   };
 
-  // ------- CSV Export of the visible month -------
-  const handleExport = () => {
-    const header = ["date", "time", "brand", "account", "format", "caption", "predicted_tier", "confidence"];
+  // ------- Editable CSV export of the visible month -------
+  const handleExportCsv = () => {
+    const header = ["posting_date", "time", "brand", "type", "content_details", "visual_reference", "caption", "voice_over", "pic", "status"];
     const lines = [header.join(",")];
     for (const e of monthEntries) {
       lines.push(
@@ -303,38 +384,99 @@ export default function CalendarPage() {
           e.date,
           e.time ?? "",
           csvEscape(e.brand),
-          e.account,
           e.format,
+          csvEscape(e.title),
+          csvEscape(e.visualReference),
           csvEscape(e.caption),
-          e.tier,
-          e.confidence != null ? `${e.confidence}%` : "",
+          e.voiceOver || "",
+          csvEscape(e.pic),
+          e.status || "",
         ].join(",")
       );
     }
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `faiv-calendar-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const blob = new Blob(["\uFEFF", lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    downloadBlob(blob, `faiv-calendar-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.csv`);
+  };
+
+  const handleExportXlsx = async () => {
+    const ExcelJS = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "FAIV Predict";
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet("Content Calendar", {
+      views: [{ state: "frozen", ySplit: 1 }],
+    });
+    sheet.columns = [
+      { header: "Posting Date", width: 14 }, { header: "Time", width: 10 },
+      { header: "Brand", width: 22 }, { header: "Type", width: 16 },
+      { header: "Content Details", width: 30 }, { header: "Visual Reference", width: 30 },
+      { header: "Caption", width: 48 }, { header: "Voice Over", width: 14 },
+      { header: "PIC", width: 20 }, { header: "Status", width: 20 },
+    ];
+    for (const entry of monthEntries) {
+      sheet.addRow([
+        entry.date, entry.time || "", entry.brand === "Unassigned" ? "" : entry.brand,
+        entry.format, entry.title, entry.visualReference, entry.caption,
+        entry.voiceOver || "", entry.pic, entry.status || "",
+      ]);
+    }
+    const header = sheet.getRow(1);
+    header.height = 24;
+    header.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF5B41B8" } };
+    header.alignment = { vertical: "middle" };
+    sheet.autoFilter = { from: "A1", to: "J1" };
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 1) row.alignment = { vertical: "top", wrapText: true };
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    downloadBlob(
+      new Blob([buffer as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      `faiv-calendar-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.xlsx`,
+    );
+  };
+
+  const handleExportPdf = async () => {
+    const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+    const autoTable = autoTableModule.default;
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text(`Content Calendar — ${MONTH_NAMES[cursor.m]} ${cursor.y}`, 14, 16);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(90);
+    doc.text("Exported from FAIV Predict. Only user-created and imported planning records are included.", 14, 22);
+    autoTable(doc, {
+      startY: 28,
+      head: [["Date", "Time", "Brand", "Type", "Content", "Caption", "VO", "PIC", "Status"]],
+      body: monthEntries.map((entry) => [
+        entry.date, entry.time || "—", entry.brand, entry.format, entry.title || "—",
+        entry.caption || "—", entry.voiceOver || "—", entry.pic || "—", entry.status || "—",
+      ]),
+      styles: { fontSize: 7, cellPadding: 2, overflow: "linebreak" },
+      headStyles: { fillColor: [91, 65, 184], textColor: 255, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [247, 247, 251] },
+      columnStyles: { 4: { cellWidth: 38 }, 5: { cellWidth: 55 } },
+      margin: { left: 10, right: 10 },
+    });
+    doc.save(`faiv-calendar-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.pdf`);
   };
 
   const handleSave = async (next: CalendarEntry) => {
     setEditing(null);
     try {
-      const res = await fetch("/api/history", {
-        method: "PATCH",
+      const isNew = next.id.startsWith("new:");
+      const res = await fetch("/api/calendar", {
+        method: isNew ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: next.id,
-          scheduled_date: next.date,
-          caption: next.caption,
-          title: next.title,
+          ...(isNew ? {} : { id: next.id }),
+          ...toCalendarPayload(next),
         }),
       });
       if (!res.ok) throw new Error();
-      setEntries((prev) => prev.map((e) => (e.id === next.id ? next : e)));
+      await loadCalendar();
     } catch {
       setLoadError("Saving the change failed — the database rejected the update.");
     }
@@ -343,7 +485,7 @@ export default function CalendarPage() {
   const handleDelete = async (id: string) => {
     setEditing(null);
     try {
-      const res = await fetch("/api/history", {
+      const res = await fetch("/api/calendar", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
@@ -351,7 +493,7 @@ export default function CalendarPage() {
       if (!res.ok) throw new Error();
       setEntries((prev) => prev.filter((e) => e.id !== id));
     } catch {
-      setLoadError("Deleting the prediction failed — the database rejected the delete.");
+      setLoadError("Deleting the calendar entry failed — the database rejected the delete.");
     }
   };
 
@@ -379,10 +521,12 @@ export default function CalendarPage() {
     );
 
     try {
-      const res = await fetch("/api/history", {
+      const moved = entries.find((item) => item.id === id);
+      if (!moved) throw new Error();
+      const res = await fetch("/api/calendar", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, scheduled_date: targetDate }),
+        body: JSON.stringify({ id, ...toCalendarPayload({ ...moved, date: targetDate }) }),
       });
       if (!res.ok) throw new Error();
     } catch {
@@ -396,13 +540,13 @@ export default function CalendarPage() {
       <SectionHeader
         eyebrow="Content Planning"
         title="Content Calendar"
-        description="Every scored prediction on its scheduled date. Drag posts between dates to reschedule; import a CSV to score drafts in batch."
+        description="Plan user-created content independently from prediction history. Import flexible spreadsheets, review mappings, and export presentation-ready schedules."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <input
               ref={fileRef}
               type="file"
-              accept=".csv"
+              accept=".csv,.xlsx"
               className="hidden"
               onChange={handleFileSelected}
             />
@@ -417,16 +561,22 @@ export default function CalendarPage() {
               ) : (
                 <UploadCloud className="h-3.5 w-3.5" />
               )}
-              Import CSV
+              Import CSV/XLSX
             </button>
             <button
               type="button"
-              onClick={handleExport}
+              onClick={handleExportCsv}
               disabled={monthEntries.length === 0}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/95 disabled:opacity-60"
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 disabled:opacity-60"
             >
               <Download className="h-3.5 w-3.5" />
-              Export CSV
+              CSV
+            </button>
+            <button type="button" onClick={handleExportXlsx} disabled={monthEntries.length === 0} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 disabled:opacity-60">
+              <Download className="h-3.5 w-3.5" /> XLSX
+            </button>
+            <button type="button" onClick={handleExportPdf} disabled={monthEntries.length === 0} className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/95 disabled:opacity-60">
+              <Download className="h-3.5 w-3.5" /> PDF
             </button>
           </div>
         }
@@ -438,7 +588,7 @@ export default function CalendarPage() {
           <span className="font-semibold text-destructive">{loadError}</span>
           <button
             type="button"
-            onClick={() => { setLoadError(null); loadPredictions(); }}
+            onClick={() => { setLoadError(null); loadCalendar(); }}
             className="ml-auto rounded-lg border border-border bg-surface px-3 py-1.5 font-semibold hover:bg-surface-2"
           >
             Retry
@@ -463,9 +613,9 @@ export default function CalendarPage() {
             ) : (
               <CheckCircle2 className="h-4 w-4 text-accent-lime-strong" />
             )}
-            {importReport.running ? "Scoring imported rows…" : "Import finished"}
+            {importReport.running ? "Importing reviewed rows…" : "Import finished"}
             <span className="font-mono font-semibold text-muted-foreground">
-              {importReport.predicted} predicted · {importReport.skipped} skipped · {importReport.failed} failed
+              {importReport.imported} imported · {importReport.skipped} skipped · {importReport.failed} failed
               {importReport.total > 0 && ` (of ${importReport.total})`}
             </span>
             {!importReport.running && (
@@ -489,7 +639,7 @@ export default function CalendarPage() {
         </div>
       )}
 
-      {/* CSV review: nothing imports until the user confirms here */}
+      {/* Spreadsheet review: nothing imports until the user confirms here */}
       {csvStage && csvValidation && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-background/75 p-4 backdrop-blur-sm"
@@ -501,7 +651,7 @@ export default function CalendarPage() {
           >
             <div className="flex items-start justify-between border-b border-border p-5 shrink-0">
               <div>
-                <h3 className="font-display text-base font-bold text-foreground">Review CSV import</h3>
+                <h3 className="font-display text-base font-bold text-foreground">Review spreadsheet import</h3>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {csvStage.fileName} · {csvStage.rows.length} data row{csvStage.rows.length === 1 ? "" : "s"} —
                   nothing is imported until you confirm.
@@ -522,7 +672,7 @@ export default function CalendarPage() {
                 <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Column mapping <span className="font-normal normal-case">(auto-detected — adjust if wrong)</span>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-5">
+                <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
                   {CSV_FIELDS.map(({ field, label, required }) => (
                     <label key={field} className="block">
                       <span className="text-[10px] font-semibold text-foreground">
@@ -565,8 +715,7 @@ export default function CalendarPage() {
                     : "border-accent-lime/30 bg-accent-lime/[0.04] text-foreground"
                 )}
               >
-                {csvValidation.importable.length} of {csvValidation.results.length} rows will be imported
-                and scored.{" "}
+                {csvValidation.importable.length} of {csvValidation.results.length} rows will be imported.{" "}
                 {csvValidation.results.length - csvValidation.importable.length > 0 &&
                   `${csvValidation.results.length - csvValidation.importable.length} will be skipped (errors below).`}{" "}
                 {csvValidation.results.some((r) => r.warnings.length > 0) &&
@@ -748,14 +897,15 @@ export default function CalendarPage() {
                         {cell.day}
                       </span>
                       {cell.inMonth && (
-                        <Link
-                          href="/predict"
+                        <button
+                          type="button"
+                          onClick={() => setEditing(blankCalendarEntry(dateStr, brandsList[0]))}
                           className="grid h-5 w-5 place-items-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-surface-3 transition-opacity"
-                          aria-label="Analyze a new post"
-                          title="Analyze a new post"
+                          aria-label="Add calendar entry"
+                          title="Add calendar entry"
                         >
                           <Plus className="h-3.5 w-3.5" />
-                        </Link>
+                        </button>
                       )}
                     </div>
 
@@ -785,7 +935,9 @@ export default function CalendarPage() {
                             <span className="rounded border border-border bg-surface-2 px-1 py-0.5 text-[8px] font-bold text-muted-foreground font-mono">
                               {e.format}
                             </span>
-                            <TierBadge tier={e.tier} className="scale-90 origin-right" />
+                            {e.status && (
+                              <span className="truncate rounded-full bg-primary/10 px-1.5 py-0.5 text-[8px] font-bold text-primary">{e.status}</span>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -814,8 +966,8 @@ export default function CalendarPage() {
                     <th className="px-6 py-4 font-semibold">Account</th>
                     <th className="px-6 py-4 font-semibold">Format</th>
                     <th className="px-6 py-4 font-semibold">Caption Preview</th>
-                    <th className="px-6 py-4 font-semibold text-center">Confidence</th>
-                    <th className="px-6 py-4 font-semibold">Tier</th>
+                    <th className="px-6 py-4 font-semibold">PIC</th>
+                    <th className="px-6 py-4 font-semibold">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -866,11 +1018,13 @@ export default function CalendarPage() {
                               &quot;{r.caption}&quot;
                             </div>
                           </td>
-                          <td className="px-6 py-4 align-middle text-center font-mono text-xs font-semibold tabular-nums">
-                            {r.confidence != null ? `${r.confidence}%` : "—"}
+                          <td className="px-6 py-4 align-middle text-xs font-semibold">
+                            {r.pic || "—"}
                           </td>
                           <td className="px-6 py-4 align-middle">
-                            <TierBadge tier={r.tier} />
+                            {r.status ? (
+                              <span className="rounded-full border border-border bg-surface-2 px-2 py-1 text-[10px] font-bold">{r.status}</span>
+                            ) : "—"}
                           </td>
                         </tr>
                       );
@@ -878,7 +1032,7 @@ export default function CalendarPage() {
                   {monthEntries.length === 0 && (
                     <tr>
                       <td colSpan={7} className="px-6 py-10 text-center text-xs text-muted-foreground">
-                        No predictions scheduled this month. Analyze a post or import a CSV to populate the calendar.
+                        No planned content this month. Add an entry or import a CSV/XLSX calendar.
                       </td>
                     </tr>
                   )}
@@ -892,6 +1046,7 @@ export default function CalendarPage() {
       {editing && (
         <EntryModal
           initial={editing}
+          brands={brandsList}
           onClose={() => setEditing(null)}
           onSave={handleSave}
           onDelete={() => handleDelete(editing.id)}
@@ -902,15 +1057,17 @@ export default function CalendarPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Entry Modal — edits persist through /api/history PATCH
+// Entry Modal — edits persist through /api/calendar
 // ---------------------------------------------------------------------------
 function EntryModal({
   initial,
+  brands,
   onClose,
   onSave,
   onDelete,
 }: {
   initial: CalendarEntry;
+  brands: Brand[];
   onClose: () => void;
   onSave: (next: CalendarEntry) => void;
   onDelete: () => void;
@@ -933,13 +1090,13 @@ function EntryModal({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-md overflow-hidden rounded-xl border border-border bg-surface shadow-md"
+        className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-border bg-surface shadow-md"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between border-b border-border p-4">
           <div>
             <div className="text-[9px] font-bold uppercase tracking-wider text-primary">
-              Edit Scheduled Prediction
+              {draft.id.startsWith("new:") ? "New Calendar Entry" : "Edit Calendar Entry"}
             </div>
             <h3 className="mt-1 font-display text-sm font-bold">
               {formatDayLabel(draft.date)} · {draft.account}
@@ -955,8 +1112,8 @@ function EntryModal({
           </button>
         </div>
 
-        <div className="space-y-4 p-4">
-          <ModalField label="Scheduled Date">
+        <div className="grid gap-4 p-4 sm:grid-cols-2">
+          <ModalField label="Posting Date">
             <input
               type="date"
               value={draft.date}
@@ -965,7 +1122,31 @@ function EntryModal({
             />
           </ModalField>
 
-          <ModalField label="Title / Note">
+          <ModalField label="Posting Time">
+            <input type="time" value={draft.time || ""} onChange={(e) => setDraft({ ...draft, time: e.target.value || null })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary" />
+          </ModalField>
+
+          <ModalField label="Brand">
+            <select
+              value={draft.brand_id || ""}
+              onChange={(e) => {
+                const brand = brands.find((item) => item.id === e.target.value);
+                setDraft({ ...draft, brand_id: brand?.id || null, brand: brand?.name || "Unassigned", account: brand ? brandHandle(brand.name) : "Unassigned" });
+              }}
+              className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
+            >
+              <option value="">Unassigned</option>
+              {brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+            </select>
+          </ModalField>
+
+          <ModalField label="Content Type">
+            <select value={draft.format} onChange={(e) => setDraft({ ...draft, format: e.target.value as ContentFormat })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary">
+              <option value="Reels">Reels</option><option value="Carousel">Carousel</option><option value="Single Image">Single Image</option>
+            </select>
+          </ModalField>
+
+          <ModalField label="Content Details">
             <input
               type="text"
               value={draft.title}
@@ -975,39 +1156,42 @@ function EntryModal({
             />
           </ModalField>
 
-          <ModalField label="Caption Text">
+          <ModalField label="Visual Reference">
+            <input type="text" value={draft.visualReference} onChange={(e) => setDraft({ ...draft, visualReference: e.target.value })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary" placeholder="URL or production reference" />
+          </ModalField>
+
+          <div className="sm:col-span-2"><ModalField label="Caption Text">
             <textarea
               value={draft.caption}
               onChange={(e) => setDraft({ ...draft, caption: e.target.value })}
               rows={4}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs outline-none focus:border-primary"
             />
+          </ModalField></div>
+
+          <ModalField label="Voice Over">
+            <select value={draft.voiceOver || ""} onChange={(e) => setDraft({ ...draft, voiceOver: (e.target.value || null) as CalendarEntry["voiceOver"] })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary">
+              <option value="">Not specified</option><option value="Need">Need</option><option value="No Need">No Need</option><option value="Done">Done</option>
+            </select>
           </ModalField>
 
-          <div className="flex items-center justify-between rounded-lg border border-border bg-surface-2/50 px-3 py-2.5">
-            <div className="text-[10px] text-muted-foreground font-semibold">
-              Predicted result
-              <span className="block text-[9px] font-normal">
-                Re-run the analysis on the Prediction page after editing the caption.
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {draft.confidence != null && (
-                <span className="font-mono text-xs font-bold tabular-nums">{draft.confidence}%</span>
-              )}
-              <TierBadge tier={draft.tier} />
-            </div>
-          </div>
+          <ModalField label="PIC">
+            <input type="text" value={draft.pic} onChange={(e) => setDraft({ ...draft, pic: e.target.value })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary" />
+          </ModalField>
+
+          <div className="sm:col-span-2"><ModalField label="Status">
+            <select value={draft.status || ""} onChange={(e) => setDraft({ ...draft, status: (e.target.value || null) as CalendarEntry["status"] })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary">
+              <option value="">Not specified</option>
+              {CALENDAR_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+          </ModalField></div>
+
         </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-border bg-surface-2/40 p-4">
-          <button
-            type="button"
-            onClick={onDelete}
-            className="text-xs font-semibold text-destructive hover:underline"
-          >
-            Delete prediction
-          </button>
+          {draft.id.startsWith("new:") ? <span /> : (
+            <button type="button" onClick={onDelete} className="text-xs font-semibold text-destructive hover:underline">Delete entry</button>
+          )}
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -1087,6 +1271,13 @@ function formatDayLabel(yyyymmdd: string) {
 
 /** Minimal CSV parser with support for quoted fields and escaped quotes. */
 function parseCsv(text: string): string[][] {
+  const sample = text.split(/\r?\n/, 5).join("\n");
+  const delimiters = [",", ";", "\t"];
+  const delimiter = delimiters.reduce((best, candidate) => {
+    const count = sample.split(candidate).length - 1;
+    const bestCount = sample.split(best).length - 1;
+    return count > bestCount ? candidate : best;
+  }, ",");
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
@@ -1107,7 +1298,7 @@ function parseCsv(text: string): string[][] {
       }
     } else if (ch === '"') {
       inQuotes = true;
-    } else if (ch === ",") {
+    } else if (ch === delimiter) {
       row.push(field);
       field = "";
     } else if (ch === "\n" || ch === "\r") {
@@ -1128,8 +1319,129 @@ function parseCsv(text: string): string[][] {
 }
 
 function csvEscape(value: string): string {
-  if (/[",\n\r]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
+  // Prevent CSV formula injection when an exported user-authored field is
+  // opened by Excel or another spreadsheet application.
+  const safe = /^\s*[=+\-@]/.test(value) ? `'${value}` : value;
+  if (/[",\n\r]/.test(safe)) {
+    return `"${safe.replace(/"/g, '""')}"`;
   }
-  return value;
+  return safe;
+}
+
+function normalizeFormat(value: unknown): ContentFormat {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized.includes("reel") || normalized === "video") return "Reels";
+  if (normalized.includes("carousel") || normalized.includes("slide")) return "Carousel";
+  return "Single Image";
+}
+
+function normalizeDate(value: unknown): string {
+  const input = String(value || "").trim();
+  if (!input) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    const [year, month, day] = input.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) {
+      return input;
+    }
+    return "";
+  }
+
+  const numeric = input.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+  if (numeric) {
+    const year = Number(numeric[3]) < 100 ? 2000 + Number(numeric[3]) : Number(numeric[3]);
+    const month = Number(numeric[2]);
+    const day = Number(numeric[1]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) {
+      return ymd(year, month - 1, day);
+    }
+  }
+
+  const parsed = new Date(input);
+  if (!Number.isNaN(parsed.getTime())) {
+    return ymd(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+  return "";
+}
+
+function normalizeTime(value: unknown): string | null {
+  const input = String(value || "").trim();
+  if (!input) return null;
+  const match = input.match(/^(\d{1,2})(?:[:.](\d{1,2}))?\s*(am|pm)?$/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] || 0);
+  const meridiem = match[3]?.toLowerCase();
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    if (meridiem === "pm" && hour !== 12) hour += 12;
+    if (meridiem === "am" && hour === 12) hour = 0;
+  }
+  if (hour > 23 || minute > 59) return null;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function normalizeVoiceOver(value: unknown): CalendarEntry["voiceOver"] {
+  const input = String(value || "").trim().toLowerCase();
+  return VOICE_OVER_VALUES.find((item) => item.toLowerCase() === input) || null;
+}
+
+function normalizeStatus(value: unknown): CalendarEntry["status"] {
+  const input = String(value || "").trim().toLowerCase();
+  return CALENDAR_STATUSES.find((item) => item.toLowerCase() === input) || null;
+}
+
+function excelCellToString(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return ymd(value.getFullYear(), value.getMonth(), value.getDate());
+  if (typeof value === "object") {
+    const cell = value as any;
+    if (typeof cell.text === "string") return cell.text;
+    if (cell.result !== undefined) return excelCellToString(cell.result);
+    if (Array.isArray(cell.richText)) return cell.richText.map((part: any) => part.text || "").join("");
+  }
+  return String(value);
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function toCalendarPayload(entry: CalendarEntry) {
+  return {
+    brand_id: entry.brand_id,
+    posting_date: entry.date,
+    posting_time: entry.time,
+    content_type: entry.format,
+    content_details: entry.title,
+    visual_reference: entry.visualReference,
+    caption: entry.caption,
+    voice_over: entry.voiceOver,
+    pic: entry.pic,
+    status: entry.status,
+  };
+}
+
+function blankCalendarEntry(date: string, brand?: Brand): CalendarEntry {
+  return {
+    id: `new:${date}:${Date.now()}`,
+    date,
+    time: "19:00",
+    account: brand ? brandHandle(brand.name) : "Unassigned",
+    brand: brand?.name || "Unassigned",
+    brand_id: brand?.id || null,
+    format: "Single Image",
+    caption: "",
+    title: "",
+    visualReference: "",
+    voiceOver: null,
+    pic: "",
+    status: null,
+  };
 }

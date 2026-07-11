@@ -11,7 +11,6 @@ import {
   History,
   BarChart3,
   Building2,
-  Cpu,
   Sun,
   Moon,
   ChevronDown,
@@ -29,14 +28,13 @@ const NAV_GROUPS = [
       { to: "/predict", label: "Prediction", icon: Sparkles },
       { to: "/calendar", label: "Calendar", icon: CalendarRange },
       { to: "/history", label: "History", icon: History },
-      { to: "/insights", label: "Post Insights", icon: BarChart3 },
+      { to: "/insights", label: "Insights", icon: BarChart3 },
     ],
   },
   {
     label: "Administrator",
     items: [
-      { to: "/niches", label: "Niche Management", icon: Building2 },
-      { to: "/model-health", label: "Model Health", icon: Cpu },
+      { to: "/niches", label: "Brands & Cohorts", icon: Building2 },
     ],
   },
 ] as const;

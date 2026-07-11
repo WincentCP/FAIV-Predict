@@ -30,12 +30,12 @@ import {
 import { motion, Variants } from "framer-motion";
 
 
-const LOCAL_KPIS = [
+const KPI_DEFINITIONS = [
   {
     id: "predictions",
     label: "Total Predictions",
-    value: "0",
-    sub: "No predictions recorded",
+    value: "—",
+    sub: "Loading verified data",
     colorClass: "text-success bg-success/10 border-success/20",
     iconColor: "text-success",
     glowColor: "hsl(var(--success) / 0.2)",
@@ -43,9 +43,9 @@ const LOCAL_KPIS = [
   },
   {
     id: "accounts",
-    label: "Active Accounts",
-    value: "0",
-    sub: "No brands connected",
+    label: "Brand Workspaces",
+    value: "—",
+    sub: "Loading verified data",
     colorClass: "text-chart-3 bg-chart-3/10 border-chart-3/20",
     iconColor: "text-chart-3",
     glowColor: "hsl(var(--chart-3) / 0.2)",
@@ -53,9 +53,9 @@ const LOCAL_KPIS = [
   },
   {
     id: "models",
-    label: "Active Models",
-    value: "0",
-    sub: "No models deployed",
+    label: "Available Models",
+    value: "—",
+    sub: "Loading verified data",
     colorClass: "text-primary bg-primary/10 border-primary/20",
     iconColor: "text-primary",
     glowColor: "hsl(var(--primary) / 0.2)",
@@ -64,8 +64,8 @@ const LOCAL_KPIS = [
   {
     id: "confidence",
     label: "Average Confidence",
-    value: "0%",
-    sub: "No metrics evaluated",
+    value: "—",
+    sub: "Loading verified data",
     colorClass: "text-warning bg-warning/10 border-warning/20",
     iconColor: "text-warning",
     glowColor: "hsl(var(--warning) / 0.2)",
@@ -73,25 +73,24 @@ const LOCAL_KPIS = [
   },
 ];
 
-const LOCAL_RECENT_PREDICTIONS: any[] = [];
-
 export default function DashboardPage() {
   const [brandsList, setBrandsList] = useState<Brand[]>([]);
   const [isWorkspaceEmpty, setIsWorkspaceEmpty] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [dashboardLoaded, setDashboardLoaded] = useState(false);
   const [accuracyTrend, setAccuracyTrend] = useState<{ day: string; accuracy: number }[]>([]);
-  const [tierDistribution, setTierDistribution] = useState([
-    { tier: "High" as const, count: 0, color: "hsl(var(--primary))" },
-    { tier: "Average" as const, count: 0, color: "hsl(var(--warning))" },
-    { tier: "Low" as const, count: 0, color: "hsl(var(--foreground) / 0.35)" },
-  ]);
+  const [tierDistribution, setTierDistribution] = useState<Array<{
+    tier: "High" | "Average" | "Low";
+    count: number;
+    color: string;
+  }>>([]);
 
   const personalCount = useMemo(() => {
     return brandsList.filter((b) => b.model_type === "personal").length;
   }, [brandsList]);
 
-  const [kpis, setKpis] = useState(LOCAL_KPIS);
-  const [recentPredictions, setRecentPredictions] = useState(LOCAL_RECENT_PREDICTIONS);
+  const [kpis, setKpis] = useState(KPI_DEFINITIONS);
+  const [recentPredictions, setRecentPredictions] = useState<any[]>([]);
 
   useEffect(() => {
     async function fetchDashboard() {
@@ -108,16 +107,16 @@ export default function DashboardPage() {
           setKpis((prev) =>
             prev.map((kpi) => {
               if (kpi.id === "predictions" && data.totalPredictions !== undefined) {
-                return { ...kpi, value: data.totalPredictions.toLocaleString() };
+                return { ...kpi, value: data.totalPredictions.toLocaleString(), sub: data.totalPredictions === 0 ? "No predictions recorded" : "Authenticated workspace only" };
               }
               if (kpi.id === "models" && data.totalModels !== undefined) {
-                return { ...kpi, value: `${data.totalModels} Live` };
+                return { ...kpi, value: data.totalModels.toString(), sub: data.totalModels === 0 ? "No models available" : "Latest account and cohort scopes" };
               }
               if (kpi.id === "accounts" && data.totalBrands !== undefined) {
-                return { ...kpi, value: data.totalBrands.toString(), sub: `${data.totalBrands} brand${data.totalBrands === 1 ? "" : "s"} connected` };
+                return { ...kpi, value: data.totalBrands.toString(), sub: `${data.totalBrands} registered brand${data.totalBrands === 1 ? "" : "s"}` };
               }
               if (kpi.id === "confidence" && data.avgConfidence !== undefined) {
-                return { ...kpi, value: data.avgConfidence, sub: "Across recent predictions" };
+                return { ...kpi, value: data.avgConfidence, sub: data.avgConfidence === "—" ? "No confidence values recorded" : "Across recent predictions" };
               }
               return kpi;
             })
@@ -150,6 +149,8 @@ export default function DashboardPage() {
       } catch (err) {
         console.warn("Could not fetch dashboard metrics aggregates:", err);
         setLoadError("Workspace metrics could not be loaded right now.");
+      } finally {
+        setDashboardLoaded(true);
       }
     }
 
@@ -262,7 +263,7 @@ export default function DashboardPage() {
           <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
             <div className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface/70 px-3.5 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-primary shadow-sm backdrop-blur">
               <span className="h-2 w-2 animate-ping rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary))]" />
-              {brandsList.length} accounts analyzed
+              {brandsList.length} brand workspaces
             </div>
             {loadError && (
               <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,hsl(var(--destructive))_45%,transparent)] bg-[color-mix(in_oklab,hsl(var(--destructive))_10%,transparent)] px-3.5 py-2 text-[10px] font-extrabold text-destructive shadow-sm backdrop-blur">
@@ -299,7 +300,7 @@ export default function DashboardPage() {
               transition={{ delay: 0.4 }}
               className="mt-6 max-w-xl text-base font-medium text-muted-foreground/90 leading-relaxed"
             >
-              <span className="font-extrabold text-foreground">{personalCount}</span> of your brands now have a dedicated AI, and the rest are learning fast. Pick a workflow below to keep momentum going.
+              <span className="font-extrabold text-foreground">{personalCount}</span> of your brands have an active personal model; the rest use their shared industry-cohort model while verified post history accumulates.
             </motion.p>
 
             <motion.div 
@@ -407,7 +408,7 @@ export default function DashboardPage() {
               <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/65 text-center">
                 <span className="text-xl">📊</span>
                 <p className="text-xs font-semibold text-muted-foreground">No training sessions yet</p>
-                <p className="text-[10px] text-muted-foreground/60">Run a model retrain session in Model Health to see accuracy over time.</p>
+                <p className="text-[10px] text-muted-foreground/60">Accuracy appears after the scheduled training pipeline registers a validated model.</p>
               </div>
             )}
           </div>
@@ -485,7 +486,7 @@ export default function DashboardPage() {
               Per-Account AI Status
             </h3>
             <p className="mt-1.5 text-xs font-medium text-muted-foreground/80">
-              Dedicated AI activates after 200 posts analyzed. Otherwise, it falls back to General Niche AI.
+              A personal model activates only after successful training on at least 200 verified posts. Until then, the brand uses its shared industry-cohort model.
             </p>
           </div>
           <Link href="/niches" className="shrink-0 text-xs font-bold text-primary hover:text-primary-glow hover:underline">
@@ -495,13 +496,13 @@ export default function DashboardPage() {
         <ul className="grid gap-4 sm:grid-cols-2">
           {brandsList.length === 0 ? (
             <li className="col-span-2 text-center py-10 border border-dashed border-border rounded-2xl bg-surface-2/30 text-xs text-muted-foreground">
-              No brand accounts connected. Click &quot;Manage brands&quot; above to add your first account feed.
+              No brand workspaces registered. Click &quot;Manage brands&quot; above to add your first brand.
             </li>
           ) : (
             brandsList.slice(0, 6).map((b) => {
               const isPersonal = b.model_type === "personal";
               const stage = isPersonal ? "Personal" : "Niche";
-              const followers = typeof b.followers === "number" ? b.followers : 0;
+              const followers = typeof b.followers === "number" ? b.followers : null;
               const handle = brandHandle(b.name);
 
               return (
@@ -526,10 +527,10 @@ export default function DashboardPage() {
                   </div>
                   <div className="mt-4 flex items-center justify-between text-[11px] font-bold">
                     <span className="text-muted-foreground/80">
-                      <span className="font-mono tabular-nums text-foreground">{followers.toLocaleString()}</span> followers
+                      {followers === null ? "Followers not synced" : <><span className="font-mono tabular-nums text-foreground">{followers.toLocaleString()}</span> followers</>}
                     </span>
                     <span className="inline-flex items-center gap-1.5 font-mono text-muted-foreground/80">
-                      {stage === "Personal" ? "Dedicated AI active" : "Niche AI"}
+                      {stage === "Personal" ? "Personal model active" : "Cohort model"}
                     </span>
                   </div>
                 </li>
@@ -559,7 +560,7 @@ export default function DashboardPage() {
                 href: "/calendar",
                 icon: CalendarRange,
                 title: "Content Calendar",
-                desc: "Upload an Excel file to score in batch",
+                desc: "Import or plan an editable content schedule",
                 glow: "hsl(var(--secondary-glow))",
               },
               {
@@ -598,13 +599,19 @@ export default function DashboardPage() {
         <div className="rounded-2xl border border-border bg-surface/70 p-6 backdrop-blur-xl shadow-sm flex flex-col justify-between">
           <div>
             <SectionHeader
-              eyebrow="This week"
+              eyebrow="Authenticated history"
               title={<span className="text-2xl font-bold">Performance Potential Distribution</span>}
-              description="Distribution of forecast results."
+              description="Distribution across predictions generated by your account."
             />
           </div>
           <div className="mt-4 space-y-5">
-            {tierDistribution.map((d) => {
+            {!dashboardLoaded ? (
+              [1, 2, 3].map((item) => <div key={item} className="h-12 animate-pulse rounded-xl bg-surface-2" />)
+            ) : tierDistribution.reduce((sum, item) => sum + item.count, 0) === 0 ? (
+              <div className="rounded-xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">
+                No prediction results yet.
+              </div>
+            ) : tierDistribution.map((d) => {
               const max = Math.max(...tierDistribution.map((x) => x.count), 1);
               const pct = d.count > 0 ? (d.count / max) * 100 : 0;
               return (

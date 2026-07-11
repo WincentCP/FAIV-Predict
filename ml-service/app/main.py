@@ -76,17 +76,17 @@ class PredictionRequest(BaseModel):
     brand_id: Optional[str] = None
     niche: Optional[str] = None
     scheduled_date: Optional[str] = None  # ISO date (YYYY-MM-DD)
+    created_by: Optional[str] = None
 
 class TrainRequest(BaseModel):
     brand_id: Optional[str] = None
     niche: Optional[str] = None
 
-class SuggestRequest(BaseModel):
-    caption: str
-    format: str
-    post_hour: int
-    brand_id: Optional[str] = None
-    niche: Optional[str] = None
+class InstagramPostInsightsRequest(BaseModel):
+    brand_id: str
+    media_id: str
+    caption: Optional[str] = None
+    created_by: Optional[str] = None
 
 # DB connection helper
 def get_db_connection():
@@ -231,9 +231,29 @@ def predict(req: PredictionRequest):
     """
     Extracts features, loads the appropriate Random Forest model (personal or niche),
     classifies the performance tier, and returns the confidence & class probabilities.
-    Logs the prediction metadata to the Supabase database.
+    Persists brand-scoped predictions with authenticated-user provenance.
     """
     try:
+        if req.brand_id:
+            try:
+                uuid.UUID(req.brand_id)
+                uuid.UUID(str(req.created_by or ""))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="brand_id and created_by must be valid UUIDs for a persisted prediction.",
+                )
+
+        sched_date = datetime.date.today()
+        if req.scheduled_date:
+            try:
+                sched_date = datetime.date.fromisoformat(req.scheduled_date)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="scheduled_date must be a real ISO date (YYYY-MM-DD).",
+                )
+
         # 1. Load model and bounds bundle (real trained model only)
         try:
             bundle, metadata = ModelLoader.load_model(brand_id=req.brand_id, niche=req.niche)
@@ -242,14 +262,8 @@ def predict(req: PredictionRequest):
             raise HTTPException(status_code=503, detail=str(mue))
 
         # 2. Extract features using preprocessor. The weekend flag comes from
-        # the scheduled date (falling back to today), matching training-side
-        # semantics.
-        sched_date = datetime.date.today()
-        if req.scheduled_date:
-            try:
-                sched_date = datetime.date.fromisoformat(req.scheduled_date)
-            except ValueError:
-                logger.warning(f"Invalid scheduled_date '{req.scheduled_date}', using today.")
+        # the validated scheduled date (or today when no date was supplied),
+        # matching training-side semantics.
         features = DataPreprocessor.extract_features(
             caption=req.caption,
             format_type=req.format,
@@ -278,17 +292,13 @@ def predict(req: PredictionRequest):
         probabilities = {classes[i].title(): round(float(probs_raw[i]) * 100, 2) for i in range(len(classes))}
         confidence = round(float(np.max(probs_raw)) * 100, 2)
         
-        # 4. Log Prediction to Database (Optional & Safe)
+        # 4. Persist the prediction. Brand-scoped requests are only successful
+        # when their creator provenance is durably recorded.
         prediction_id = None
         db_url = os.getenv("DATABASE_URL")
         if db_url and req.brand_id:
+            conn = None
             try:
-                scheduled_date = datetime.date.today()
-                if req.scheduled_date:
-                    try:
-                        scheduled_date = datetime.date.fromisoformat(req.scheduled_date)
-                    except ValueError:
-                        logger.warning(f"Invalid scheduled_date '{req.scheduled_date}', using today.")
                 conn = psycopg2.connect(db_url)
                 with conn.cursor() as cur:
                     # Clean features for JSON storage — include confidence so history can display it
@@ -296,26 +306,41 @@ def predict(req: PredictionRequest):
                     json_features["confidence"] = confidence
                     cur.execute(
                         """
-                        INSERT INTO predictions (brand_id, title, caption, features, pred_class, created_at, scheduled_date, model_version)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO predictions (brand_id, created_by, title, caption, features, pred_class, created_at, scheduled_date, model_version)
+                        SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        WHERE EXISTS (
+                            SELECT 1 FROM brands WHERE id = %s AND owner_id = %s
+                        )
                         RETURNING id
                         """,
                         (
                             req.brand_id,
+                            req.created_by,
                             f"{req.format} prediction - {datetime.date.today().strftime('%d/%m/%y')}",
                             req.caption,
                             psycopg2.extras.Json(json_features),
                             predicted_class.upper(),
                             datetime.datetime.utcnow(),
-                            scheduled_date,
-                            metadata.get("version")
+                            sched_date,
+                            metadata.get("version"),
+                            req.brand_id,
+                            req.created_by,
                         )
                     )
-                    prediction_id = str(cur.fetchone()[0])
+                    inserted = cur.fetchone()
+                    if not inserted:
+                        raise ValueError("Prediction brand is not owned by created_by")
+                    prediction_id = str(inserted[0])
                     conn.commit()
-                conn.close()
             except Exception as log_err:
-                logger.warning(f"Logging prediction to database failed: {log_err}")
+                logger.error("Prediction persistence failed: %s", log_err)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Prediction could not be saved with user provenance; no result was returned.",
+                )
+            finally:
+                if conn:
+                    conn.close()
 
         # Determine if personal model or shared niche was active
         is_personal_model_active = metadata.get("model_type") == "account"
@@ -383,24 +408,32 @@ def train(req: TrainRequest, background_tasks: BackgroundTasks):
     Returns the retrain job database ID and current state.
     """
     db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(
+            status_code=503,
+            detail="Cannot queue retraining: DATABASE_URL is not configured.",
+        )
     job_id = str(uuid.uuid4())
     
     # Register job in DB
-    if db_url:
-        try:
-            conn = psycopg2.connect(db_url)
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO model_retrain_jobs (id, brand_id, status, created_at)
-                    VALUES (%s, %s, 'pending', %s)
-                    """,
-                    (job_id, req.brand_id, datetime.datetime.utcnow())
-                )
-                conn.commit()
+    conn = None
+    try:
+        conn = psycopg2.connect(db_url)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO model_retrain_jobs (id, brand_id, status, created_at)
+                VALUES (%s, %s, 'pending', %s)
+                """,
+                (job_id, req.brand_id, datetime.datetime.utcnow())
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to record retrain job in database: {e}")
+        raise HTTPException(status_code=503, detail="Cannot queue retraining: job store is unavailable.")
+    finally:
+        if conn:
             conn.close()
-        except Exception as e:
-            logger.warning(f"Failed to record retrain job in database: {e}")
     
     # Run in background
     background_tasks.add_task(run_training_job_async, job_id, req.brand_id, req.niche)
@@ -411,74 +444,6 @@ def train(req: TrainRequest, background_tasks: BackgroundTasks):
         "message": "Retraining job queued successfully in background."
     }
 
-
-@app.post("/suggest", dependencies=[Depends(verify_internal_token)])
-def suggest(req: SuggestRequest):
-    """
-    Template Recommendation Engine (TRE). Evaluates post attributes against niche averages,
-    generating direct parameters adjustments instructions.
-    """
-    features = DataPreprocessor.extract_features(req.caption, req.format, req.post_hour)
-    
-    suggestions = []
-    
-    # 1. Post hour evaluation
-    if not (17 <= req.post_hour <= 21):
-        suggestions.append({
-            "parameter": "post_hour",
-            "current": req.post_hour,
-            "recommendation": "Move the posting time into the 17:00-21:00 evening window, when audience activity in this niche peaks.",
-            "impact": "High"
-        })
-
-    # 2. Caption length evaluation
-    cap_len = len(req.caption)
-    if cap_len < 180:
-        suggestions.append({
-            "parameter": "caption_length",
-            "current": cap_len,
-            "recommendation": "Extend the caption to at least 180 characters to build a stronger narrative.",
-            "impact": "Medium"
-        })
-    elif cap_len > 320:
-        suggestions.append({
-            "parameter": "caption_length",
-            "current": cap_len,
-            "recommendation": "Shorten the caption below 320 characters so the call-to-action stays above the fold.",
-            "impact": "Medium"
-        })
-
-    # 3. Hashtag evaluation
-    hashtag_count = features["hashtag_count"]
-    if hashtag_count < 3:
-        suggestions.append({
-            "parameter": "hashtag_count",
-            "current": hashtag_count,
-            "recommendation": "Add industry-specific hashtags until you have 3-8 to improve discoverability.",
-            "impact": "High"
-        })
-    elif hashtag_count > 8:
-        suggestions.append({
-            "parameter": "hashtag_count",
-            "current": hashtag_count,
-            "recommendation": "Reduce hashtags to at most 8 so the post does not read as spam.",
-            "impact": "Low"
-        })
-
-    # 4. CTA evaluation
-    if features["has_cta"] == 0.0:
-        suggestions.append({
-            "parameter": "has_cta",
-            "current": "None",
-            "recommendation": "Add an explicit call-to-action such as 'Order now' or 'Click the link in bio'.",
-            "impact": "High"
-        })
-
-    return {
-        "status": "success",
-        "features_analyzed": features,
-        "recommendations": suggestions
-    }
 
 @app.get("/train/{job_id}", dependencies=[Depends(verify_internal_token)])
 def get_train_status(job_id: str):
@@ -532,7 +497,7 @@ def _fetch_ig_profile(ig_id: str, token: str) -> int:
         r.raise_for_status()
         return r.json().get("followers_count", 0)
 
-def _fetch_ig_posts(ig_id: str, token: str, limit: int = 150) -> list:
+def _fetch_ig_posts(ig_id: str, token: str, limit: int = 250) -> list:
     url = f"https://graph.facebook.com/v25.0/{ig_id}/media"
     params = {"fields": "caption,like_count,comments_count,media_type,timestamp", "limit": limit, "access_token": token}
     posts = []
@@ -548,37 +513,101 @@ def _fetch_ig_posts(ig_id: str, token: str, limit: int = 150) -> list:
                 break
     return posts[:limit]
 
-def _get_brands_config() -> list:
+def _get_brands_config() -> list[Dict[str, Any]]:
     """
-    Instagram-connected brands, configured via environment variables.
+    Instagram-connected brands configured through ``IG_BRANDS_JSON``.
 
-    Preferred: IG_BRANDS_JSON — a JSON array of objects with keys
-    "name", "niche", "instagram_id", "access_token" — so onboarding a new
-    brand is a config change, not a code change. The legacy per-brand
-    BISON_*/LASENCE_* variables remain supported as a fallback.
+    Every credential set must include the immutable database ``brand_id``.
+    Name-based resolution is intentionally unsupported because two users can
+    create brands with the same display name.
     """
     raw = os.getenv("IG_BRANDS_JSON")
-    if raw:
-        try:
-            entries = json.loads(raw)
-            return [
-                (e["name"], e["niche"], e["instagram_id"], e["access_token"])
-                for e in entries
-            ]
-        except (ValueError, KeyError, TypeError) as e:
-            logger.error(f"IG_BRANDS_JSON is malformed ({e}); falling back to legacy variables.")
+    if not raw:
+        return []
 
-    config = []
-    bison_token = os.getenv("BISON_PAGE_ACCESS_TOKEN")
-    bison_ig = os.getenv("BISON_INSTAGRAM_ID")
-    if bison_token and bison_ig:
-        config.append(("Bison Gym", "Fitness", bison_ig, bison_token))
+    try:
+        entries = json.loads(raw)
+        if not isinstance(entries, list):
+            raise TypeError("expected a JSON array")
 
-    lasence_token = os.getenv("LASENCE_PAGE_ACCESS_TOKEN")
-    lasence_ig = os.getenv("LASENCE_INSTAGRAM_ID")
-    if lasence_token and lasence_ig:
-        config.append(("Lasence Bakeshop", "Bakery", lasence_ig, lasence_token))
-    return config
+        normalized = []
+        seen_brand_ids = set()
+        for entry in entries:
+            brand_id = str(entry["brand_id"])
+            uuid.UUID(brand_id)
+            instagram_id = str(entry["instagram_id"]).strip()
+            access_token = str(entry["access_token"]).strip()
+            if not instagram_id or not access_token:
+                raise ValueError("instagram_id and access_token must be non-empty")
+            if brand_id in seen_brand_ids:
+                raise ValueError(f"duplicate brand_id: {brand_id}")
+            seen_brand_ids.add(brand_id)
+            normalized.append({
+                "brand_id": brand_id,
+                "instagram_id": instagram_id,
+                "access_token": access_token,
+            })
+        return normalized
+    except (ValueError, KeyError, TypeError) as exc:
+        logger.error("IG_BRANDS_JSON is malformed: %s", exc)
+        return []
+
+
+def _bound_instagram_configs() -> list[Dict[str, Any]]:
+    """Resolve configured credentials to existing database brands.
+
+    This function never creates or claims a brand. Explicit UUID bindings are
+    required. Unbound entries are returned with ``brand_id=None`` so health
+    checks can report configuration problems without exposing the connection
+    to a user-facing route.
+    """
+    configured = _get_brands_config()
+    if not configured:
+        return []
+
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        return [{**entry, "brand_id": None, "binding_error": "DATABASE_URL is not configured"} for entry in configured]
+
+    conn = None
+    try:
+        conn = psycopg2.connect(db_url)
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT id, name, niche FROM brands WHERE owner_id IS NOT NULL")
+            brands = [dict(row) for row in cur.fetchall()]
+    except Exception as exc:
+        logger.warning(f"Instagram configuration binding failed: {exc}")
+        return [{**entry, "brand_id": None, "binding_error": "Database lookup failed"} for entry in configured]
+    finally:
+        if conn:
+            conn.close()
+
+    by_id = {str(brand["id"]): brand for brand in brands}
+    bound = []
+    for entry in configured:
+        configured_id = str(entry.get("brand_id") or "")
+        brand = by_id.get(configured_id) if configured_id else None
+
+        if brand:
+            bound.append({
+                **entry,
+                "brand_id": str(brand["id"]),
+                "name": str(brand["name"]),
+                "niche": str(brand["niche"]),
+                "binding_error": None,
+            })
+        else:
+            bound.append({**entry, "brand_id": None, "binding_error": "Configured brand_id does not exist"})
+    return bound
+
+
+def _get_instagram_connection(brand_id: str) -> Dict[str, Any]:
+    matches = [entry for entry in _bound_instagram_configs() if entry.get("brand_id") == brand_id]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise HTTPException(status_code=503, detail="Multiple Instagram connections target this brand. Fix IG_BRANDS_JSON.")
+    raise HTTPException(status_code=404, detail="No Instagram connection is configured for this brand.")
 
 
 @app.get("/instagram/health", dependencies=[Depends(verify_internal_token)])
@@ -596,27 +625,33 @@ def instagram_health():
             conn = psycopg2.connect(db_url)
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT b.name, MAX(p.created_at) FROM brands b
+                    """SELECT b.id, MAX(p.created_at) FROM brands b
                        LEFT JOIN posts p ON p.brand_id = b.id AND p.is_synced
-                       GROUP BY b.name"""
+                       GROUP BY b.id"""
                 )
-                for name, ts in cur.fetchall():
-                    last_synced[name] = ts.isoformat() if ts else None
+                for brand_id, ts in cur.fetchall():
+                    last_synced[str(brand_id)] = ts.isoformat() if ts else None
             conn.close()
         except Exception as e:
             logger.warning(f"Instagram health: last-sync lookup failed: {e}")
 
-    for name, niche, ig_id, token in _get_brands_config():
+    for config in _bound_instagram_configs():
+        brand_id = config.get("brand_id")
         entry: Dict[str, Any] = {
-            "brand": name,
-            "niche": niche,
-            "last_synced": last_synced.get(name),
+            "brand_id": brand_id,
+            "brand": config.get("name") or "Unbound connection",
+            "niche": config.get("niche"),
+            "last_synced": last_synced.get(str(brand_id)) if brand_id else None,
         }
+        if not brand_id:
+            entry.update({"status": "unbound", "error": config.get("binding_error")})
+            connections.append(entry)
+            continue
         try:
             with httpx.Client(timeout=10.0) as client:
                 r = client.get(
-                    f"https://graph.facebook.com/v25.0/{ig_id}",
-                    params={"fields": "username,followers_count", "access_token": token},
+                    f"https://graph.facebook.com/v25.0/{config['instagram_id']}",
+                    params={"fields": "username,followers_count", "access_token": config["access_token"]},
                 )
             if r.status_code == 200:
                 data = r.json()
@@ -636,17 +671,17 @@ def instagram_health():
 
 
 @app.get("/instagram/posts", dependencies=[Depends(verify_internal_token)])
-def instagram_posts(brand: str, limit: int = 24):
+def instagram_posts(brand_id: str, limit: int = 24):
     """
     Live post insights for a linked brand: media previews, engagement
     metrics, and an ER tier graded against the brand's own synced history
     (same percentile method as training labels). Media URLs are fetched
     fresh on every call because Instagram CDN URLs expire.
     """
-    config = {name: (niche, ig_id, token) for name, niche, ig_id, token in _get_brands_config()}
-    if brand not in config:
-        raise HTTPException(status_code=404, detail=f"No Instagram connection configured for '{brand}'.")
-    _, ig_id, token = config[brand]
+    config = _get_instagram_connection(brand_id)
+    brand = config["name"]
+    ig_id = config["instagram_id"]
+    token = config["access_token"]
     try:
         followers = _fetch_ig_profile(ig_id, token)
         params = {
@@ -672,9 +707,11 @@ def instagram_posts(brand: str, limit: int = 24):
                 cur.execute(
                     """SELECT percentile_cont(0.33) WITHIN GROUP (ORDER BY p.er),
                               percentile_cont(0.67) WITHIN GROUP (ORDER BY p.er)
-                       FROM posts p JOIN brands b ON p.brand_id = b.id
-                       WHERE b.name = %s""",
-                    (brand,),
+                       FROM posts p
+                       WHERE p.brand_id = %s
+                         AND p.source = 'instagram_graph'
+                         AND p.instagram_media_id IS NOT NULL""",
+                    (brand_id,),
                 )
                 row = cur.fetchone()
                 if row and row[0] is not None:
@@ -685,13 +722,18 @@ def instagram_posts(brand: str, limit: int = 24):
 
     posts = []
     for m in media:
-        likes = m.get("like_count", 0)
-        comments = m.get("comments_count", 0)
-        er = round(((likes + comments) / followers) * 100, 4) if followers else 0.0
+        likes = m.get("like_count") if isinstance(m.get("like_count"), (int, float)) else None
+        comments = m.get("comments_count") if isinstance(m.get("comments_count"), (int, float)) else None
+        er = (
+            round(((likes + comments) / followers) * 100, 4)
+            if followers > 0 and likes is not None and comments is not None
+            else None
+        )
         tier = None
-        if p33 is not None:
+        if p33 is not None and er is not None:
             tier = "Low" if er < p33 else ("Average" if er <= p67 else "High")
         posts.append({
+            "id": m.get("id"),
             "caption": m.get("caption", ""),
             "media_type": m.get("media_type"),
             "media_url": m.get("media_url"),
@@ -703,123 +745,423 @@ def instagram_posts(brand: str, limit: int = 24):
             "er": er,
             "tier": tier,
         })
-    return {"status": "success", "brand": brand, "followers": followers, "posts": posts}
+    return {"status": "success", "brand_id": brand_id, "brand": brand, "followers": followers, "posts": posts}
+
+
+def _media_insight_value(payload: Dict[str, Any]) -> Optional[float]:
+    data = payload.get("data") or []
+    if not data:
+        return None
+    item = data[0]
+    total = item.get("total_value") or {}
+    if isinstance(total.get("value"), (int, float)):
+        return float(total["value"])
+    values = item.get("values") or []
+    if values and isinstance(values[0].get("value"), (int, float)):
+        return float(values[0]["value"])
+    return None
+
+
+def _media_insight_values(payload: Dict[str, Any]) -> Dict[str, float]:
+    """Normalize Meta's lifetime insight response for one or many metrics."""
+    result: Dict[str, float] = {}
+    for item in payload.get("data") or []:
+        name = item.get("name")
+        if not isinstance(name, str):
+            continue
+        value = _media_insight_value({"data": [item]})
+        if value is not None:
+            result[name] = value
+    return result
+
+
+@app.post("/instagram/post-insights", dependencies=[Depends(verify_internal_token)])
+def instagram_post_insights(req: InstagramPostInsightsRequest):
+    """Fetch supported lifetime metrics for one selected Instagram post.
+
+    Meta exposes different metrics by media type and API version. We request
+    the common media metrics in one call, then fall back to individual calls
+    only if Meta rejects the mixed set. Unsupported metrics never become zero.
+    """
+    config = _get_instagram_connection(req.brand_id)
+    token = config["access_token"]
+
+    requested_metrics = [
+        "reach", "impressions", "views", "saved", "shares",
+        "total_interactions", "accounts_engaged",
+    ]
+    metrics: Dict[str, float] = {}
+    unavailable = []
+    insights_url = f"https://graph.facebook.com/v25.0/{req.media_id}/insights"
+    with httpx.Client(timeout=15.0) as client:
+        ownership = client.get(
+            f"https://graph.facebook.com/v25.0/{req.media_id}",
+            params={"fields": "id,owner", "access_token": token},
+        )
+        if ownership.status_code != 200:
+            raise HTTPException(status_code=404, detail="Instagram media was not found for this connection.")
+        owner_id = str((ownership.json().get("owner") or {}).get("id") or "")
+        if owner_id != str(config["instagram_id"]):
+            raise HTTPException(status_code=404, detail="Instagram media does not belong to this brand.")
+
+        try:
+            combined = client.get(
+                insights_url,
+                params={"metric": ",".join(requested_metrics), "period": "lifetime", "access_token": token},
+            )
+            if combined.status_code == 200:
+                metrics.update(_media_insight_values(combined.json()))
+        except Exception:
+            pass
+
+        missing = [metric for metric in requested_metrics if metric not in metrics]
+        # A mixed query can fail when one metric is unavailable for this media
+        # type. Retry only the missing metrics to preserve the supported subset.
+        for metric in missing:
+            try:
+                response = client.get(
+                    insights_url,
+                    params={"metric": metric, "period": "lifetime", "access_token": token},
+                )
+                if response.status_code != 200:
+                    unavailable.append(metric)
+                    continue
+                value = _media_insight_value(response.json())
+                if value is None:
+                    unavailable.append(metric)
+                else:
+                    metrics[metric] = value
+            except Exception:
+                unavailable.append(metric)
+
+    historical: Dict[str, Optional[float]] = {
+        "brand_median_er": None,
+        "recent_median_er": None,
+    }
+    prediction = None
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        conn = None
+        try:
+            conn = psycopg2.connect(db_url)
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY p.er) AS brand_median_er
+                       FROM posts p
+                       WHERE p.brand_id = %s
+                         AND p.source = 'instagram_graph'
+                         AND p.instagram_media_id IS NOT NULL""",
+                    (req.brand_id,),
+                )
+                row = cur.fetchone()
+                if row and row.get("brand_median_er") is not None:
+                    historical["brand_median_er"] = float(row["brand_median_er"])
+                cur.execute(
+                    """SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY recent.er) AS recent_median_er
+                       FROM (
+                         SELECT p.er FROM posts p
+                         WHERE p.brand_id = %s
+                           AND p.source = 'instagram_graph'
+                           AND p.instagram_media_id IS NOT NULL
+                         ORDER BY p.created_at DESC LIMIT 10
+                       ) recent""",
+                    (req.brand_id,),
+                )
+                row = cur.fetchone()
+                if row and row.get("recent_median_er") is not None:
+                    historical["recent_median_er"] = float(row["recent_median_er"])
+
+                if req.caption:
+                    normalized = re.sub(r"\s+", " ", req.caption.strip().lower())
+                    cur.execute(
+                        """SELECT p.pred_class, p.actual_class, p.actual_source, p.model_version,
+                                  p.features->>'confidence' AS confidence
+                           FROM predictions p
+                           WHERE p.brand_id = %s AND p.created_by = %s
+                             AND regexp_replace(lower(trim(coalesce(p.caption, ''))), '\\s+', ' ', 'g') = %s
+                           ORDER BY p.created_at DESC LIMIT 1""",
+                        (req.brand_id, req.created_by, normalized),
+                    )
+                    match = cur.fetchone()
+                    if match:
+                        prediction = {
+                            "tier": str(match["pred_class"]).title(),
+                            "actual_tier": (
+                                str(match["actual_class"]).title()
+                                if match.get("actual_source") == "instagram_media_id" and match.get("actual_class")
+                                else None
+                            ),
+                            "confidence": float(match["confidence"]) if match.get("confidence") else None,
+                            "model_version": match.get("model_version"),
+                            "match_method": "exact_caption",
+                        }
+        except Exception as exc:
+            logger.warning(f"Post detail comparison lookup failed: {exc}")
+        finally:
+            if conn:
+                conn.close()
+
+    return {
+        "status": "success",
+        "metrics": metrics,
+        "unavailable_metrics": sorted(set(unavailable)),
+        # Meta's media-insights endpoint does not reliably attribute these
+        # account-level actions to an individual organic post.
+        "not_attributable_metrics": ["profile_visits", "follows"],
+        "historical": historical,
+        "prediction": prediction,
+    }
+
+
+def _upsert_instagram_media(cur, brand_id: str, post: Dict[str, Any], current_followers: int) -> str:
+    """Insert or refresh one Graph API media row without deleting history.
+
+    The immutable Instagram media ID is the identity key. On the first run
+    after migration, one legacy row may be claimed only when both timestamp
+    and caption match exactly. Its original follower denominator is preserved.
+    """
+    media_id = str(post["id"])
+    caption = post.get("caption") or ""
+    timestamp = str(post["timestamp"])
+    likes = float(post["like_count"])
+    comments = float(post["comments_count"])
+    media_type = post.get("media_type", "IMAGE")
+    ts_clean = timestamp.replace("Z", "+00:00").replace("+0000", "+00:00")
+    dt_utc = datetime.datetime.fromisoformat(ts_clean)
+    post_hour = (dt_utc + datetime.timedelta(hours=7)).hour
+
+    cur.execute(
+        """SELECT id, follower_count_at_post FROM posts
+           WHERE brand_id = %s AND instagram_media_id = %s
+           LIMIT 1""",
+        (brand_id, media_id),
+    )
+    existing = cur.fetchone()
+    result = "updated"
+    if not existing:
+        cur.execute(
+            """SELECT id, follower_count_at_post FROM posts
+               WHERE brand_id = %s
+                 AND instagram_media_id IS NULL
+                 AND source IS NULL
+                 AND created_at = %s
+                 AND caption IS NOT DISTINCT FROM %s
+               ORDER BY id LIMIT 1""",
+            (brand_id, timestamp, caption),
+        )
+        existing = cur.fetchone()
+        result = "claimed" if existing else "inserted"
+
+    denominator = (
+        int(existing[1])
+        if existing and isinstance(existing[1], (int, float)) and existing[1] > 0
+        else current_followers
+    )
+    er = round(((likes + comments) / denominator) * 100, 4)
+    values = (
+        media_id, caption, er, denominator,
+        media_type == "IMAGE", media_type == "CAROUSEL_ALBUM", media_type == "VIDEO",
+        post_hour, len(caption), len(HASHTAG_PATTERN.findall(caption)),
+        bool(CTA_PATTERN.search(caption)), timestamp,
+    )
+
+    if existing:
+        cur.execute(
+            """UPDATE posts SET
+                 instagram_media_id = %s, source = 'instagram_graph',
+                 caption = %s, er = %s, is_synced = true,
+                 follower_count_at_post = %s,
+                 is_single_image = %s, is_carousel = %s, is_reels = %s,
+                 post_hour = %s, caption_length = %s, hashtag_count = %s,
+                 has_cta = %s, created_at = %s,
+                 synced_at = timezone('utc'::text, now())
+               WHERE id = %s""",
+            (*values, existing[0]),
+        )
+    else:
+        cur.execute(
+            """INSERT INTO posts (
+                 brand_id, instagram_media_id, source, caption, er, is_synced,
+                 follower_count_at_post, is_single_image, is_carousel, is_reels,
+                 post_hour, caption_length, hashtag_count, has_cta, created_at, synced_at
+               ) VALUES (
+                 %s, %s, 'instagram_graph', %s, %s, true,
+                 %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                 timezone('utc'::text, now())
+               )""",
+            (brand_id, *values),
+        )
+    return result
 
 
 def _sync_and_retrain_pipeline():
-    """Full pipeline: sync Instagram data then retrain models for each brand."""
+    """Sync configured Instagram accounts and train the appropriate model.
+
+    Connections must already be bound to an existing brand; sync never creates
+    user-facing rows. Accounts with at least 200 posts train a personal model.
+    Smaller accounts contribute to one shared cohort model per run.
+    """
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         return {"status": "error", "message": "DATABASE_URL not configured"}
 
-    brands_config = _get_brands_config()
+    brands_config = _bound_instagram_configs()
+    if not brands_config:
+        return {
+            "status": "error",
+            "message": "No Instagram connections are configured.",
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "results": [],
+        }
     results = []
 
-    for name, niche, ig_id, token in brands_config:
+    for config in brands_config:
+        name = config.get("name") or "Unbound connection"
+        niche = config.get("niche")
+        brand_id = config.get("brand_id")
         brand_result = {"brand": name, "niche": niche, "sync": {}, "train": {}}
+        if not brand_id:
+            brand_result["sync"] = {
+                "status": "failed",
+                "error": config.get("binding_error") or "Instagram connection is not bound to a brand",
+            }
+            results.append(brand_result)
+            continue
+
+        conn = None
         try:
-            followers = _fetch_ig_profile(ig_id, token)
+            followers = _fetch_ig_profile(config["instagram_id"], config["access_token"])
             brand_result["sync"]["followers"] = followers
+            if followers <= 0:
+                raise ValueError(
+                    "Instagram returned no usable follower denominator; refusing to write fabricated 0% engagement rates."
+                )
 
+            posts = _fetch_ig_posts(config["instagram_id"], config["access_token"])
+            valid_posts = [
+                post for post in posts
+                if isinstance(post.get("like_count"), (int, float))
+                and isinstance(post.get("comments_count"), (int, float))
+                and post.get("id")
+                and post.get("timestamp")
+            ]
+            if not valid_posts:
+                raise ValueError("Instagram returned no posts with complete engagement and timestamp fields; existing history was preserved.")
+            if len(valid_posts) != len(posts):
+                logger.warning(f"Skipping {len(posts) - len(valid_posts)} incomplete Instagram media rows for {name}.")
             conn = psycopg2.connect(db_url)
-            brand_id = None
+            sync_counts = {"inserted": 0, "updated": 0, "claimed": 0}
             with conn.cursor() as cur:
-                cur.execute("SELECT id FROM brands WHERE name = %s", (name,))
-                row = cur.fetchone()
-                if row:
-                    brand_id = str(row[0])
-                    cur.execute("UPDATE brands SET followers = %s, niche = %s WHERE id = %s", (followers, niche, brand_id))
-                else:
-                    cur.execute(
-                        "INSERT INTO brands (name, niche, followers, model_type) VALUES (%s, %s, %s, 'personal') RETURNING id",
-                        (name, niche, followers)
-                    )
-                    brand_id = str(cur.fetchone()[0])
-            conn.commit()
-
-            posts = _fetch_ig_posts(ig_id, token)
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM posts WHERE brand_id = %s", (brand_id,))
-                for post in posts:
-                    caption = post.get("caption", "")
-                    likes = post.get("like_count", 0)
-                    comments = post.get("comments_count", 0)
-                    media_type = post.get("media_type", "IMAGE")
-                    timestamp = post.get("timestamp")
-                    er = round(((likes + comments) / followers) * 100, 4) if followers > 0 else 0.0
-                    is_single = media_type == "IMAGE"
-                    is_carousel = media_type == "CAROUSEL_ALBUM"
-                    is_reels = media_type == "VIDEO"
-                    ts_clean = timestamp.replace("Z", "+00:00").replace("+0000", "+00:00")
-                    dt_utc = datetime.datetime.fromisoformat(ts_clean)
-                    post_hour = (dt_utc + datetime.timedelta(hours=7)).hour
-                    cur.execute(
-                        """INSERT INTO posts (brand_id, caption, er, is_synced, follower_count_at_post,
-                            is_single_image, is_carousel, is_reels, post_hour,
-                            caption_length, hashtag_count, has_cta, created_at)
-                        VALUES (%s,%s,%s,true,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                        (brand_id, caption, er, followers, is_single, is_carousel, is_reels,
-                         post_hour, len(caption), len(HASHTAG_PATTERN.findall(caption)),
-                         bool(CTA_PATTERN.search(caption)), timestamp)
-                    )
-            conn.commit()
-
-            # Outcome tracking: link past predictions to the real posts they
-            # became (normalized exact-caption match within the brand) and
-            # grade the realized tier with the same percentile method used for
-            # training labels. Drafts edited before publishing stay unmatched
-            # rather than guessed.
-            with conn.cursor() as cur:
+                # This row lock serializes concurrent syncs for the same brand
+                # until the media upserts commit.
+                cur.execute("UPDATE brands SET followers = %s WHERE id = %s", (followers, brand_id))
+                if cur.rowcount != 1:
+                    raise ValueError("Bound brand no longer exists")
+                for post in valid_posts:
+                    sync_result = _upsert_instagram_media(cur, brand_id, post, followers)
+                    sync_counts[sync_result] += 1
                 cur.execute(
-                    """UPDATE predictions pr
-                       SET actual_er = p.er
-                       FROM posts p
-                       WHERE pr.brand_id = %s AND p.brand_id = pr.brand_id
-                         AND pr.actual_er IS NULL
-                         AND lower(regexp_replace(pr.caption, '\\s+', ' ', 'g')) =
-                             lower(regexp_replace(p.caption, '\\s+', ' ', 'g'))""",
-                    (brand_id,)
+                    """SELECT COUNT(*) FROM posts
+                       WHERE brand_id = %s
+                         AND source = 'instagram_graph'
+                         AND instagram_media_id IS NOT NULL""",
+                    (brand_id,),
                 )
-                outcomes = cur.rowcount
-                cur.execute(
-                    """WITH bounds AS (
-                           SELECT percentile_cont(0.33) WITHIN GROUP (ORDER BY er) AS p33,
-                                  percentile_cont(0.67) WITHIN GROUP (ORDER BY er) AS p67
-                           FROM posts WHERE brand_id = %s
-                       )
-                       UPDATE predictions SET actual_class =
-                           CASE WHEN actual_er < (SELECT p33 FROM bounds) THEN 'LOW'
-                                WHEN actual_er <= (SELECT p67 FROM bounds) THEN 'AVERAGE'
-                                ELSE 'HIGH' END
-                       WHERE brand_id = %s AND actual_er IS NOT NULL""",
-                    (brand_id, brand_id)
-                )
+                stored_count = int(cur.fetchone()[0])
             conn.commit()
             conn.close()
-            brand_result["sync"]["posts_synced"] = len(posts)
-            brand_result["sync"]["outcomes_recorded"] = outcomes
+            conn = None
+            brand_result["sync"]["posts_received"] = len(posts)
+            brand_result["sync"]["posts_synced"] = len(valid_posts)
+            brand_result["sync"]["posts_inserted"] = sync_counts["inserted"]
+            brand_result["sync"]["posts_updated"] = sync_counts["updated"]
+            brand_result["sync"]["legacy_rows_claimed"] = sync_counts["claimed"]
+            brand_result["sync"]["stored_verified_posts"] = stored_count
             brand_result["sync"]["status"] = "success"
-            logger.info(f"[n8n Sync] {name}: {len(posts)} posts synced, {outcomes} prediction outcomes recorded.")
+            logger.info(
+                f"[n8n Sync] {name}: {len(valid_posts)}/{len(posts)} posts synced "
+                f"({sync_counts['inserted']} inserted, {sync_counts['updated']} updated, "
+                f"{sync_counts['claimed']} legacy rows claimed)."
+            )
 
             try:
-                train_result = ModelTrainer.run_training(brand_id=brand_id)
+                if stored_count >= 200:
+                    train_scope = "personal"
+                    train_result = ModelTrainer.run_training(brand_id=brand_id)
+                else:
+                    brand_result["train"] = {
+                        "status": "pending",
+                        "scope": "cohort",
+                        "reason": "Cohort training runs after every configured brand has synced.",
+                    }
+                    results.append(brand_result)
+                    continue
                 brand_result["train"] = {
                     "status": "success",
+                    "scope": train_scope,
                     "accuracy": train_result["metrics"]["accuracy"],
                     "f1_score": train_result["metrics"]["f1_score"],
                     "model_filename": train_result["model_filename"]
                 }
-                logger.info(f"[n8n Train] {name}: accuracy={train_result['metrics']['accuracy']:.2%}")
+                logger.info(f"[n8n Train] {name} ({train_scope}): accuracy={train_result['metrics']['accuracy']:.2%}")
             except Exception as te:
                 brand_result["train"] = {"status": "failed", "error": str(te)}
 
         except Exception as e:
             brand_result["sync"]["status"] = "failed"
             brand_result["sync"]["error"] = str(e)
+        finally:
+            if conn:
+                conn.close()
 
         results.append(brand_result)
 
-    return {"status": "success", "timestamp": datetime.datetime.utcnow().isoformat(), "results": results}
+    # Train each shared cohort once, after all connected brands have synced, so
+    # model input never depends on connection ordering.
+    pending_niches = {
+        result.get("niche")
+        for result in results
+        if result.get("train", {}).get("status") == "pending" and result.get("niche")
+    }
+    for pending_niche in pending_niches:
+        try:
+            train_result = ModelTrainer.run_training(niche=pending_niche)
+            cohort_train = {
+                "status": "success",
+                "scope": "cohort",
+                "accuracy": train_result["metrics"]["accuracy"],
+                "f1_score": train_result["metrics"]["f1_score"],
+                "model_filename": train_result["model_filename"],
+            }
+        except Exception as exc:
+            cohort_train = {"status": "failed", "scope": "cohort", "error": str(exc)}
+        for result in results:
+            if (
+                result.get("niche") == pending_niche
+                and result.get("train", {}).get("status") == "pending"
+            ):
+                result["train"] = dict(cohort_train)
+
+    # A connected brand without a cohort cannot be trained and must not leave
+    # a misleading pending status in an otherwise completed run.
+    for result in results:
+        if result.get("train", {}).get("status") == "pending":
+            result["train"] = {
+                "status": "failed",
+                "scope": "cohort",
+                "error": "The brand has no supported industry cohort.",
+            }
+
+    fully_successful = all(
+        result.get("sync", {}).get("status") == "success"
+        and result.get("train", {}).get("status") == "success"
+        for result in results
+    )
+    return {
+        "status": "success" if fully_successful else "partial",
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "results": results,
+    }
 
 
 @app.post("/sync/now", dependencies=[Depends(verify_internal_token)])

@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { brandHandle } from "@/lib/types";
+import { getRequestUser, getOwnedBrands } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
+    const user = await getRequestUser(supabase);
+    if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
+    const brandIds = (await getOwnedBrands(supabase, user.id)).map((brand) => brand.id);
+    if (brandIds.length === 0) return NextResponse.json([]);
 
     // Fetch predictions joined with brand metadata
     const { data: predictions, error } = await supabase
@@ -18,6 +23,7 @@ export async function GET() {
         features,
         pred_class,
         actual_class,
+        actual_source,
         created_at,
         scheduled_date,
         brand_id,
@@ -26,6 +32,8 @@ export async function GET() {
           niche
         )
       `)
+      .in("brand_id", brandIds)
+      .eq("created_by", user.id)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -52,7 +60,7 @@ export async function GET() {
         format,
         caption: p.caption || "",
         tier: p.pred_class.charAt(0).toUpperCase() + p.pred_class.slice(1).toLowerCase(),
-        actual: p.actual_class
+        actual: p.actual_source === "instagram_media_id" && p.actual_class
           ? p.actual_class.charAt(0).toUpperCase() + p.actual_class.slice(1).toLowerCase()
           : null,
         confidence,
@@ -74,7 +82,11 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
+    const user = await getRequestUser(supabase);
+    if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
+    const brandIds = (await getOwnedBrands(supabase, user.id)).map((brand) => brand.id);
+    if (brandIds.length === 0) return NextResponse.json({ status: "error", message: "Not found" }, { status: 404 });
     const { id, scheduled_date, title, caption } = await request.json();
 
     if (!id) {
@@ -89,14 +101,19 @@ export async function PATCH(request: Request) {
     if (title !== undefined) updates.title = title;
     if (caption !== undefined) updates.caption = caption;
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from("predictions")
       .update(updates)
-      .eq("id", id);
+      .eq("id", id)
+      .in("brand_id", brandIds)
+      .eq("created_by", user.id)
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       throw error;
     }
+    if (!updated) return NextResponse.json({ status: "error", message: "Prediction not found" }, { status: 404 });
 
     return NextResponse.json({ status: "success", message: "Prediction updated successfully" });
   } catch (error: any) {
@@ -110,7 +127,11 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
+    const user = await getRequestUser(supabase);
+    if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
+    const brandIds = (await getOwnedBrands(supabase, user.id)).map((brand) => brand.id);
+    if (brandIds.length === 0) return NextResponse.json({ status: "error", message: "Not found" }, { status: 404 });
     const { id } = await request.json();
 
     if (!id) {
@@ -120,11 +141,19 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const { error } = await supabase.from("predictions").delete().eq("id", id);
+    const { data: deleted, error } = await supabase
+      .from("predictions")
+      .delete()
+      .eq("id", id)
+      .in("brand_id", brandIds)
+      .eq("created_by", user.id)
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       throw error;
     }
+    if (!deleted) return NextResponse.json({ status: "error", message: "Prediction not found" }, { status: 404 });
 
     return NextResponse.json({ status: "success", message: "Prediction deleted" });
   } catch (error: any) {

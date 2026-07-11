@@ -12,7 +12,7 @@ export interface Brand {
   id: string;
   name: string;
   niche: string;
-  followers: number;
+  followers: number | null;
   model_type: "niche" | "personal";
   /** Real count of historical posts stored for this brand. */
   samples: number;
@@ -21,12 +21,11 @@ export interface Brand {
 
 export interface MlModel {
   id: string;
-  name: string; // "Niche Model: Bakery" / "Personal Model: Lasence"
+  name: string; // Human-readable model scope and brand/industry label.
   scope: "Niche" | "Personal";
   niche: string;
   version: string;
-  baselineAccuracy: number; // validation accuracy recorded at training time
-  is_active: boolean;
+  baselineAccuracy: number | null; // validation accuracy recorded at training time
   trained: string;
   brandId?: string;
 }

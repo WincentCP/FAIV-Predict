@@ -1,27 +1,54 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/authz";
+import { NICHES } from "@/lib/niches";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const supabase = createClient();
-    // posts(count) returns the real number of historical posts per brand —
-    // this is the "samples" figure that drives model-maturity displays.
+    const supabase = await createClient();
+    const user = await getRequestUser(supabase);
+    if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
     const { data: brands, error } = await supabase
       .from("brands")
-      .select("id, name, niche, followers, model_type, created_at, posts(count)")
+      .select("id, name, niche, followers, model_type, created_at")
+      .eq("owner_id", user.id)
       .order("name", { ascending: true });
 
     if (error) {
       throw error;
     }
 
-    const mapped = (brands || []).map((b: any) => {
-      const postCount = Array.isArray(b.posts) ? b.posts[0]?.count ?? 0 : 0;
-      const { posts: _posts, ...rest } = b;
-      return { ...rest, samples: postCount };
-    });
+    // Count only posts carrying immutable Instagram media provenance. Legacy
+    // rows of unknown origin remain available to administrators but never
+    // inflate model-maturity claims in the product.
+    const counts = await Promise.all((brands || []).map(async (brand: any) => {
+      const { count, error: countError } = await supabase
+        .from("posts")
+        .select("id", { count: "exact", head: true })
+        .eq("brand_id", brand.id)
+        .eq("source", "instagram_graph")
+        .not("instagram_media_id", "is", null);
+      if (countError) throw countError;
+      return count || 0;
+    }));
+    const brandIds = (brands || []).map((brand: any) => brand.id);
+    const { data: verifiedPersonalModels, error: modelError } = brandIds.length > 0
+      ? await supabase
+          .from("models")
+          .select("brand_id")
+          .in("brand_id", brandIds)
+          .eq("model_type", "account")
+          .contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" })
+      : { data: [], error: null };
+    if (modelError) throw modelError;
+    const personalBrandIds = new Set((verifiedPersonalModels || []).map((model: any) => model.brand_id));
+    const mapped = (brands || []).map((brand: any, index: number) => ({
+      ...brand,
+      samples: counts[index],
+      model_type: personalBrandIds.has(brand.id) ? "personal" : "niche",
+    }));
 
     return NextResponse.json(mapped);
   } catch (error: any) {
@@ -36,7 +63,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, niche, followers } = body;
+    const { name, niche } = body;
 
     if (typeof name !== "string" || !name.trim() || typeof niche !== "string" || !niche.trim()) {
       return NextResponse.json(
@@ -50,25 +77,38 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    const followersNum = Number(followers);
-    if (followers !== undefined && (!Number.isFinite(followersNum) || followersNum < 0)) {
+    if (!(NICHES as readonly string[]).includes(niche.trim())) {
       return NextResponse.json(
-        { status: "error", message: "'followers' must be a non-negative number." },
+        { status: "error", message: "Select a supported industry cohort." },
         { status: 400 }
       );
     }
-
-    const supabase = createClient();
+    const supabase = await createClient();
+    const user = await getRequestUser(supabase);
+    if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
+    const { data: duplicate, error: duplicateError } = await supabase
+      .from("brands")
+      .select("id")
+      .eq("owner_id", user.id)
+      .eq("name", name.trim())
+      .limit(1)
+      .maybeSingle();
+    if (duplicateError) throw duplicateError;
+    if (duplicate) {
+      return NextResponse.json(
+        { status: "error", message: "A brand workspace with this name already exists." },
+        { status: 409 }
+      );
+    }
     const { data: newBrand, error } = await supabase
       .from("brands")
       .insert([
         {
           name: name.trim(),
+          owner_id: user.id,
           niche: niche.trim(),
-          followers: followers !== undefined ? Math.round(followersNum) : 0,
-          // New brands always start on the shared niche model; the training
-          // pipeline promotes them to 'personal' once a personal model ships.
-          model_type: "niche",
+          // followers and model_type deliberately use database defaults.
+          // Only the sync/training service may change those system fields.
         },
       ])
       .select()

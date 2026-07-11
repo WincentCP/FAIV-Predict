@@ -22,7 +22,7 @@ class ModelUnavailableError(Exception):
 class ModelLoader:
     """
     Manages caching, fetching, and loading of Random Forest models from Supabase Storage.
-    Includes robust fallbacks for offline or unconfigured environments.
+    Fails closed when storage or database configuration is unavailable.
     """
     
     _model_cache = {}
@@ -54,6 +54,8 @@ class ModelLoader:
                         SELECT id, brand_id, niche, model_type, storage_path, storage_url, version, accuracy, metrics
                         FROM models 
                         WHERE brand_id = %s AND model_type = 'account'
+                          AND metrics->>'data_source' = 'instagram_graph'
+                          AND metrics->>'identity_key' = 'instagram_media_id'
                         ORDER BY created_at DESC LIMIT 1
                         """,
                         (brand_id,)
@@ -69,6 +71,8 @@ class ModelLoader:
                         SELECT id, brand_id, niche, model_type, storage_path, storage_url, version, accuracy, metrics
                         FROM models 
                         WHERE niche = %s AND model_type = 'niche' AND brand_id IS NULL
+                          AND metrics->>'data_source' = 'instagram_graph'
+                          AND metrics->>'identity_key' = 'instagram_media_id'
                         ORDER BY created_at DESC LIMIT 1
                         """,
                         (niche,)
@@ -166,6 +170,14 @@ class ModelLoader:
         try:
             local_path = cls.download_model(storage_url, storage_path, filename)
             model = joblib.load(local_path)
+            provenance = model.get("data_provenance") if isinstance(model, dict) else None
+            if not isinstance(provenance, dict) or (
+                provenance.get("source") != "instagram_graph"
+                or provenance.get("identity_key") != "instagram_media_id"
+            ):
+                raise ModelUnavailableError(
+                    "The model artifact predates verified Instagram media provenance. Retrain it before serving."
+                )
             cls._model_cache[cache_key] = model
             logger.info(f"Successfully loaded model {filename} and cached in memory.")
             return model, metadata
