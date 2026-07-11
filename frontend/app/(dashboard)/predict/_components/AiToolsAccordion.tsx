@@ -43,7 +43,7 @@ export function AiToolsAccordion({
           <div className="min-w-0">
             <div className="text-xs font-bold text-foreground">AI Assistant</div>
             <div className="text-xs text-muted-foreground truncate">
-              Optional — concept analysis and caption rewriting. Does not affect the score.
+              Visual concepts are not scored directly. Applied caption rewrites require a new prediction.
             </div>
           </div>
         </div>

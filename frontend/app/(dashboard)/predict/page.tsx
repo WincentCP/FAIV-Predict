@@ -41,6 +41,9 @@ export default function PredictPage() {
     d.setHours(19, 30, 0, 0);
     return d;
   });
+  // A new draft has no committed publishing time. Keep the internal Date for
+  // the date picker, but do not silently treat its 19:30 placeholder as input.
+  const [hasPostTime, setHasPostTime] = useState(false);
   const [caption, setCaption] = useState("");
   const [visualConcept, setVisualConcept] = useState("");
 
@@ -60,8 +63,11 @@ export default function PredictPage() {
   const [predictionSnapshot, setPredictionSnapshot] = useState<{
     caption: string;
     contentFormat: ContentFormat;
-    scheduledAt: number;
+    scheduledDate: string;
+    scheduledTime: string | null;
+    postHour: number | null;
     accountId: string | null;
+    brandName: string | null;
   } | null>(null);
 
   const isFormValid = useMemo(
@@ -78,10 +84,11 @@ export default function PredictPage() {
     return (
       predictionSnapshot.caption !== caption ||
       predictionSnapshot.contentFormat !== contentFormat ||
-      predictionSnapshot.scheduledAt !== scheduledAt.getTime() ||
+      predictionSnapshot.scheduledDate !== formatDate(scheduledAt, "yyyy-MM-dd") ||
+      predictionSnapshot.postHour !== (hasPostTime ? scheduledAt.getHours() : null) ||
       predictionSnapshot.accountId !== accountId
     );
-  }, [predictionSnapshot, caption, contentFormat, scheduledAt, accountId]);
+  }, [predictionSnapshot, caption, contentFormat, scheduledAt, hasPostTime, accountId]);
 
   const stats = useMemo(() => analyzeCaption(caption), [caption]);
   const tooLong = stats.charCount > CAPTION_MAX;
@@ -109,7 +116,7 @@ export default function PredictPage() {
   // Clear the "optimizations applied" note once inputs are edited again
   useEffect(() => {
     setOptimizationsApplied(false);
-  }, [caption, contentFormat, scheduledAt, accountId]);
+  }, [caption, contentFormat, scheduledAt, hasPostTime, accountId]);
 
   const handlePredict = async () => {
     if (!isFormValid || submitting) return;
@@ -124,10 +131,16 @@ export default function PredictPage() {
         body: JSON.stringify({
           caption,
           format: contentFormat,
-          post_hour: scheduledAt.getHours(),
+          post_hour: hasPostTime ? scheduledAt.getHours() : null,
           brand_id: account?.id,
           niche: account?.niche,
           scheduled_date: formatDate(scheduledAt, "yyyy-MM-dd"),
+          supersedes_prediction_id:
+            isPredictionStale &&
+            prediction?.savedId &&
+            predictionSnapshot?.accountId === accountId
+              ? prediction.savedId
+              : null,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -160,13 +173,21 @@ export default function PredictPage() {
         outOfRange: Array.isArray(data.out_of_range) ? data.out_of_range : [],
         counterfactuals: Array.isArray(data.counterfactuals) ? data.counterfactuals : [],
         counterfactualsNote: data.counterfactuals_note ?? null,
+        status: data.prediction_context?.status === "provisional" ? "provisional" : "current",
+        timeKnown: data.prediction_context?.time_known !== false,
+        scenarioHours: Array.isArray(data.prediction_context?.scenario_hours)
+          ? data.prediction_context.scenario_hours
+          : [],
       });
       setFeatureImportances(data.feature_importances || null);
       setPredictionSnapshot({
         caption,
         contentFormat,
-        scheduledAt: scheduledAt.getTime(),
+        scheduledDate: formatDate(scheduledAt, "yyyy-MM-dd"),
+        scheduledTime: hasPostTime ? formatDate(scheduledAt, "HH:mm") : null,
+        postHour: hasPostTime ? scheduledAt.getHours() : null,
         accountId,
+        brandName: account?.name ?? null,
       });
       setView("insights");
     } catch {
@@ -188,6 +209,7 @@ export default function PredictPage() {
       const d = new Date(scheduledAt);
       d.setHours(bestHour);
       setScheduledAt(d);
+      setHasPostTime(true);
     }
     let nextCaption = caption;
     if (appliedRecs.has_cta && !stats.hasCTA) {
@@ -212,6 +234,13 @@ export default function PredictPage() {
   };
 
   const anyRecsApplied = Object.values(appliedRecs).some(Boolean);
+
+  const predictionScheduledAt = useMemo(() => {
+    if (!predictionSnapshot) return scheduledAt;
+    return new Date(
+      `${predictionSnapshot.scheduledDate}T${predictionSnapshot.scheduledTime ?? "00:00"}:00`
+    );
+  }, [predictionSnapshot, scheduledAt]);
 
   // MDI chart data from the real model importances; one-hot format features
   // merge into a single "Content Format" row for readability.
@@ -241,14 +270,18 @@ export default function PredictPage() {
     const fi = featureImportances;
     if (!fi) return [];
     const postHour = predictionSnapshot
-      ? new Date(predictionSnapshot.scheduledAt).getHours()
-      : scheduledAt.getHours();
+      ? predictionSnapshot.postHour
+      : hasPostTime ? scheduledAt.getHours() : null;
     const snapshotStats = analyzeCaption(predictionSnapshot?.caption ?? caption);
-    const snapDate = predictionSnapshot ? new Date(predictionSnapshot.scheduledAt) : scheduledAt;
+    const snapDate = predictionSnapshot
+      ? new Date(`${predictionSnapshot.scheduledDate}T00:00:00`)
+      : scheduledAt;
     const reasons: WhyReason[] = [
       {
-        label: `Scheduled at ${String(postHour).padStart(2, "0")}:00`,
-        detail: "Posting hour is an input used by this trained model.",
+        label: postHour == null ? "Posting time not set" : `Scheduled at ${String(postHour).padStart(2, "0")}:00`,
+        detail: postHour == null
+          ? "This provisional result averages the model artifact's supported posting-hour scenarios."
+          : "Posting hour is an input used by this trained model.",
         weight: fi.post_hour ?? 0,
         direction: "neutral" as const,
       },
@@ -300,7 +333,7 @@ export default function PredictPage() {
       });
     }
     return reasons;
-  }, [featureImportances, predictionSnapshot, caption, scheduledAt]);
+  }, [featureImportances, predictionSnapshot, caption, scheduledAt, hasPostTime]);
 
   return (
     <div className="relative px-4 py-6 md:px-8 md:py-8 max-w-[1200px] mx-auto min-h-screen">
@@ -353,6 +386,8 @@ export default function PredictPage() {
             setContentFormat={setContentFormat}
             scheduledAt={scheduledAt}
             setScheduledAt={setScheduledAt}
+            hasPostTime={hasPostTime}
+            setHasPostTime={setHasPostTime}
             caption={caption}
             setCaption={setCaption}
             visualConcept={visualConcept}
@@ -370,9 +405,10 @@ export default function PredictPage() {
             <InsightsView
               prediction={prediction}
               isPredictionStale={isPredictionStale}
-              brandName={account?.name}
-              scheduledAt={scheduledAt}
-              contentFormat={contentFormat}
+              brandName={predictionSnapshot?.brandName ?? undefined}
+              scheduledAt={predictionScheduledAt}
+              hasPostTime={predictionSnapshot?.postHour != null}
+              contentFormat={predictionSnapshot?.contentFormat ?? contentFormat}
               whyReasons={whyReasons}
               mdiChartData={mdiChartData}
               appliedRecs={appliedRecs}

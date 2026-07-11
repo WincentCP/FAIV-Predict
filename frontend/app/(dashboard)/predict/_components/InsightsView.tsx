@@ -34,6 +34,9 @@ export interface InsightsPrediction {
   outOfRange: string[];
   counterfactuals: Counterfactual[];
   counterfactualsNote: string | null;
+  status: "current" | "provisional";
+  timeKnown: boolean;
+  scenarioHours: number[];
 }
 
 export function InsightsView(props: {
@@ -41,6 +44,7 @@ export function InsightsView(props: {
   isPredictionStale: boolean;
   brandName?: string;
   scheduledAt: Date;
+  hasPostTime: boolean;
   contentFormat: ContentFormat;
   whyReasons: WhyReason[];
   mdiChartData: { name: string; importance: number; rawPct: number }[];
@@ -51,7 +55,7 @@ export function InsightsView(props: {
   onEditDraft: () => void;
 }) {
   const {
-    prediction, isPredictionStale, brandName, scheduledAt, contentFormat,
+    prediction, isPredictionStale, brandName, scheduledAt, hasPostTime, contentFormat,
     whyReasons, mdiChartData, appliedRecs, onToggleRec, anyRecsApplied, onApply, onEditDraft,
   } = props;
 
@@ -87,7 +91,7 @@ export function InsightsView(props: {
       {/* Verdict header */}
       <div className="grid gap-6 rounded-2xl border border-border bg-surface/60 p-6 backdrop-blur shadow-[var(--shadow-soft)] md:grid-cols-12">
         <div className="flex items-center justify-center md:col-span-4">
-          <ConfidenceMeter value={prediction.confidence} tier={prediction.tier} size={160} label="Model Confidence" />
+          <ConfidenceMeter value={prediction.confidence} tier={prediction.tier} size={160} label="Raw Class Score" />
         </div>
         <div className="flex flex-col justify-center space-y-3 md:col-span-8">
           <div className="flex flex-wrap items-center gap-2">
@@ -98,14 +102,23 @@ export function InsightsView(props: {
                 Saved to History
               </span>
             )}
+            {prediction.status === "provisional" && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-warning">
+                <Clock className="h-2.5 w-2.5" />
+                Provisional · time unknown
+              </span>
+            )}
           </div>
           <h4 className="text-2xl font-black font-display leading-tight text-foreground">
             Predicted tier: <span className={tierColorClass}>{prediction.tier.toUpperCase()}</span>
           </h4>
           <p className="text-xs text-muted-foreground leading-relaxed max-w-[62ch]">
-            This draft is predicted to earn <strong className="text-foreground">
-            {prediction.tier.toLowerCase()}-tier engagement</strong> (likes + comments relative to this
-            brand&apos;s own history — not reach or sales), with {prediction.confidence}% model confidence.
+            This draft is {prediction.status === "provisional" ? "provisionally " : ""}predicted to earn <strong className="text-foreground">
+            {prediction.tier.toLowerCase()}-tier engagement</strong> (likes + comments relative to {prediction.isPersonalModel
+              ? "this brand's own verified history"
+              : "the selected industry's verified cohort history"}; not reach or sales), with a {prediction.confidence}% raw class score.
+            This score is not yet a calibrated probability.
+            {prediction.status === "provisional" && " Set a posting time and re-analyze before approval or publishing."}
           </p>
 
           {/* Inline probability bars */}
@@ -133,7 +146,7 @@ export function InsightsView(props: {
           <div className="flex flex-wrap items-center gap-3 border-t border-border/40 pt-3 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5 font-semibold"><FileText className="h-3 w-3" />{brandName || "—"}</span>
             <span className="inline-flex items-center gap-1.5"><Calendar className="h-3 w-3" />{formatDate(scheduledAt, "MMM d, yyyy")}</span>
-            <span className="inline-flex items-center gap-1.5"><Clock className="h-3 w-3" />{formatDate(scheduledAt, "HH:mm")}</span>
+            <span className="inline-flex items-center gap-1.5"><Clock className="h-3 w-3" />{hasPostTime ? formatDate(scheduledAt, "HH:mm") : "Time not set"}</span>
             <span className="rounded-md border border-border bg-surface px-2 py-0.5 font-mono text-xs font-bold">{contentFormat}</span>
           </div>
         </div>
@@ -218,11 +231,17 @@ export function InsightsView(props: {
         <button
           type="button"
           onClick={onApply}
-          disabled={!anyRecsApplied}
-          title={!anyRecsApplied ? "Toggle at least one change above to stage it" : undefined}
+          disabled={!anyRecsApplied || isPredictionStale}
+          title={
+            isPredictionStale
+              ? "Recalculate this draft before applying recommendations from the old result"
+              : !anyRecsApplied
+                ? "Toggle at least one change above to stage it"
+                : undefined
+          }
           className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground transition-colors duration-200 hover:bg-primary/92 disabled:opacity-50"
         >
-          Apply Changes &amp; Re-Analyze
+          Apply to Draft
         </button>
       </div>
     </motion.div>

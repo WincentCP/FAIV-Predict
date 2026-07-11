@@ -32,6 +32,8 @@ export function ComposeView(props: {
   setContentFormat: (f: ContentFormat) => void;
   scheduledAt: Date;
   setScheduledAt: (d: Date) => void;
+  hasPostTime: boolean;
+  setHasPostTime: (known: boolean) => void;
   caption: string;
   setCaption: (c: string) => void;
   visualConcept: string;
@@ -47,6 +49,7 @@ export function ComposeView(props: {
   const {
     brandsList, brandsError, accountId, setAccountId, account,
     contentFormat, setContentFormat, scheduledAt, setScheduledAt,
+    hasPostTime, setHasPostTime,
     caption, setCaption, visualConcept, setVisualConcept,
     predictError, optimizationsApplied, isFormValid, isPredictionStale,
     submitting, tooLong, onAnalyze,
@@ -155,8 +158,27 @@ export function ComposeView(props: {
             <DatePicker id="predict-date" aria-label="Scheduled post date" value={scheduledAt} onChange={setScheduledAt} />
           </div>
           <div>
-            <Label htmlFor="predict-time">Post Time</Label>
-            <TimePicker id="predict-time" aria-label="Scheduled post time in WIB" value={scheduledAt} onChange={setScheduledAt} />
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="predict-time">Post Time <span className="font-normal text-muted-foreground">(optional)</span></Label>
+              <button
+                type="button"
+                onClick={() => setHasPostTime(!hasPostTime)}
+                className="text-xs font-semibold text-primary hover:underline"
+              >
+                {hasPostTime ? "Set later" : "Add time"}
+              </button>
+            </div>
+            {hasPostTime ? (
+              <TimePicker id="predict-time" aria-label="Scheduled post time in WIB" value={scheduledAt} onChange={setScheduledAt} />
+            ) : (
+              <div
+                id="predict-time"
+                role="status"
+                className="flex h-10 items-center rounded-lg border border-dashed border-border bg-surface-2/50 px-3 text-xs font-semibold text-muted-foreground"
+              >
+                Not set. The result will be provisional.
+              </div>
+            )}
           </div>
         </div>
       </Panel>
@@ -204,6 +226,8 @@ export function ComposeView(props: {
             <span className="text-warning font-semibold">
               Inputs changed — re-analyze to refresh the result.
             </span>
+          ) : !hasPostTime ? (
+            <span>Time is optional. The model will average its supported hours and mark the result provisional.</span>
           ) : (
             <span>Caption, format, and timing feed the model.</span>
           )}

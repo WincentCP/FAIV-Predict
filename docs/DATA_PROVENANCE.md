@@ -16,8 +16,8 @@ error, empty, or unavailable state; it must never substitute example records.
 | Brands and cohorts | `GET/POST /api/brands` | `brands`; verified post counts from `posts` | Brand rows require `owner_id = auth.uid()`. Maturity counts include only `source = instagram_graph` rows with an immutable `instagram_media_id`. A new workspace starts disconnected and with no trained model. |
 | Instagram connection health | `GET /api/instagram-health` → FastAPI | Meta Graph `/me` plus the latest verified `posts.synced_at` | The BFF sends only owned brand UUIDs. FastAPI filters the credential bindings before any database or Graph request. Empty ownership performs no work. |
 | Compose signals | Local deterministic parsing | The user's current caption, format, and schedule | These are draft-derived UI signals, not historical claims. CTA parsing mirrors the trained model feature contract. |
-| Prediction verdict and explanations | `POST /api/predict` → FastAPI | Certified model bundle from Supabase Storage plus the submitted draft | The BFF proves brand ownership and supplies `created_by`. FastAPI serves only Graph-provenance-certified bundles. Feature importance and counterfactual values are model outputs; no fallback score is generated. |
-| Prediction history | `GET/PATCH/DELETE /api/history` | `predictions` joined to `brands` | Every operation requires an owned `brand_id` and `created_by = auth.uid()`. “Actual” is displayed only when `actual_source = instagram_media_id`; otherwise it is explicitly not linked. |
+| Prediction verdict and explanations | `POST /api/predict` → FastAPI | Certified model bundle from Supabase Storage plus the submitted draft | The BFF proves brand ownership and supplies `created_by`. Each immutable result records the model ID, model version, feature-schema hash, raw-input hash, optional-time status, and supersession lineage. Feature importance is global evidence; sensitivity scenarios are non-causal model simulations. |
+| Prediction history | `GET/PATCH/DELETE /api/history` | `predictions` joined to `brands` | Every operation requires an owned `brand_id` and `created_by = auth.uid()`. Scored inputs and outputs cannot be edited. Delete soft-archives the row; restore and lifecycle changes are audited. “Actual” appears only when `actual_source = instagram_media_id`. |
 | Insights post list | `GET /api/instagram-posts` → FastAPI | Meta Graph media plus verified stored post observations | The BFF supplies one owned brand ID. Stored comparisons match immutable media IDs and only verified `source = instagram_graph` rows. Live reactions and media preview come from Graph; captured engagement rate and tier context come from the corresponding sync observation. |
 | Insights post metrics | `POST /api/instagram-post-insights` → FastAPI | Meta Graph lifetime insights for the selected owned media ID | The BFF verifies the brand before forwarding. Unsupported or unavailable Meta metrics remain unavailable; they are not estimated. |
 | Model Health | `GET /api/models`, `GET/POST /api/train` | `models`, `model_retrain_jobs`, ML training pipeline | Personal models are restricted to owned brand IDs and cohort models to owned cohorts. Accuracy is the stored held-out validation value, not live monitoring. Training calls are authenticated service-to-service. |
@@ -43,13 +43,14 @@ error, empty, or unavailable state; it must never substitute example records.
 Before a release, all gates below must pass:
 
 1. Apply `supabase/migrations/202607110001_user_data_ownership_and_calendar.sql`.
-2. Run `bash scripts/verify_env.sh`; the ownership, provenance, Storage, and
+2. Apply `supabase/migrations/202607110002_prediction_lifecycle.sql` before deploying the matching frontend and ML service.
+3. Run `bash scripts/verify_env.sh`; the ownership, provenance, Storage, and
    credential checks must pass or produce only intentional optional-integration warnings.
-3. Confirm every production brand has an explicit owner assignment.
-4. Configure `IG_BRANDS_JSON` with existing owned brand UUIDs; never bind a
+4. Confirm every production brand has an explicit owner assignment.
+5. Configure `IG_BRANDS_JSON` with existing owned brand UUIDs; never bind a
    token by display-name inference.
-5. Run frontend lint, TypeScript, production build, and the ML test suite.
-6. Verify empty accounts show empty states on Dashboard, History, Insights, and
+6. Run frontend lint, TypeScript, production build, and the ML test suite.
+7. Verify empty accounts show empty states on Dashboard, History, Insights, and
    Calendar before connecting real integrations.
 
 Reports, Settings, notifications, and user-management pages are intentionally

@@ -7,13 +7,6 @@ export const dynamic = "force-dynamic";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function isRealIsoDate(value: string) {
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-    !Number.isNaN(parsed.getTime()) &&
-    parsed.toISOString().slice(0, 10) === value;
-}
-
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -35,6 +28,15 @@ export async function GET() {
         actual_source,
         created_at,
         scheduled_date,
+        prediction_status,
+        stale_reason,
+        stale_at,
+        supersedes_prediction_id,
+        supersession_reason,
+        model_id,
+        feature_schema_version,
+        input_hash,
+        time_known,
         brand_id,
         brands (
           name,
@@ -43,6 +45,7 @@ export async function GET() {
       `)
       .in("brand_id", brandIds)
       .eq("created_by", user.id)
+      .is("deleted_at", null)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -78,6 +81,15 @@ export async function GET() {
         post_hour: postHour,
         when: p.created_at,
         scheduled_date: p.scheduled_date || null,
+        status: p.prediction_status || (p.time_known === false ? "provisional" : "current"),
+        stale_reason: p.stale_reason || null,
+        stale_at: p.stale_at || null,
+        supersedes_prediction_id: p.supersedes_prediction_id || null,
+        supersession_reason: p.supersession_reason || null,
+        model_id: p.model_id || null,
+        feature_schema_version: p.feature_schema_version || null,
+        input_hash: p.input_hash || null,
+        time_known: p.time_known !== false,
       };
     });
 
@@ -95,7 +107,7 @@ export async function PATCH(request: Request) {
     if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
     const brandIds = (await getOwnedBrands(supabase, user.id)).map((brand) => brand.id);
     if (brandIds.length === 0) return NextResponse.json({ status: "error", message: "Not found" }, { status: 404 });
-    const { id, scheduled_date, title, caption } = await readJsonObject(request);
+    const { id, scheduled_date, title, caption, restore } = await readJsonObject(request);
 
     if (typeof id !== "string" || !UUID_PATTERN.test(id)) {
       return NextResponse.json(
@@ -104,11 +116,13 @@ export async function PATCH(request: Request) {
       );
     }
 
-    if (scheduled_date !== undefined && scheduled_date !== null &&
-        (typeof scheduled_date !== "string" || !isRealIsoDate(scheduled_date))) {
+    if (scheduled_date !== undefined || caption !== undefined) {
       return NextResponse.json(
-        { status: "error", message: "Scheduled date must be a real date in YYYY-MM-DD format." },
-        { status: 400 }
+        {
+          status: "error",
+          message: "Prediction snapshots are immutable. Edit the draft or calendar item, then create a successor prediction.",
+        },
+        { status: 409 }
       );
     }
     if (title !== undefined && (typeof title !== "string" || title.length > 255)) {
@@ -117,13 +131,13 @@ export async function PATCH(request: Request) {
         { status: 400 }
       );
     }
-    if (caption !== undefined && (typeof caption !== "string" || caption.length > 5000)) {
+    if (restore !== undefined && typeof restore !== "boolean") {
       return NextResponse.json(
-        { status: "error", message: "Caption must be text no longer than 5,000 characters." },
+        { status: "error", message: "'restore' must be a boolean." },
         { status: 400 }
       );
     }
-    if (scheduled_date === undefined && title === undefined && caption === undefined) {
+    if (title === undefined && restore !== true) {
       return NextResponse.json(
         { status: "error", message: "Provide at least one field to update." },
         { status: 400 }
@@ -131,9 +145,10 @@ export async function PATCH(request: Request) {
     }
 
     const updates: Record<string, string | null> = {};
-    if (scheduled_date !== undefined) updates.scheduled_date = scheduled_date;
     if (title !== undefined) updates.title = title;
-    if (caption !== undefined) updates.caption = caption;
+    if (restore === true) {
+      updates.deleted_at = null;
+    }
 
     const { data: updated, error } = await supabase
       .from("predictions")
@@ -149,7 +164,10 @@ export async function PATCH(request: Request) {
     }
     if (!updated) return NextResponse.json({ status: "error", message: "Prediction not found" }, { status: 404 });
 
-    return NextResponse.json({ status: "success", message: "Prediction updated successfully" });
+    return NextResponse.json({
+      status: "success",
+      message: restore === true ? "Prediction restored." : "Prediction title updated.",
+    });
   } catch (error) {
     console.error("[BFF History] Failed to update prediction:", error);
     return publicErrorResponse(error, "Prediction could not be updated.", 503);
@@ -174,10 +192,11 @@ export async function DELETE(request: Request) {
 
     const { data: deleted, error } = await supabase
       .from("predictions")
-      .delete()
+      .update({ deleted_at: new Date().toISOString() })
       .eq("id", id)
       .in("brand_id", brandIds)
       .eq("created_by", user.id)
+      .is("deleted_at", null)
       .select("id")
       .maybeSingle();
 
@@ -186,7 +205,7 @@ export async function DELETE(request: Request) {
     }
     if (!deleted) return NextResponse.json({ status: "error", message: "Prediction not found" }, { status: 404 });
 
-    return NextResponse.json({ status: "success", message: "Prediction deleted" });
+    return NextResponse.json({ status: "success", message: "Prediction archived and retained in the audit trail." });
   } catch (error) {
     console.error("[BFF History] Failed to delete prediction:", error);
     return publicErrorResponse(error, "Prediction could not be deleted.", 503);

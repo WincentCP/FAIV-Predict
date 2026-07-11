@@ -26,13 +26,13 @@ export function WhyThisScore({ reasons, context }: WhyThisScoreProps) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-primary">
-            Why this score
+            Model context
           </div>
           <h3
             id="why-score-heading"
             className="font-display mt-2 text-sm font-bold tracking-tight"
           >
-            Top Contributing Signals
+            Top Global Model Signals
           </h3>
           {context && (
             <p className="mt-0.5 text-xs text-muted-foreground">

@@ -57,7 +57,8 @@ authoritative integration is maintained in
 | `POST /api/refine-caption` | Optional Gemini caption rewrite (501 without `LLM_API_KEY`) |
 | `POST /api/classify` | Optional Gemini niche classification (501 without `LLM_API_KEY`) |
 | `GET/POST /api/brands` | Brands with real per-brand post counts (`samples`) |
-| `GET/PATCH/DELETE /api/history` | Prediction log: list, reschedule/edit, delete |
+| `GET/PATCH/DELETE /api/history` | Immutable prediction log: list, rename/restore, soft-archive |
+| `POST /api/analyze-concept` | Optional Gemini review of an unscored creative brief |
 | `GET/POST/PATCH/DELETE /api/calendar` | User-owned planning records and reviewed spreadsheet imports |
 | `GET /api/dashboard` | Workspace KPI aggregates (503 on database failure) |
 | `GET /api/models` | Trained model registry |
@@ -77,7 +78,7 @@ authoritative integration is maintained in
 5. **Evaluation**: accuracy, weighted precision/recall/F1 on a held-out 20% split, stored in the `models.metrics` JSONB column.
 6. **Serving**: model bundles (`model + thresholds + feature order + data provenance`) are uploaded to Supabase Storage, registered in the `models` table, downloaded, provenance-verified, and memory-cached by the inference service. Pre-migration models without certified Graph media IDs are not served.
 7. **Hierarchy**: prediction requests resolve a brand-specific (`account`) model first, falling back to the shared niche model. The response reports which one served the request (`is_personal_model_active`).
-8. **Explainability**: two complementary layers. **Global** — real MDI feature importances returned with every prediction drive the importance chart and "Why this score" signals. **Local (counterfactual / what-if)** — after predicting, the model re-scores ~6–8 single-feature variants of the *same* draft in one batched `predict_proba` call and returns the measured change in P(High) for each (e.g. "Switch format to Reels: 7% → 58%"). These are evidence, not heuristics; changes with no measured gain are reported honestly, and a model whose classes lack a High tier returns an explicit "unavailable" note rather than fabricated numbers.
+8. **Explainability**: two complementary layers. **Global**: real MDI feature importance describes overall model behavior but is not presented as a signed local explanation. **Sensitivity scenarios**: the model re-scores single-feature variants of the same draft. These are non-causal model simulations, not guaranteed engagement uplift, and the actual edited draft must be scored again.
 9. **Post provenance**: sync upserts by immutable Instagram media ID and never deletes/rebuilds historical posts. A legacy row is claimed only by an exact timestamp-and-caption match; otherwise it remains quarantined. Caption matching may provide a read-only prediction trace in Insights, but never writes an “actual” outcome. Predicted-vs-actual values are shown only when `actual_source = instagram_media_id` supplies explicit future linkage.
 
 ---
@@ -90,14 +91,14 @@ The core flow lives on **`/predict`** as two focused views:
 Compose (draft the post) → Insights (everything the model has to say, one screen)
 ```
 
-* **Compose** — one column: a compact setup strip (brand + format + schedule), the caption as the hero input with live signals (length, hashtags, CTA, question, emoji), and an optional collapsed **AI Assistant** (Gemini concept analysis + caption refinement — clearly labelled as *not* affecting the score).
-* **Insights** — a single scrollable screen: the verdict (tier, confidence dial, class probabilities), a **Trust strip** stating exactly what the score is based on (personal vs cohort model, train-split size, validated accuracy, model version), **Measured Improvements** (counterfactual results ranked by measured effect), format planning comparison, and a default-closed model-evidence disclosure. Actionable changes stage for one-click Apply & Re-Analyze.
+* **Compose**: one column with brand, format, required date, optional posting time, caption signals, and an optional AI Assistant. With no time, the model averages the artifact's train-range hours and stores an explicitly provisional result. A legacy artifact without hour-support metadata falls back to all 24 hours and discloses that limitation. Visual Concept is not a model feature; applying a concept-conditioned caption rewrite changes the draft and requires a new prediction.
+* **Insights**: a single scrollable screen with tier, raw class score, class scores, model scope, validation accuracy, model version, sensitivity scenarios, and global model signals. Raw Random Forest scores are explicitly not described as calibrated probabilities. Edited inputs make the result stale and disable applying old recommendations.
 
 Other pages:
 
 * **`/dashboard`** — KPIs, model accuracy trend, recent forecasts, per-brand model status (all queried live from Supabase).
 * **`/calendar`** — a planning workspace independent from prediction history. It contains only manual or reviewed CSV/XLSX imports, supports workflow metadata, drag-to-reschedule, and CSV/XLSX/PDF export.
-* **`/history`** — filterable prediction log.
+* **`/history`**: filterable, immutable prediction evidence. Recalculation creates a successor; user deletion is a reversible soft archive and never rewrites or destroys the scored snapshot.
 * **`/insights`** — a master-detail analytics hub. The post list stays lightweight; supported Meta lifetime metrics load only for the selected post, alongside verified historical and prediction comparisons.
 * **`/niches`** — brand registration with one controlled industry cohort. AI may suggest a cohort, but the user confirms it; follower counts come only from Instagram sync.
 Instagram connection health is shown per brand on **`/niches`**. The daily n8n check can notify operators before a scheduled sync fails.

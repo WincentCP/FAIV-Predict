@@ -82,17 +82,18 @@ if [ -n "$SUPABASE_URL" ] && [ -n "$SERVICE_KEY" ]; then
   for endpoint in \
     "brands?select=id,owner_id&limit=1" \
     "posts?select=id,instagram_media_id,source,synced_at&limit=1" \
-    "predictions?select=id,created_by,actual_source&limit=1" \
-    "calendar_entries?select=id,owner_id,source&limit=1"; do
+    "predictions?select=id,created_by,actual_source,prediction_status,time_known,model_id,feature_schema_version,input_hash,deleted_at&limit=1" \
+    "calendar_entries?select=id,owner_id,source,prediction_id&limit=1" \
+    "content_lifecycle_events?select=id,owner_id,event_type,occurred_at&limit=1"; do
     code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$SUPABASE_URL/rest/v1/$endpoint" \
       -K /dev/fd/3 \
       3<<< $'header = "apikey: '"$SERVICE_KEY"$'"\nheader = "Authorization: Bearer '"$SERVICE_KEY"$'"')
     [ "$code" = "200" ] || schema_ok=0
   done
   if [ "$schema_ok" = "1" ]; then
-    pass "ownership, calendar, and post-provenance columns are exposed by PostgREST"
+    pass "ownership, provenance, prediction lifecycle, and audit schema are exposed by PostgREST"
   else
-    fail "required ownership/calendar migration is missing or not exposed by PostgREST"
+    fail "required ownership or prediction-lifecycle migration is missing or not exposed by PostgREST"
   fi
 else
   warn "service key unavailable; skipping PostgREST schema preflight"
@@ -106,7 +107,7 @@ import os, sys, psycopg2
 try:
     conn = psycopg2.connect(os.environ["FAIV_VERIFY_DB_URL"], connect_timeout=15)
     with conn.cursor() as cur:
-        for table in ("brands", "posts", "predictions", "models", "calendar_entries"):
+        for table in ("brands", "posts", "predictions", "models", "calendar_entries", "content_lifecycle_events"):
             cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
             if cur.fetchone()[0] is None:
                 raise RuntimeError(f"missing table: {table}")
@@ -117,6 +118,12 @@ try:
             ("posts", "synced_at"),
             ("predictions", "created_by"),
             ("predictions", "actual_source"),
+            ("predictions", "prediction_status"),
+            ("predictions", "time_known"),
+            ("predictions", "model_id"),
+            ("predictions", "feature_schema_version"),
+            ("predictions", "input_hash"),
+            ("predictions", "deleted_at"),
         ):
             cur.execute(
                 "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name=%s AND column_name=%s",
@@ -124,7 +131,7 @@ try:
             )
             if cur.fetchone() is None:
                 raise RuntimeError(f"missing column: {table}.{column}")
-        print("  PASS ownership, calendar, and post-provenance migration is present")
+        print("  PASS ownership, provenance, prediction lifecycle, and audit migrations are present")
     conn.close()
 except Exception as exc:
     print(f"  FAIL database/schema check: {exc}")

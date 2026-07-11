@@ -23,6 +23,10 @@ type HistoryItem = {
   confidence: number | null;
   when: string;
   scheduled_date: string | null;
+  status: "current" | "provisional" | "stale" | "superseded";
+  stale_reason: string | null;
+  stale_at: string | null;
+  time_known: boolean;
 };
 
 export default function HistoryPage() {
@@ -68,10 +72,11 @@ export default function HistoryPage() {
         body: JSON.stringify({
           caption: h.caption,
           format: h.format,
-          post_hour: h.post_hour ?? 19,
+          post_hour: h.post_hour,
           brand_id: h.brand_id,
           niche: h.niche,
           scheduled_date: h.scheduled_date || undefined,
+          supersedes_prediction_id: h.id,
         }),
       });
       const result = await res.json().catch(() => null);
@@ -244,7 +249,20 @@ export default function HistoryPage() {
 
                   {/* Predicted tier */}
                   <td className="px-6 py-5 align-middle">
-                    <TierBadge tier={h.tier} />
+                    <div className="space-y-1.5">
+                      <TierBadge tier={h.tier} />
+                      {h.status !== "current" && (
+                        <span
+                          className={cn(
+                            "block text-xs font-bold uppercase tracking-wide",
+                            h.status === "stale" ? "text-warning" : "text-muted-foreground"
+                          )}
+                          title={h.stale_reason || undefined}
+                        >
+                          {h.status === "provisional" ? "Time not set" : h.status}
+                        </span>
+                      )}
+                    </div>
                   </td>
 
                   {/* Actual tier is shown only after an immutable media-ID link
@@ -272,12 +290,18 @@ export default function HistoryPage() {
                     <button
                       type="button"
                       onClick={() => reEvaluate(h)}
-                      disabled={!h.brand_id || reEvaluating !== null}
-                      title="Score this draft again with the current model. The original prediction is kept and a fresh result is added."
+                      disabled={!h.brand_id || reEvaluating !== null || h.status === "superseded"}
+                      title={h.status === "superseded"
+                        ? "This prediction already has a successor. Re-evaluate the newest result instead."
+                        : "Score this draft again with the current model. The original prediction is kept and a fresh result is added."}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-bold text-muted-foreground transition-all hover:bg-surface-2 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <RefreshCw className={reEvaluating === h.id ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
-                      Re-evaluate
+                      {h.status === "superseded"
+                        ? "Replaced"
+                        : h.status === "stale" || h.status === "provisional"
+                          ? "Recalculate"
+                          : "Re-evaluate"}
                     </button>
                   </td>
                 </tr>

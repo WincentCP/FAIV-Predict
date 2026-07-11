@@ -26,6 +26,7 @@ def test_predict_requires_internal_token_when_configured():
     assert _token, "CI and local test runs must configure INTERNAL_API_TOKEN"
     resp = TestClient(app).post("/predict", json={
         "caption": "hi", "format": "Reels", "post_hour": 19,
+        "scheduled_date": "2026-07-11",
     })
     assert resp.status_code == 401
 
@@ -33,7 +34,10 @@ def test_predict_requires_internal_token_when_configured():
 def test_predict_rejects_invalid_internal_token():
     resp = TestClient(app, headers={"X-Internal-Token": "wrong-token"}).post(
         "/predict",
-        json={"caption": "hi", "format": "Reels", "post_hour": 19},
+        json={
+            "caption": "hi", "format": "Reels", "post_hour": 19,
+            "scheduled_date": "2026-07-11",
+        },
     )
     assert resp.status_code == 401
 
@@ -50,7 +54,8 @@ def test_predict_endpoint_no_model_is_honest(monkeypatch):
         "post_hour": 19,
         "brand_id": "bfd6dbca-613d-4950-8b1e-45ad7dcf1088",
         "created_by": "15663b0a-d1fc-4cb9-bac2-bb0251307441",
-        "niche": "Fashion"
+        "niche": "Fashion",
+        "scheduled_date": "2026-07-11",
       }
     response = client.post("/predict", json=payload)
     assert response.status_code == 503
@@ -80,7 +85,10 @@ def test_predict_rejects_impossible_schedule_before_inference():
     {"unexpected": "field"},
 ])
 def test_predict_rejects_invalid_payloads_before_inference(payload_update):
-    payload = {"caption": "A real draft", "format": "Reels", "post_hour": 19}
+    payload = {
+        "caption": "A real draft", "format": "Reels", "post_hour": 19,
+        "scheduled_date": "2026-07-11",
+    }
     payload.update(payload_update)
     response = client.post("/predict", json=payload)
     assert response.status_code == 422
@@ -97,12 +105,22 @@ def test_prediction_errors_do_not_leak_internal_exception_details(monkeypatch):
         "caption": "A real draft",
         "format": "Reels",
         "post_hour": 19,
+        "scheduled_date": "2026-07-11",
     })
     assert response.status_code == 500
     assert secret_detail not in response.text
     assert response.json()["detail"] == (
         "Prediction could not be completed due to an internal service error."
     )
+
+
+def test_predict_requires_a_real_schedule_date():
+    response = client.post("/predict", json={
+        "caption": "A real draft",
+        "format": "Reels",
+        "post_hour": None,
+    })
+    assert response.status_code == 422
 
 def test_train_endpoint_without_db_refuses_untrackable_job(monkeypatch):
     """A job that cannot be persisted must never be reported as queued."""
@@ -256,9 +274,78 @@ def test_predict_success_contract_uses_real_bundle_outputs(monkeypatch):
     assert body["prediction_id"] is None
     assert body["model_metadata"]["trained_samples"] == 42
     assert body["model_metadata"]["is_personal_model_active"] is False
+    assert body["prediction_context"] == {
+        "status": "current",
+        "time_known": True,
+        "scenario_hours": [],
+        "scenario_support_basis": "exact_time",
+        "input_hash": body["prediction_context"]["input_hash"],
+        "feature_schema_version": body["prediction_context"]["feature_schema_version"],
+    }
+    assert len(body["prediction_context"]["input_hash"]) == 64
+    assert body["prediction_context"]["feature_schema_version"].startswith("sha256:")
     assert "caption_length" in body["out_of_range"]
     assert set(body["probabilities"]) == {name.title() for name in model.classes_}
     assert len([row for row in body["counterfactuals"] if row["parameter"] == "format"]) == 2
+
+
+def test_predict_without_post_time_is_explicitly_provisional(monkeypatch):
+    """An optional time must never be silently replaced with a default hour."""
+    model = _tiny_model()
+    bundle = {
+        "model": model,
+        "features": FEATURE_ORDER_V2,
+        "feature_ranges": {
+            "post_hour": [8.0, 20.0],
+            "caption_length": [1.0, 200.0],
+            "hashtag_count": [0.0, 5.0],
+            "emoji_count": [0.0, 2.0],
+        },
+    }
+    metadata = {
+        "id": "model-optional-time",
+        "model_type": "niche",
+        "version": "test-v1",
+        "accuracy": 0.75,
+        "metrics": {"train_samples": 42},
+    }
+    monkeypatch.setattr(ModelLoader, "load_model", lambda **_kwargs: (bundle, metadata))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    response = client.post("/predict", json={
+        "caption": "A real draft with no committed publishing time #launch",
+        "format": "Reels",
+        "post_hour": None,
+        "scheduled_date": "2026-07-11",
+    })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["prediction_context"] == {
+        "status": "provisional",
+        "time_known": False,
+        "scenario_hours": list(range(8, 21)),
+        "scenario_support_basis": "training_range",
+        "input_hash": body["prediction_context"]["input_hash"],
+        "feature_schema_version": body["prediction_context"]["feature_schema_version"],
+    }
+    assert "training-range hours 8:00 through 20:00 equally" in body["counterfactuals_note"]
+    assert "post_hour" not in body["out_of_range"]
+    assert len(body["counterfactuals"]) == 1
+    assert body["counterfactuals"][0]["parameter"] == "post_hour"
+
+
+def test_predict_rejects_incomplete_supersession_metadata():
+    response = client.post("/predict", json={
+        "caption": "A real draft",
+        "format": "Reels",
+        "post_hour": 19,
+        "scheduled_date": "2026-07-11",
+        "brand_id": "bfd6dbca-613d-4950-8b1e-45ad7dcf1088",
+        "created_by": "15663b0a-d1fc-4cb9-bac2-bb0251307441",
+        "supersedes_prediction_id": "2e4ca101-c68c-44ef-8fa8-192398c602e1",
+    })
+    assert response.status_code == 422
 
 
 def test_build_counterfactuals_measured_and_honest():

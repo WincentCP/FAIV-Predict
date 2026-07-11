@@ -2,6 +2,8 @@ import os
 import re
 import json
 import uuid
+import hashlib
+import math
 import datetime
 import logging
 from typing import Optional, Dict, Any, Literal
@@ -12,7 +14,7 @@ from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(env_path)
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 import numpy as np
 import psycopg2
 import psycopg2.extras
@@ -22,6 +24,10 @@ from app.model_loader import ModelLoader, ModelUnavailableError
 from app.train_pipeline import ModelTrainer
 
 MAX_INSTAGRAM_HEALTH_BRANDS = 100
+# Legacy bundles do not carry a learned posting-hour distribution. For them,
+# use all clock hours as an explicit provisional fallback. Newer bundles at
+# least restrict marginalization to their train-split min/max support.
+UNKNOWN_TIME_SCENARIOS = tuple(range(24))
 
 # Configure Logging
 logger = logging.getLogger("main")
@@ -91,11 +97,18 @@ class PredictionRequest(BaseModel):
 
     caption: str = Field(max_length=2200)
     format: Literal["Reels", "Carousel", "Single Image"]
-    post_hour: int = Field(strict=True, ge=0, le=23)
+    # A draft may not have a committed posting time yet. Unknown time is not
+    # silently replaced with an arbitrary default; inference averages a fixed,
+    # documented scenario set and marks the result provisional.
+    post_hour: Optional[int] = Field(default=None, strict=True, ge=0, le=23)
     brand_id: Optional[str] = Field(default=None, max_length=36)
     niche: Optional[str] = Field(default=None, max_length=120)
-    scheduled_date: Optional[str] = Field(default=None, max_length=10)  # ISO date (YYYY-MM-DD)
+    scheduled_date: str = Field(max_length=10)  # ISO date (YYYY-MM-DD)
     created_by: Optional[str] = Field(default=None, max_length=36)
+    supersedes_prediction_id: Optional[str] = Field(default=None, max_length=36)
+    supersession_reason: Optional[Literal[
+        "inputs_changed", "time_finalized", "manual_rerun"
+    ]] = None
 
     @field_validator("caption")
     @classmethod
@@ -103,6 +116,18 @@ class PredictionRequest(BaseModel):
         if not value.strip():
             raise ValueError("caption must contain non-whitespace text")
         return value
+
+    @model_validator(mode="after")
+    def supersession_fields_are_coherent(self):
+        has_parent = self.supersedes_prediction_id is not None
+        has_reason = self.supersession_reason is not None
+        if has_parent != has_reason:
+            raise ValueError(
+                "supersedes_prediction_id and supersession_reason must be supplied together"
+            )
+        if has_parent and (not self.brand_id or not self.created_by):
+            raise ValueError("supersession requires brand_id and created_by")
+        return self
 
 class TrainRequest(BaseModel):
     brand_id: Optional[str] = None
@@ -273,21 +298,21 @@ def predict(req: PredictionRequest):
             try:
                 uuid.UUID(req.brand_id)
                 uuid.UUID(str(req.created_by or ""))
+                if req.supersedes_prediction_id:
+                    uuid.UUID(req.supersedes_prediction_id)
             except ValueError:
                 raise HTTPException(
                     status_code=400,
-                    detail="brand_id and created_by must be valid UUIDs for a persisted prediction.",
+                    detail="brand_id, created_by, and supersedes_prediction_id must be valid UUIDs.",
                 )
 
-        sched_date = datetime.date.today()
-        if req.scheduled_date:
-            try:
-                sched_date = datetime.date.fromisoformat(req.scheduled_date)
-            except ValueError:
-                raise HTTPException(
-                    status_code=400,
-                    detail="scheduled_date must be a real ISO date (YYYY-MM-DD).",
-                )
+        try:
+            sched_date = datetime.date.fromisoformat(req.scheduled_date)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="scheduled_date must be a real ISO date (YYYY-MM-DD).",
+            )
 
         # 1. Load model and bounds bundle (real trained model only)
         try:
@@ -296,31 +321,75 @@ def predict(req: PredictionRequest):
             # Honest "no trained model yet" signal instead of a fabricated result
             raise HTTPException(status_code=503, detail=str(mue))
 
-        # 2. Extract features using preprocessor. The weekend flag comes from
-        # the validated scheduled date (or today when no date was supplied),
-        # matching training-side semantics.
-        features = DataPreprocessor.extract_features(
-            caption=req.caption,
-            format_type=req.format,
-            post_hour=req.post_hour,
-            is_weekend=sched_date.weekday() >= 5,
-        )
-
         # The bundle's own stored feature list drives vector order so old
         # 7-feature artifacts keep working after the feature set grew.
         feature_order = bundle.get("features") or FEATURE_ORDER_V1
-        out_of_range = DataPreprocessor.out_of_range_features(
-            features, bundle.get("feature_ranges")
-        )
-        feature_vector = [DataPreprocessor.features_to_list(features, feature_order)]
-        
+        feature_schema_version = "sha256:" + hashlib.sha256(
+            "|".join(feature_order).encode("utf-8")
+        ).hexdigest()
+        input_hash = hashlib.sha256(json.dumps(
+            {
+                "brand_id": req.brand_id,
+                "caption": req.caption,
+                "format": req.format,
+                "scheduled_date": req.scheduled_date,
+                "post_hour": req.post_hour,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")).hexdigest()
+
         # Extract components from bundle
         model = bundle["model"]
         classes = model.classes_
-        
-        # 3. Model Inference
-        pred_raw = model.predict(feature_vector)[0]
-        probs_raw = model.predict_proba(feature_vector)[0]
+
+        # 2. Extract features and score. A known time produces the normal
+        # single-vector prediction. An unknown time is evaluated across a
+        # artifact-supported set of hours and averaged, making the result
+        # explicitly provisional instead of pretending that 19:00 was chosen.
+        time_known = req.post_hour is not None
+        scenario_support_basis = "exact_time"
+        if time_known:
+            scenario_hours = [req.post_hour]
+        else:
+            scenario_hours = list(UNKNOWN_TIME_SCENARIOS)
+            hour_bounds = (bundle.get("feature_ranges") or {}).get("post_hour")
+            if isinstance(hour_bounds, (list, tuple)) and len(hour_bounds) == 2:
+                try:
+                    supported_min = max(0, int(math.ceil(float(hour_bounds[0]))))
+                    supported_max = min(23, int(math.floor(float(hour_bounds[1]))))
+                    if supported_min <= supported_max:
+                        scenario_hours = list(range(supported_min, supported_max + 1))
+                        scenario_support_basis = "training_range"
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            if scenario_support_basis != "training_range":
+                scenario_support_basis = "legacy_all_hours"
+        scenario_features = [
+            DataPreprocessor.extract_features(
+                caption=req.caption,
+                format_type=req.format,
+                post_hour=int(hour),
+                is_weekend=sched_date.weekday() >= 5,
+            )
+            for hour in scenario_hours
+        ]
+        feature_matrix = [
+            DataPreprocessor.features_to_list(row, feature_order)
+            for row in scenario_features
+        ]
+        scenario_probabilities = model.predict_proba(feature_matrix)
+        probs_raw = np.mean(scenario_probabilities, axis=0)
+        pred_raw = classes[int(np.argmax(probs_raw))]
+        # Keep one middle scenario vector for non-time explanations. The stored
+        # feature explicitly replaces its hour with null when time is unknown.
+        features = scenario_features[len(scenario_features) // 2]
+        out_of_range = DataPreprocessor.out_of_range_features(
+            features, bundle.get("feature_ranges")
+        )
+        if not time_known:
+            out_of_range = [name for name in out_of_range if name != "post_hour"]
         
         # Map class and probabilities to Title Case for Frontend consistency ("High", "Average", "Low")
         predicted_class = pred_raw.title()
@@ -341,11 +410,45 @@ def predict(req: PredictionRequest):
                 if i < len(mdi_raw):
                     feature_importances[name] = round(float(mdi_raw[i]), 4)
 
-        # Counterfactual what-if analysis: measured P(High) deltas for
-        # single-feature changes to this exact draft.
-        counterfactuals, cf_note = build_counterfactuals(
-            model, features, feature_order, classes, probs_raw
-        )
+        # Counterfactual what-if analysis is complete only when every model
+        # input is known. For an unknown time, expose only the best measured
+        # hour scenario and explain why the remaining recommendations wait.
+        if time_known:
+            counterfactuals, cf_note = build_counterfactuals(
+                model, features, feature_order, classes, probs_raw
+            )
+        else:
+            class_list = [str(value).upper() for value in classes]
+            counterfactuals = []
+            if "HIGH" in class_list:
+                high_index = class_list.index("HIGH")
+                base_high = round(float(probs_raw[high_index]) * 100, 1)
+                best_index = int(np.argmax(scenario_probabilities[:, high_index]))
+                best_probs = scenario_probabilities[best_index]
+                best_hour = scenario_hours[best_index]
+                best_class = str(classes[int(np.argmax(best_probs))]).title()
+                best_high = round(float(best_probs[high_index]) * 100, 1)
+                counterfactuals.append({
+                    "parameter": "post_hour",
+                    "change": f"Set posting time to {best_hour}:00",
+                    "from_value": "Not set",
+                    "to_value": best_hour,
+                    "from_prob_high": base_high,
+                    "to_prob_high": best_high,
+                    "delta_high": round(best_high - base_high, 1),
+                    "new_predicted_class": best_class,
+                    "tier_changed": best_class.upper() != str(pred_raw).upper(),
+                })
+            scenario_description = (
+                f"training-range hours {scenario_hours[0]}:00 through {scenario_hours[-1]}:00"
+                if scenario_support_basis == "training_range"
+                else "all 24 hours because this legacy bundle has no hour-support metadata"
+            )
+            cf_note = (
+                "Posting time is not set. This provisional tier averages "
+                f"{scenario_description} equally. Set a time and re-analyze "
+                "for complete what-if recommendations."
+            )
 
         # Training-set size for the trust display (metrics may be a JSON string
         # depending on the driver).
@@ -369,14 +472,33 @@ def predict(req: PredictionRequest):
                 conn = psycopg2.connect(db_url)
                 with conn.cursor() as cur:
                     json_features = {k: float(v) for k, v in features.items()}
+                    if not time_known:
+                        json_features["post_hour"] = None
+                        json_features["time_scenarios"] = scenario_hours
                     json_features["confidence"] = confidence
+                    json_features["time_known"] = time_known
+                    prediction_status = "current" if time_known else "provisional"
                     cur.execute(
                         """
-                        INSERT INTO predictions (brand_id, created_by, title, caption, features, pred_class, created_at, scheduled_date, model_version)
-                        SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        INSERT INTO predictions (
+                            brand_id, created_by, title, caption, features,
+                            pred_class, created_at, scheduled_date, model_version,
+                            model_id, feature_schema_version, input_hash,
+                            prediction_status, time_known, supersedes_prediction_id,
+                            supersession_reason
+                        )
+                        SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                         WHERE EXISTS (
                             SELECT 1 FROM brands WHERE id = %s AND owner_id = %s
                         )
+                          AND (
+                            %s IS NULL OR EXISTS (
+                                SELECT 1 FROM predictions previous
+                                WHERE previous.id = %s
+                                  AND previous.brand_id = %s
+                                  AND previous.created_by = %s
+                            )
+                          )
                         RETURNING id
                         """,
                         (
@@ -389,14 +511,43 @@ def predict(req: PredictionRequest):
                             datetime.datetime.now(datetime.timezone.utc),
                             sched_date,
                             metadata.get("version"),
+                            metadata.get("id"),
+                            feature_schema_version,
+                            input_hash,
+                            prediction_status,
+                            time_known,
+                            req.supersedes_prediction_id,
+                            req.supersession_reason,
+                            req.brand_id,
+                            req.created_by,
+                            req.supersedes_prediction_id,
+                            req.supersedes_prediction_id,
                             req.brand_id,
                             req.created_by,
                         ),
                     )
                     inserted = cur.fetchone()
                     if not inserted:
-                        raise ValueError("Prediction brand is not owned by created_by")
+                        raise ValueError("Prediction ownership or supersession validation failed")
                     prediction_id = str(inserted[0])
+                    if req.supersedes_prediction_id:
+                        cur.execute(
+                            """UPDATE predictions
+                               SET prediction_status = 'superseded',
+                                   stale_reason = CASE %s
+                                     WHEN 'inputs_changed' THEN 'Recalculated after model input changes'
+                                     WHEN 'time_finalized' THEN 'Recalculated after posting time was finalized'
+                                     ELSE 'Manually re-evaluated'
+                                   END,
+                                   stale_at = COALESCE(stale_at, timezone('utc'::text, now()))
+                               WHERE id = %s AND brand_id = %s AND created_by = %s""",
+                            (
+                                req.supersession_reason,
+                                req.supersedes_prediction_id,
+                                req.brand_id,
+                                req.created_by,
+                            ),
+                        )
                     conn.commit()
             except Exception as log_err:
                 logger.error("Prediction persistence failed: %s", log_err)
@@ -414,6 +565,14 @@ def predict(req: PredictionRequest):
             "confidence": confidence,
             "probabilities": probabilities,
             "prediction_id": prediction_id,
+            "prediction_context": {
+                "status": "current" if time_known else "provisional",
+                "time_known": time_known,
+                "scenario_hours": [] if time_known else scenario_hours,
+                "scenario_support_basis": scenario_support_basis,
+                "input_hash": input_hash,
+                "feature_schema_version": feature_schema_version,
+            },
             "model_metadata": {
                 "model_id": metadata.get("id"),
                 "model_type": metadata.get("model_type"),
