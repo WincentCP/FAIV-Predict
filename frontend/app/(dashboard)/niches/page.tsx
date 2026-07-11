@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/SectionHeader";
 import { NICHES } from "@/lib/niches";
-import { type Brand, type MlModel, SAMPLE_TARGET, brandHandle } from "@/lib/types";
+import { type Brand, type MlModel, SAMPLE_TARGET } from "@/lib/types";
 
 import {
   Loader2,
@@ -69,6 +69,7 @@ export default function NichesPage() {
   const [igStatus, setIgStatus] = useState<
     Record<string, { status: string; username?: string }>
   >({});
+  const [igHealthState, setIgHealthState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     (async () => {
@@ -83,9 +84,12 @@ export default function NichesPage() {
             }
           }
           setIgStatus(map);
+          setIgHealthState("ready");
+        } else {
+          setIgHealthState("error");
         }
       } catch {
-        // leave empty — column falls back to "Not linked"
+        setIgHealthState("error");
       }
     })();
   }, []);
@@ -115,20 +119,15 @@ export default function NichesPage() {
       });
   }, [brands, models]);
 
-  const graduatedCount = brands.filter((b) => b.model_type === "personal").length;
+  const graduatedCount = brands.filter((b) => b.active_model_scope === "personal").length;
 
   return (
     <motion.div
       variants={containerVariants}
       initial="hidden"
       animate="show"
-      className="relative px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto space-y-8 min-h-screen"
+    className="relative px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto space-y-8 min-h-[100dvh]"
     >
-      {/* Ambient Backglow */}
-      <div
-        aria-hidden
-        className="absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[350px] rounded-full filter blur-[120px] pointer-events-none -z-10 bg-indigo-500/10 dark:bg-indigo-500/5"
-      />
 
       <motion.div variants={itemVariants}>
         <SectionHeader
@@ -138,7 +137,7 @@ export default function NichesPage() {
           actions={
             <button
               onClick={() => setShowAddBrand(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.02] active:scale-[0.98]"
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground transition-colors duration-200 hover:bg-primary/92"
             >
               <Users className="h-3.5 w-3.5" />
               Register New Brand
@@ -230,14 +229,14 @@ export default function NichesPage() {
                   <Building2 className="h-4.5 w-4.5 text-primary" />
                   <span className="text-sm font-semibold">{nicheRows.length} industry cohorts</span>
                 </div>
-                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider bg-surface-3 border border-border px-2.5 py-1 rounded-lg">
+                <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider bg-surface-3 border border-border px-2.5 py-1 rounded-lg">
                   Shared models per cohort
                 </span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] table-fixed">
                   <thead>
-                    <tr className="border-b border-border bg-surface-2/30 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                    <tr className="border-b border-border bg-surface-2/30 text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
                       <th className="w-[180px] px-6 py-5 text-left">Industry Cohort</th>
                       <th className="w-[120px] px-6 py-5 text-right">Brands</th>
                       <th className="w-[140px] px-6 py-5 text-right">Total Samples</th>
@@ -263,12 +262,12 @@ export default function NichesPage() {
                         </td>
                         <td className="px-6 py-5 align-middle">
                           {row.model ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-lime/10 border border-accent-lime/30 px-2.5 py-1 text-[10px] font-bold text-accent-lime-strong">
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-lime/10 border border-accent-lime/30 px-2.5 py-1 text-xs font-bold text-accent-lime-strong">
                               <Check className="h-3 w-3" />
                               Trained · {row.model.baselineAccuracy !== null ? `${row.model.baselineAccuracy.toFixed(1)}% acc` : "accuracy unavailable"} · {row.model.trained}
                             </span>
                           ) : (
-                            <span className="inline-flex items-center rounded-full bg-surface-3 border border-border px-2.5 py-1 text-[10px] font-bold text-muted-foreground">
+                            <span className="inline-flex items-center rounded-full bg-surface-3 border border-border px-2.5 py-1 text-xs font-bold text-muted-foreground">
                               Not trained yet
                             </span>
                           )}
@@ -298,16 +297,15 @@ export default function NichesPage() {
                   <Users className="h-4.5 w-4.5 text-primary" />
                   <span className="text-sm font-semibold">{brands.length} brand accounts</span>
                 </div>
-                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider bg-surface-3 border border-border px-2.5 py-1 rounded-lg">
+                <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider bg-surface-3 border border-border px-2.5 py-1 rounded-lg">
                   Personal model at {SAMPLE_TARGET} samples
                 </span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[980px] table-fixed">
                   <thead>
-                    <tr className="border-b border-border bg-surface-2/30 text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
-                      <th className="w-[160px] px-6 py-5 text-left">Username</th>
-                      <th className="w-[180px] px-6 py-5 text-left">Display Name</th>
+                    <tr className="border-b border-border bg-surface-2/30 text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">
+                      <th className="w-[260px] px-6 py-5 text-left">Brand</th>
                       <th className="w-[150px] px-6 py-5 text-left">Industry Cohort</th>
                       <th className="w-[150px] px-6 py-5 text-left">Instagram</th>
                       <th className="w-[100px] px-6 py-5 text-right">Followers</th>
@@ -317,7 +315,7 @@ export default function NichesPage() {
                   <tbody className="divide-y divide-border/50">
                     {brands.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-6 py-10 text-center text-xs text-muted-foreground">
+                        <td colSpan={5} className="px-6 py-10 text-center text-xs text-muted-foreground">
                           No brand accounts registered yet.
                         </td>
                       </tr>
@@ -325,41 +323,24 @@ export default function NichesPage() {
                     {brands.map((b) => {
                       const samples = b.samples ?? 0;
                       const pct = Math.min(100, Math.round((samples / SAMPLE_TARGET) * 100));
-                      const handle = brandHandle(b.name);
-                      const personalActive = b.model_type === "personal";
+                      const personalActive = b.active_model_scope === "personal";
+                      const cohortActive = b.active_model_scope === "cohort";
                       let barColor = "bg-amber-400";
-                      let label = "Cohort model (cold start)";
-                      let labelColor = "text-amber-600 dark:text-amber-400";
-                      let animated = false;
-                      let glowing = false;
+                      let label = cohortActive ? "Cohort model available" : "No trained model";
+                      let labelColor = cohortActive
+                        ? "text-primary"
+                        : "text-amber-700 dark:text-amber-400";
 
                       if (personalActive) {
                         barColor = "bg-accent-lime";
                         label = "Personal model active";
                         labelColor = "text-[oklch(0.42_0.18_130)] dark:text-[oklch(0.82_0.20_130)]";
-                        glowing = true;
-                      } else if (samples >= SAMPLE_TARGET) {
+                      } else if (samples >= 100 || cohortActive) {
                         barColor = "bg-primary";
-                        label = "Eligible — training pending";
-                        labelColor = "text-primary";
-                        animated = true;
-                      } else if (samples >= 100) {
-                        barColor = "bg-primary";
-                        label = "Learning — accumulating data";
-                        labelColor = "text-primary";
-                        animated = true;
                       }
 
                       return (
                         <tr key={b.id} className="group transition-colors hover:bg-surface-2/40">
-                          <td className="px-6 py-5 align-middle">
-                            <span
-                              className="font-mono text-xs text-primary font-semibold bg-primary/5 border border-primary/10 rounded-lg px-2.5 py-1.5 inline-flex max-w-full truncate"
-                              title={handle}
-                            >
-                              {handle}
-                            </span>
-                          </td>
                           <td className="px-6 py-5 align-middle">
                             <div className="flex items-center gap-3 min-w-0">
                               <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-xs font-bold text-primary">
@@ -372,16 +353,26 @@ export default function NichesPage() {
                           </td>
                           <td className="px-6 py-5 align-middle">
                             <span
-                              className="inline-flex items-center rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[10px] font-semibold text-muted-foreground max-w-full truncate"
+                              className="inline-flex items-center rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-xs font-semibold text-muted-foreground max-w-full truncate"
                               title={b.niche}
                             >
                               {b.niche}
                             </span>
                           </td>
                           <td className="px-6 py-5 align-middle">
-                            {igStatus[b.id]?.status === "connected" ? (
+                            {igHealthState === "loading" ? (
+                              <span className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Checking
+                              </span>
+                            ) : igHealthState === "error" ? (
+                              <span className="inline-flex items-center gap-1.5 rounded-lg border border-warning/30 bg-warning/[0.06] px-2.5 py-1 text-xs font-semibold text-warning-foreground" title="The connection service could not be reached. This does not mean the account is disconnected.">
+                                <AlertTriangle className="h-3 w-3" />
+                                Health unavailable
+                              </span>
+                            ) : igStatus[b.id]?.status === "connected" ? (
                               <span
-                                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-[10px] font-bold text-emerald-600 max-w-full"
+                                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-400 max-w-full"
                                 title={`Live Graph API connection verified as @${igStatus[b.id]?.username}`}
                               >
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
@@ -389,17 +380,17 @@ export default function NichesPage() {
                               </span>
                             ) : igStatus[b.id] ? (
                               <span
-                                className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 border border-destructive/25 px-2.5 py-1 text-[10px] font-bold text-destructive"
-                                title="The access token was rejected — regenerate it in the Meta developer console and update the ML service environment"
+                                className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 border border-destructive/25 px-2.5 py-1 text-xs font-bold text-destructive"
+                                title="The saved Meta connection needs administrator attention."
                               >
                                 Token error
                               </span>
                             ) : (
                               <span
-                                className="text-[10px] font-semibold text-muted-foreground/70"
-                                title="Link this brand's Instagram Business account via IG_BRANDS_JSON in the ML service environment — predictions work without it, but weekly data sync and Insights need it"
+                                className="text-xs font-semibold text-muted-foreground"
+                                title="No verified Instagram Business connection is stored for this workspace."
                               >
-                                Not linked
+                                Not connected
                               </span>
                             )}
                           </td>
@@ -413,7 +404,7 @@ export default function NichesPage() {
                               <div className="flex items-center justify-between gap-3">
                                 <span
                                   className={cn(
-                                    "inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider leading-tight min-w-0",
+                                    "inline-flex items-center gap-1.5 text-xs font-bold leading-tight min-w-0",
                                     labelColor
                                   )}
                                 >
@@ -421,34 +412,34 @@ export default function NichesPage() {
                                     className={cn(
                                       "h-1.5 w-1.5 rounded-full shrink-0",
                                       personalActive
-                                        ? "bg-accent-lime animate-pulse"
-                                        : samples >= 100
+                                        ? "bg-accent-lime"
+                                        : cohortActive || samples >= 100
                                         ? "bg-primary"
                                         : "bg-amber-400"
                                     )}
                                   />
                                   <span className="truncate" title={label}>{label}</span>
                                 </span>
-                                <span className="shrink-0 font-mono text-[10px] font-bold tabular-nums text-muted-foreground">
+                                <span className="shrink-0 font-mono text-xs font-bold tabular-nums text-muted-foreground">
                                   {samples}
                                   <span className="opacity-50">/{SAMPLE_TARGET}</span>
                                 </span>
                               </div>
-                              <div className="h-2 overflow-hidden rounded-full bg-surface-3">
+                              <div
+                                className="h-2 overflow-hidden rounded-full bg-surface-3"
+                                role="progressbar"
+                                aria-label={`${b.name} personal model data maturity`}
+                                aria-valuemin={0}
+                                aria-valuemax={SAMPLE_TARGET}
+                                aria-valuenow={Math.min(samples, SAMPLE_TARGET)}
+                              >
                                 <div
                                   className={cn(
-                                    "h-full rounded-full transition-all duration-700",
-                                    barColor,
-                                    animated && "relative overflow-hidden",
-                                    glowing &&
-                                      "shadow-[0_0_8px_2px_color-mix(in_oklab,hsl(var(--accent-lime))_60%,transparent)]"
+                                    "h-full rounded-full transition-[width] duration-300",
+                                    barColor
                                   )}
                                   style={{ width: `${personalActive ? 100 : pct}%` }}
-                                >
-                                  {animated && (
-                                    <span className="absolute inset-0 -translate-x-full animate-[shimmer_2s_linear_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent" />
-                                  )}
-                                </div>
+                                />
                               </div>
                             </div>
                           </td>
@@ -549,7 +540,6 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
       if (res.ok) {
         setSaved(true);
         onSaveSuccess();
-        setTimeout(onClose, 900);
       } else {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.message || "Failed to save the brand account to the database.");
@@ -565,7 +555,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
 
   const manualPicker = (
     <div className="space-y-1.5">
-      <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+      <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
         Select industry cohort
       </div>
       <div className="relative">
@@ -609,7 +599,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
             </div>
             <div>
               <h2 className="font-display text-base font-bold tracking-tight">Create Brand Workspace</h2>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+              <p className="mt-0.5 text-xs text-muted-foreground">
                 Create the workspace record first. Instagram remains disconnected until Meta authorization and a successful sync.
               </p>
             </div>
@@ -627,7 +617,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
           {/* ── Left: Registration form ── */}
           <div className="space-y-5 border-b border-border p-7 md:border-b-0 md:border-r">
             <div className="space-y-1.5">
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 Brand Name
               </label>
               <input
@@ -639,7 +629,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 Business Profile &amp; Target Audience
               </label>
               <textarea
@@ -649,7 +639,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                 placeholder="Describe the business core, products, and who they sell to..."
                 className="w-full resize-none rounded-lg border border-border bg-surface p-3 text-sm leading-relaxed outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_color-mix(in_oklab,hsl(var(--ring))_16%,transparent)]"
               />
-              <div className="text-[10px] text-muted-foreground">
+              <div className="text-xs text-muted-foreground">
                 {bio.trim().length < 10 ? (
                   <span className="text-warning font-medium">
                     Requires at least 10 characters to analyze ({bio.trim().length}/10)
@@ -670,7 +660,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
               type="button"
               onClick={classify}
               disabled={aiState === "loading" || bio.trim().length < 10}
-              className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground transition-all hover:scale-[1.01] hover:shadow-[var(--shadow-glow-purple)] active:scale-[0.98] disabled:opacity-50"
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground transition-colors duration-200 hover:bg-primary/92 disabled:opacity-50"
             >
               {aiState === "loading" ? (
                 <>
@@ -691,7 +681,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                 setPicked((p) => p ?? NICHES[0]);
                 setAiState("manual");
               }}
-              className="w-full text-center text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors"
+              className="w-full text-center text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
             >
               Skip AI and select an industry cohort manually
             </button>
@@ -706,7 +696,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                 </div>
                 <div className="text-center">
                   <p className="text-sm font-semibold text-muted-foreground">Industry suggestion ready</p>
-                  <p className="mt-1 max-w-[220px] text-[11px] text-muted-foreground/70">
+                  <p className="mt-1 max-w-[220px] text-xs text-muted-foreground/70">
                     Fill in the business profile and request a suggestion, or select the cohort manually.
                   </p>
                 </div>
@@ -718,7 +708,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                 {aiError && (
                   <div className="rounded-xl border border-warning/30 bg-warning/[0.03] p-4 flex items-start gap-3">
                     <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">{aiError}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{aiError}</p>
                   </div>
                 )}
                 {manualPicker}
@@ -727,11 +717,11 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
 
             {aiState === "loading" && (
               <div className="flex flex-1 flex-col gap-4">
-                <div className="h-5 w-2/3 animate-pulse rounded-md bg-surface-3" />
-                <div className="h-16 w-full animate-pulse rounded-xl bg-surface-3" />
+                <div className="h-5 w-2/3 motion-safe:animate-pulse rounded-md bg-surface-3" />
+                <div className="h-16 w-full motion-safe:animate-pulse rounded-xl bg-surface-3" />
                 <div className="space-y-2">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-12 animate-pulse rounded-lg bg-surface-3" style={{ animationDelay: `${i * 80}ms` }} />
+                    <div key={i} className="h-12 motion-safe:animate-pulse rounded-lg bg-surface-3" style={{ animationDelay: `${i * 80}ms` }} />
                   ))}
                 </div>
               </div>
@@ -742,13 +732,13 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                 <div className="rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                      <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                         AI Suggestion
                       </div>
                       <div className="mt-1 text-lg font-bold text-primary">
                         {topMatch?.niche}
                       </div>
-                      <div className="mt-0.5 text-[11px] font-semibold text-muted-foreground">
+                      <div className="mt-0.5 text-xs font-semibold text-muted-foreground">
                         Ranked first by the AI assistant · confirm or override below
                       </div>
                     </div>
@@ -756,13 +746,13 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                       <Check className="h-4 w-4" />
                     </span>
                   </div>
-                  <p className="mt-3 rounded-lg bg-surface/80 p-3 text-[11px] leading-relaxed text-muted-foreground">
+                  <p className="mt-3 rounded-lg bg-surface/80 p-3 text-xs leading-relaxed text-muted-foreground">
                     {topMatch?.reason}
                   </p>
                 </div>
 
                 <div className="space-y-1.5">
-                  <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                  <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                     All matches
                   </div>
                   {suggestions.map((s) => {
@@ -789,7 +779,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-semibold text-foreground">{s.niche}</div>
-                          <div className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-muted-foreground">{s.reason}</div>
+                          <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{s.reason}</div>
                         </div>
                       </button>
                     );
@@ -797,7 +787,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                 </div>
 
                 <div className="space-y-1.5">
-                  <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                  <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                     Override industry cohort
                   </div>
                   <div className="relative">
@@ -820,6 +810,23 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
 
         {/* Footer actions */}
         <div className="flex items-center justify-end gap-2 border-t border-border bg-surface-2/30 px-7 py-4">
+          {saved ? (
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" role="status">
+              <div className="flex items-start gap-2 text-xs">
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <div>
+                  <div className="font-bold text-foreground">Workspace created</div>
+                  <div className="mt-0.5 text-muted-foreground">
+                    Instagram remains not connected until an administrator completes Meta authorization and a sync test.
+                  </div>
+                </div>
+              </div>
+              <button type="button" onClick={onClose} className="h-9 shrink-0 rounded-lg bg-primary px-5 text-xs font-bold text-primary-foreground hover:bg-primary/95">
+                Done
+              </button>
+            </div>
+          ) : (
+            <>
           <button
             onClick={onClose}
             className="rounded-lg border border-border bg-surface px-4 py-2 text-xs font-semibold text-foreground hover:bg-surface-2 active:scale-95 transition-all"
@@ -828,16 +835,11 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
           </button>
           <button
             type="button"
-            disabled={!name || !picked || saving || saved}
+            disabled={!name || !picked || saving}
             onClick={handleSave}
-            className="flex h-9 items-center gap-2 rounded-lg bg-primary px-5 text-xs font-bold text-primary-foreground transition-all hover:scale-[1.02] hover:shadow-[var(--shadow-glow-purple)] active:scale-[0.98] disabled:opacity-50"
+            className="flex h-9 items-center gap-2 rounded-lg bg-primary px-5 text-xs font-bold text-primary-foreground transition-colors duration-200 hover:bg-primary/92 disabled:opacity-50"
           >
-            {saved ? (
-              <>
-                <Check className="h-3.5 w-3.5" />
-                Saved!
-              </>
-            ) : saving ? (
+            {saving ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Saving…
@@ -846,6 +848,8 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
               "Confirm & Save Account"
             )}
           </button>
+            </>
+          )}
         </div>
       </motion.div>
     </motion.div>
@@ -884,16 +888,14 @@ function SummaryCard({
 
   return (
     <motion.div
-      whileHover={{ y: -4, scale: 1.01 }}
-      transition={{ type: "spring", stiffness: 350, damping: 25 }}
       className={cn(
-        "group relative overflow-hidden rounded-2xl border p-6 backdrop-blur-xl transition-all duration-300 shadow-[var(--shadow-soft)] hover:shadow-md flex items-start justify-between gap-4",
+        "relative overflow-hidden rounded-2xl border p-6 backdrop-blur-xl transition-colors duration-200 shadow-[var(--shadow-soft)] flex items-start justify-between gap-4",
         border
       )}
       style={{ background: bg }}
     >
       <div className="relative z-10 space-y-3">
-        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/80 leading-none">
+        <div className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/80 leading-none">
           {label}
         </div>
         <div className="font-display text-2xl font-extrabold text-foreground tracking-tight leading-none">
@@ -902,7 +904,7 @@ function SummaryCard({
       </div>
       <div
         className={cn(
-          "relative z-10 grid h-10 w-10 place-items-center rounded-xl bg-surface/80 border border-border/40 shrink-0 shadow-sm group-hover:bg-primary group-hover:text-primary-foreground group-hover:border-primary/10 transition-all duration-300",
+          "relative z-10 grid h-10 w-10 place-items-center rounded-xl bg-surface/80 border border-border/40 shrink-0 shadow-sm",
           text
         )}
       >

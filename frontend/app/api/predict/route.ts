@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getRequestUser } from "@/lib/authz";
+import {
+  publicErrorResponse,
+  publicUpstreamStatus,
+  readJsonObject,
+  whitelistedUpstreamMessage,
+} from "@/lib/http-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -9,10 +15,13 @@ const FASTAPI_URL = process.env.FASTAPI_URL || "http://127.0.0.1:8000";
 const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
 
 const ALLOWED_FORMATS = ["Reels", "Carousel", "Single Image"];
+const SAFE_PREDICTION_DETAILS = new Set([
+  "Prediction could not be saved with user provenance; no result was returned.",
+]);
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const { caption, format, post_hour, brand_id, scheduled_date } = body;
 
     const supabase = await createClient();
@@ -27,7 +36,8 @@ export async function POST(request: Request) {
       .eq("id", brand_id)
       .eq("owner_id", user.id)
       .maybeSingle();
-    if (brandError || !ownedBrand) {
+    if (brandError) throw brandError;
+    if (!ownedBrand) {
       return NextResponse.json({ status: "error", message: "Brand not found in this workspace." }, { status: 404 });
     }
 
@@ -38,7 +48,13 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (!ALLOWED_FORMATS.includes(format)) {
+    if (caption.length > 2200) {
+      return NextResponse.json(
+        { status: "error", message: "'caption' must be at most 2,200 characters." },
+        { status: 400 }
+      );
+    }
+    if (typeof format !== "string" || !ALLOWED_FORMATS.includes(format)) {
       return NextResponse.json(
         { status: "error", message: `'format' must be one of: ${ALLOWED_FORMATS.join(", ")}.` },
         { status: 400 }
@@ -86,8 +102,8 @@ export async function POST(request: Request) {
           created_by: user.id,
         }),
       });
-    } catch (netErr: any) {
-      console.error("[BFF Proxy] FastAPI service is unreachable:", netErr.message);
+    } catch (netErr) {
+      console.error("[BFF Proxy] FastAPI service is unreachable:", netErr);
       return NextResponse.json(
         {
           status: "error",
@@ -99,17 +115,17 @@ export async function POST(request: Request) {
     }
 
     if (!mlResponse.ok) {
-      let message = `Prediction service error (HTTP ${mlResponse.status}).`;
-      try {
-        const errJson = await mlResponse.json();
-        if (errJson?.detail) message = String(errJson.detail);
-      } catch {
-        // non-JSON error body — keep the generic message
-      }
-      console.error(`[BFF Proxy] FastAPI returned ${mlResponse.status}: ${message}`);
+      const message = await whitelistedUpstreamMessage(
+        mlResponse,
+        SAFE_PREDICTION_DETAILS,
+        mlResponse.status === 503
+          ? "Prediction is unavailable for this brand. Confirm that a trained model exists and try again."
+          : "Prediction service could not process this request."
+      );
+      console.error(`[BFF Proxy] FastAPI returned status ${mlResponse.status}.`);
       return NextResponse.json(
         { status: "error", message },
-        { status: mlResponse.status }
+        { status: publicUpstreamStatus(mlResponse.status) }
       );
     }
 
@@ -127,11 +143,8 @@ export async function POST(request: Request) {
       counterfactuals_note: prediction.counterfactuals_note ?? null,
       feature_importances: prediction.feature_importances,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("[BFF Proxy] Fatal error processing prediction request:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to process prediction in BFF proxy" },
-      { status: 500 }
-    );
+    return publicErrorResponse(error, "The prediction request could not be processed.", 500);
   }
 }

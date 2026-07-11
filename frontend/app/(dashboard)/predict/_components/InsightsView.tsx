@@ -19,7 +19,7 @@ import { FormatComparison } from "./FormatComparison";
 
 const FeatureAttributionChart = dynamic(() => import("@/components/FeatureAttributionChart"), {
   ssr: false,
-  loading: () => <div className="h-56 w-full animate-pulse bg-muted/40 rounded-xl" />,
+  loading: () => <div className="h-56 w-full motion-safe:animate-pulse bg-muted/40 rounded-xl" />,
 });
 
 export interface InsightsPrediction {
@@ -93,7 +93,7 @@ export function InsightsView(props: {
           <div className="flex flex-wrap items-center gap-2">
             <TierBadge tier={prediction.tier} />
             {prediction.savedId && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-[9px] font-bold text-emerald-600 uppercase tracking-wide">
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-xs font-bold text-emerald-600 uppercase tracking-wide">
                 <Check className="h-2.5 w-2.5" />
                 Saved to History
               </span>
@@ -117,7 +117,7 @@ export function InsightsView(props: {
                 c.tier === "High" ? "bg-emerald-500" : c.tier === "Average" ? "bg-amber-500" : "bg-rose-500";
               return (
                 <div key={c.tier} className={cn("space-y-1", !active && "opacity-60")}>
-                  <div className="flex items-center justify-between font-mono text-[10px]">
+                  <div className="flex items-center justify-between font-mono text-xs">
                     <span className="font-bold text-foreground">{c.tier}</span>
                     <span className="font-extrabold text-foreground tabular-nums">{pct}%</span>
                   </div>
@@ -130,11 +130,11 @@ export function InsightsView(props: {
           </div>
 
           {/* Input summary */}
-          <div className="flex flex-wrap items-center gap-3 border-t border-border/40 pt-3 text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-3 border-t border-border/40 pt-3 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5 font-semibold"><FileText className="h-3 w-3" />{brandName || "—"}</span>
             <span className="inline-flex items-center gap-1.5"><Calendar className="h-3 w-3" />{formatDate(scheduledAt, "MMM d, yyyy")}</span>
             <span className="inline-flex items-center gap-1.5"><Clock className="h-3 w-3" />{formatDate(scheduledAt, "HH:mm")}</span>
-            <span className="rounded-md border border-border bg-surface px-2 py-0.5 font-mono text-[10px] font-bold">{contentFormat}</span>
+            <span className="rounded-md border border-border bg-surface px-2 py-0.5 font-mono text-xs font-bold">{contentFormat}</span>
           </div>
         </div>
       </div>
@@ -165,7 +165,7 @@ export function InsightsView(props: {
         >
           <div>
             <h3 className="font-display text-sm font-bold text-foreground">How the model thinks</h3>
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               Inspect the observed inputs and the model&apos;s global feature importance. Direction is shown only where measured.
             </p>
           </div>
@@ -194,7 +194,7 @@ export function InsightsView(props: {
                   <FeatureAttributionChart data={mdiChartData} />
                 )}
               </div>
-              <div className="mt-4 text-[10px] text-muted-foreground leading-relaxed flex items-start gap-1.5 p-3 rounded-lg bg-surface-2 border border-border/40">
+              <div className="mt-4 text-xs text-muted-foreground leading-relaxed flex items-start gap-1.5 p-3 rounded-lg bg-surface-2 border border-border/40">
                 <HelpCircle className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
                 <span>
                   Importance shows global influence magnitude. For measured effects on this draft, see
@@ -220,7 +220,7 @@ export function InsightsView(props: {
           onClick={onApply}
           disabled={!anyRecsApplied}
           title={!anyRecsApplied ? "Toggle at least one change above to stage it" : undefined}
-          className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50"
+          className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground transition-colors duration-200 hover:bg-primary/92 disabled:opacity-50"
         >
           Apply Changes &amp; Re-Analyze
         </button>

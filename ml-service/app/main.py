@@ -4,7 +4,7 @@ import json
 import uuid
 import datetime
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Literal
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header
 from dotenv import load_dotenv
 
@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(env_path)
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 import numpy as np
 import psycopg2
 import psycopg2.extras
@@ -20,6 +20,8 @@ import psycopg2.extras
 from app.preprocessing import DataPreprocessor, HASHTAG_PATTERN, CTA_PATTERN, FEATURE_ORDER_V1
 from app.model_loader import ModelLoader, ModelUnavailableError
 from app.train_pipeline import ModelTrainer
+
+MAX_INSTAGRAM_HEALTH_BRANDS = 100
 
 # Configure Logging
 logger = logging.getLogger("main")
@@ -50,43 +52,76 @@ app.add_middleware(
 
 # ── Service-to-service authentication ──────────────────────────────────────
 # The Next.js BFF is the trust boundary (it enforces the Supabase session).
-# Requests to this service must carry a shared secret. When INTERNAL_API_TOKEN
-# is unset we log a loud warning and allow the request (local dev only);
-# production deployments MUST set INTERNAL_API_TOKEN.
+# Requests to this service must carry a shared secret. An explicit, isolated
+# local-development override is the only supported unauthenticated mode.
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN")
+ALLOW_UNAUTHENTICATED_LOCAL_DEV = os.getenv(
+    "ALLOW_UNAUTHENTICATED_LOCAL_DEV", "false"
+).lower() == "true"
+if not INTERNAL_API_TOKEN and not ALLOW_UNAUTHENTICATED_LOCAL_DEV:
+    raise RuntimeError(
+        "INTERNAL_API_TOKEN is required. Set an explicit shared secret, or set "
+        "ALLOW_UNAUTHENTICATED_LOCAL_DEV=true only for an isolated local sandbox."
+    )
 if not INTERNAL_API_TOKEN:
     logger.warning(
-        "INTERNAL_API_TOKEN is not set. The ML service is UNAUTHENTICATED. "
-        "Set INTERNAL_API_TOKEN in production."
+        "The ML service is running without authentication because "
+        "ALLOW_UNAUTHENTICATED_LOCAL_DEV=true. Never enable this in a shared environment."
     )
 
 
 def verify_internal_token(x_internal_token: Optional[str] = Header(default=None)):
     """Rejects requests that do not present the shared internal token."""
-    if not INTERNAL_API_TOKEN:
+    if not INTERNAL_API_TOKEN and ALLOW_UNAUTHENTICATED_LOCAL_DEV:
         return
     if x_internal_token != INTERNAL_API_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized: invalid internal token")
 
+
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """Process liveness probe; dependency health is reported by scoped endpoints."""
+    return {"status": "ok"}
+
 # Pydantic Schemas for Requests
 class PredictionRequest(BaseModel):
-    caption: str
-    format: str
-    post_hour: int
-    brand_id: Optional[str] = None
-    niche: Optional[str] = None
-    scheduled_date: Optional[str] = None  # ISO date (YYYY-MM-DD)
-    created_by: Optional[str] = None
+    """Validated inference payload accepted from the authenticated BFF."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    caption: str = Field(max_length=2200)
+    format: Literal["Reels", "Carousel", "Single Image"]
+    post_hour: int = Field(strict=True, ge=0, le=23)
+    brand_id: Optional[str] = Field(default=None, max_length=36)
+    niche: Optional[str] = Field(default=None, max_length=120)
+    scheduled_date: Optional[str] = Field(default=None, max_length=10)  # ISO date (YYYY-MM-DD)
+    created_by: Optional[str] = Field(default=None, max_length=36)
+
+    @field_validator("caption")
+    @classmethod
+    def caption_must_contain_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("caption must contain non-whitespace text")
+        return value
 
 class TrainRequest(BaseModel):
     brand_id: Optional[str] = None
     niche: Optional[str] = None
 
 class InstagramPostInsightsRequest(BaseModel):
-    brand_id: str
-    media_id: str
-    caption: Optional[str] = None
-    created_by: Optional[str] = None
+    """Tenant-scoped request for one media node owned by the linked account.
+
+    The caption is deliberately not accepted from the caller. Prediction
+    matching uses the caption returned by Meta for the verified media ID so a
+    client cannot manufacture a relationship between an Instagram post and a
+    prediction.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    brand_id: str = Field(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
+    media_id: str = Field(min_length=1, max_length=64, pattern=r"^[0-9]+$")
+    created_by: str = Field(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
 
 # DB connection helper
 def get_db_connection():
@@ -127,13 +162,13 @@ def run_training_job_async(job_id: str, brand_id: Optional[str], niche: Optional
                 conn.commit()
             logger.info(f"Background training job {job_id} succeeded.")
     except Exception as e:
-        logger.error(f"Background training job {job_id} failed: {e}")
+        logger.exception("Background training job %s failed", job_id)
         if db_url and conn:
             try:
                 with conn.cursor() as cur:
                     cur.execute(
                         "UPDATE model_retrain_jobs SET status = 'failed', error_message = %s WHERE id = %s",
-                        (str(e), job_id)
+                        ("Training failed. Inspect the ML service logs for the cause.", job_id)
                     )
                     conn.commit()
             except Exception as inner_e:
@@ -292,8 +327,40 @@ def predict(req: PredictionRequest):
         probabilities = {classes[i].title(): round(float(probs_raw[i]) * 100, 2) for i in range(len(classes))}
         confidence = round(float(np.max(probs_raw)) * 100, 2)
         
-        # 4. Persist the prediction. Brand-scoped requests are only successful
-        # when their creator provenance is durably recorded.
+        # Determine if personal model or shared niche was active
+        is_personal_model_active = metadata.get("model_type") == "account"
+
+        # 4. Assemble every model-derived response field before persistence so
+        # an explainability failure cannot leave a history row for a response
+        # the caller never received.
+        feature_names = feature_order
+        feature_importances = {}
+        if hasattr(model, "feature_importances_"):
+            mdi_raw = model.feature_importances_
+            for i, name in enumerate(feature_names):
+                if i < len(mdi_raw):
+                    feature_importances[name] = round(float(mdi_raw[i]), 4)
+
+        # Counterfactual what-if analysis: measured P(High) deltas for
+        # single-feature changes to this exact draft.
+        counterfactuals, cf_note = build_counterfactuals(
+            model, features, feature_order, classes, probs_raw
+        )
+
+        # Training-set size for the trust display (metrics may be a JSON string
+        # depending on the driver).
+        trained_samples = None
+        metrics_blob = metadata.get("metrics")
+        if isinstance(metrics_blob, str):
+            try:
+                metrics_blob = json.loads(metrics_blob)
+            except ValueError:
+                metrics_blob = None
+        if isinstance(metrics_blob, dict):
+            trained_samples = metrics_blob.get("train_samples")
+
+        # 5. Persist only the fully assembled prediction. Brand-scoped requests
+        # are successful only when creator provenance is durably recorded.
         prediction_id = None
         db_url = os.getenv("DATABASE_URL")
         if db_url and req.brand_id:
@@ -301,7 +368,6 @@ def predict(req: PredictionRequest):
             try:
                 conn = psycopg2.connect(db_url)
                 with conn.cursor() as cur:
-                    # Clean features for JSON storage — include confidence so history can display it
                     json_features = {k: float(v) for k, v in features.items()}
                     json_features["confidence"] = confidence
                     cur.execute(
@@ -320,12 +386,12 @@ def predict(req: PredictionRequest):
                             req.caption,
                             psycopg2.extras.Json(json_features),
                             predicted_class.upper(),
-                            datetime.datetime.utcnow(),
+                            datetime.datetime.now(datetime.timezone.utc),
                             sched_date,
                             metadata.get("version"),
                             req.brand_id,
                             req.created_by,
-                        )
+                        ),
                     )
                     inserted = cur.fetchone()
                     if not inserted:
@@ -341,36 +407,6 @@ def predict(req: PredictionRequest):
             finally:
                 if conn:
                     conn.close()
-
-        # Determine if personal model or shared niche was active
-        is_personal_model_active = metadata.get("model_type") == "account"
-
-        # 5. Extract real MDI (Mean Decrease in Impurity) feature importances from RF model
-        feature_names = feature_order
-        feature_importances = {}
-        if hasattr(model, "feature_importances_"):
-            mdi_raw = model.feature_importances_
-            for i, name in enumerate(feature_names):
-                if i < len(mdi_raw):
-                    feature_importances[name] = round(float(mdi_raw[i]), 4)
-
-        # 6. Counterfactual what-if analysis: measured P(High) deltas for
-        # single-feature changes to this exact draft.
-        counterfactuals, cf_note = build_counterfactuals(
-            model, features, feature_order, classes, probs_raw
-        )
-
-        # Training-set size for the trust display (metrics may be a JSON string
-        # depending on the driver).
-        trained_samples = None
-        metrics_blob = metadata.get("metrics")
-        if isinstance(metrics_blob, str):
-            try:
-                metrics_blob = json.loads(metrics_blob)
-            except ValueError:
-                metrics_blob = None
-        if isinstance(metrics_blob, dict):
-            trained_samples = metrics_blob.get("train_samples")
 
         return {
             "status": "success",
@@ -396,9 +432,12 @@ def predict(req: PredictionRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Prediction failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+    except Exception:
+        logger.exception("Prediction failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Prediction could not be completed due to an internal service error.",
+        )
 
 
 @app.post("/train", dependencies=[Depends(verify_internal_token)])
@@ -476,9 +515,12 @@ def get_train_status(job_id: str):
             raise HTTPException(status_code=404, detail="Job not found")
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to query train status: {e}")
-        raise HTTPException(status_code=503, detail=f"Job status query failed: {e}")
+    except Exception:
+        logger.exception("Failed to query train status")
+        raise HTTPException(
+            status_code=503,
+            detail="Job status is temporarily unavailable.",
+        )
     finally:
         if conn:
             conn.close()
@@ -489,13 +531,14 @@ def get_train_status(job_id: str):
 # ──────────────────────────────────────────────────────────────────
 import httpx
 
-def _fetch_ig_profile(ig_id: str, token: str) -> int:
+def _fetch_ig_profile(ig_id: str, token: str) -> Optional[int]:
     url = f"https://graph.facebook.com/v25.0/{ig_id}"
     params = {"fields": "followers_count", "access_token": token}
     with httpx.Client(timeout=15.0) as client:
         r = client.get(url, params=params)
         r.raise_for_status()
-        return r.json().get("followers_count", 0)
+        followers = r.json().get("followers_count")
+        return int(followers) if isinstance(followers, (int, float)) and followers >= 0 else None
 
 def _fetch_ig_posts(ig_id: str, token: str, limit: int = 250) -> list:
     url = f"https://graph.facebook.com/v25.0/{ig_id}/media"
@@ -610,32 +653,81 @@ def _get_instagram_connection(brand_id: str) -> Dict[str, Any]:
     raise HTTPException(status_code=404, detail="No Instagram connection is configured for this brand.")
 
 
+def _parse_instagram_health_brand_ids(raw_brand_ids: Optional[str]) -> Optional[set[str]]:
+    """Parse the BFF's comma-separated tenant scope.
+
+    ``None`` is intentionally distinct from an empty string: an omitted query
+    parameter is reserved for trusted operator diagnostics across configured
+    connections, while ``brand_ids=`` is a valid user scope containing no
+    brands. User-facing proxies must always send the parameter.
+    """
+    if raw_brand_ids is None:
+        return None
+
+    values = [value.strip() for value in raw_brand_ids.split(",") if value.strip()]
+    if len(values) > MAX_INSTAGRAM_HEALTH_BRANDS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"At most {MAX_INSTAGRAM_HEALTH_BRANDS} brand_ids may be checked at once.",
+        )
+
+    parsed: set[str] = set()
+    for value in values:
+        try:
+            parsed.add(str(uuid.UUID(value)))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="brand_ids must contain valid UUIDs.") from exc
+    return parsed
+
+
 @app.get("/instagram/health", dependencies=[Depends(verify_internal_token)])
-def instagram_health():
+def instagram_health(brand_ids: Optional[str] = None):
     """
-    Connection health for every Instagram-linked brand: verifies each access
-    token against the Graph API live and reports when data was last synced.
-    Surfaces token expiry BEFORE the weekly pipeline silently starts failing.
+    Connection health for explicitly scoped Instagram-linked brands.
+
+    User-facing BFFs must always pass ``brand_ids`` (including an empty value)
+    so unrelated tenants are excluded before database and Graph API calls. An
+    omitted parameter retains all-connection diagnostics for trusted operators
+    calling this internal-token-protected service directly.
     """
+    requested_brand_ids = _parse_instagram_health_brand_ids(brand_ids)
+    configs = _bound_instagram_configs()
+    if requested_brand_ids is not None:
+        configs = [
+            config
+            for config in configs
+            if config.get("brand_id") in requested_brand_ids
+        ]
+
     connections = []
     last_synced: Dict[str, Optional[str]] = {}
+    bound_brand_ids = [str(config["brand_id"]) for config in configs if config.get("brand_id")]
     db_url = os.getenv("DATABASE_URL")
-    if db_url:
+    if db_url and bound_brand_ids:
+        conn = None
         try:
             conn = psycopg2.connect(db_url)
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT b.id, MAX(p.created_at) FROM brands b
-                       LEFT JOIN posts p ON p.brand_id = b.id AND p.is_synced
-                       GROUP BY b.id"""
+                    """SELECT b.id, MAX(p.synced_at)
+                       FROM brands b
+                       LEFT JOIN posts p
+                         ON p.brand_id = b.id
+                        AND p.source = 'instagram_graph'
+                        AND p.instagram_media_id IS NOT NULL
+                       WHERE b.id = ANY(%s::uuid[])
+                       GROUP BY b.id""",
+                    (bound_brand_ids,),
                 )
                 for brand_id, ts in cur.fetchall():
                     last_synced[str(brand_id)] = ts.isoformat() if ts else None
-            conn.close()
         except Exception as e:
             logger.warning(f"Instagram health: last-sync lookup failed: {e}")
+        finally:
+            if conn:
+                conn.close()
 
-    for config in _bound_instagram_configs():
+    for config in configs:
         brand_id = config.get("brand_id")
         entry: Dict[str, Any] = {
             "brand_id": brand_id,
@@ -663,8 +755,12 @@ def instagram_health():
             else:
                 detail = r.json().get("error", {}).get("message", r.text[:200])
                 entry.update({"status": "error", "error": detail})
-        except Exception as e:
-            entry.update({"status": "unreachable", "error": str(e)})
+        except Exception:
+            logger.exception("Instagram health check failed for brand %s", brand_id)
+            entry.update({
+                "status": "unreachable",
+                "error": "Instagram Graph API could not be reached.",
+            })
         connections.append(entry)
 
     return {"status": "success", "connections": connections}
@@ -695,15 +791,34 @@ def instagram_posts(brand_id: str, limit: int = 24):
             media = r.json().get("data", [])
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=502, detail=f"Instagram API error: HTTP {e.response.status_code}")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Instagram API unreachable: {e}")
+    except Exception:
+        logger.exception("Instagram posts request failed for brand %s", brand_id)
+        raise HTTPException(
+            status_code=502,
+            detail="Instagram Graph API is temporarily unreachable.",
+        )
 
     p33 = p67 = None
+    synced_by_media: Dict[str, Dict[str, Any]] = {}
     db_url = os.getenv("DATABASE_URL")
     if db_url:
+        conn = None
         try:
             conn = psycopg2.connect(db_url)
             with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT p.instagram_media_id, p.er, p.synced_at
+                       FROM posts p
+                       WHERE p.brand_id = %s
+                         AND p.source = 'instagram_graph'
+                         AND p.instagram_media_id IS NOT NULL""",
+                    (brand_id,),
+                )
+                for media_id, er, synced_at in cur.fetchall():
+                    synced_by_media[str(media_id)] = {
+                        "er": float(er) if er is not None else None,
+                        "synced_at": synced_at.isoformat() if synced_at else None,
+                    }
                 cur.execute(
                     """SELECT percentile_cont(0.33) WITHIN GROUP (ORDER BY p.er),
                               percentile_cont(0.67) WITHIN GROUP (ORDER BY p.er)
@@ -716,19 +831,21 @@ def instagram_posts(brand_id: str, limit: int = 24):
                 row = cur.fetchone()
                 if row and row[0] is not None:
                     p33, p67 = float(row[0]), float(row[1])
-            conn.close()
         except Exception as e:
             logger.warning(f"Post insights: percentile lookup failed: {e}")
+        finally:
+            if conn:
+                conn.close()
 
     posts = []
     for m in media:
         likes = m.get("like_count") if isinstance(m.get("like_count"), (int, float)) else None
         comments = m.get("comments_count") if isinstance(m.get("comments_count"), (int, float)) else None
-        er = (
-            round(((likes + comments) / followers) * 100, 4)
-            if followers > 0 and likes is not None and comments is not None
-            else None
-        )
+        # Never rebase historical engagement onto today's follower count. The
+        # stored ER preserves the follower snapshot captured by the verified
+        # Instagram sync; media that has not been synced remains unavailable.
+        synced = synced_by_media.get(str(m.get("id")))
+        er = synced.get("er") if synced else None
         tier = None
         if p33 is not None and er is not None:
             tier = "Low" if er < p33 else ("Average" if er <= p67 else "High")
@@ -744,8 +861,21 @@ def instagram_posts(brand_id: str, limit: int = 24):
             "comments": comments,
             "er": er,
             "tier": tier,
+            "synced_at": synced.get("synced_at") if synced else None,
         })
-    return {"status": "success", "brand_id": brand_id, "brand": brand, "followers": followers, "posts": posts}
+    return {
+        "status": "success",
+        "brand_id": brand_id,
+        "brand": brand,
+        "followers": followers,
+        "posts": posts,
+        "provenance": {
+            "live_source": "instagram_graph_api",
+            "synced_source": "production_database_instagram_graph_sync",
+            "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "post_limit": min(max(limit, 1), 50),
+        },
+    }
 
 
 def _media_insight_value(payload: Dict[str, Any]) -> Optional[float]:
@@ -796,13 +926,15 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
     with httpx.Client(timeout=15.0) as client:
         ownership = client.get(
             f"https://graph.facebook.com/v25.0/{req.media_id}",
-            params={"fields": "id,owner", "access_token": token},
+            params={"fields": "id,owner,caption", "access_token": token},
         )
         if ownership.status_code != 200:
             raise HTTPException(status_code=404, detail="Instagram media was not found for this connection.")
-        owner_id = str((ownership.json().get("owner") or {}).get("id") or "")
+        verified_media = ownership.json()
+        owner_id = str((verified_media.get("owner") or {}).get("id") or "")
         if owner_id != str(config["instagram_id"]):
             raise HTTPException(status_code=404, detail="Instagram media does not belong to this brand.")
+        verified_caption = verified_media.get("caption")
 
         try:
             combined = client.get(
@@ -839,6 +971,7 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
         "recent_median_er": None,
     }
     prediction = None
+    prediction_match_status = "not_found"
     db_url = os.getenv("DATABASE_URL")
     if db_url:
         conn = None
@@ -871,19 +1004,21 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
                 if row and row.get("recent_median_er") is not None:
                     historical["recent_median_er"] = float(row["recent_median_er"])
 
-                if req.caption:
-                    normalized = re.sub(r"\s+", " ", req.caption.strip().lower())
+                if isinstance(verified_caption, str) and verified_caption.strip():
+                    normalized = re.sub(r"\s+", " ", verified_caption.strip().lower())
                     cur.execute(
                         """SELECT p.pred_class, p.actual_class, p.actual_source, p.model_version,
                                   p.features->>'confidence' AS confidence
                            FROM predictions p
                            WHERE p.brand_id = %s AND p.created_by = %s
                              AND regexp_replace(lower(trim(coalesce(p.caption, ''))), '\\s+', ' ', 'g') = %s
-                           ORDER BY p.created_at DESC LIMIT 1""",
+                           ORDER BY p.created_at DESC LIMIT 2""",
                         (req.brand_id, req.created_by, normalized),
                     )
-                    match = cur.fetchone()
-                    if match:
+                    matches = cur.fetchall()
+                    if len(matches) == 1:
+                        match = matches[0]
+                        prediction_match_status = "unique_verified_caption"
                         prediction = {
                             "tier": str(match["pred_class"]).title(),
                             "actual_tier": (
@@ -893,8 +1028,10 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
                             ),
                             "confidence": float(match["confidence"]) if match.get("confidence") else None,
                             "model_version": match.get("model_version"),
-                            "match_method": "exact_caption",
+                            "match_method": "verified_graph_caption",
                         }
+                    elif len(matches) > 1:
+                        prediction_match_status = "ambiguous_duplicate_caption"
         except Exception as exc:
             logger.warning(f"Post detail comparison lookup failed: {exc}")
         finally:
@@ -910,6 +1047,13 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
         "not_attributable_metrics": ["profile_visits", "follows"],
         "historical": historical,
         "prediction": prediction,
+        "prediction_match_status": prediction_match_status,
+        "provenance": {
+            "live_source": "instagram_graph_api",
+            "historical_source": "production_database_instagram_graph_sync",
+            "prediction_source": "authenticated_user_prediction_history",
+            "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        },
     }
 
 
@@ -1032,7 +1176,7 @@ def _sync_and_retrain_pipeline():
         try:
             followers = _fetch_ig_profile(config["instagram_id"], config["access_token"])
             brand_result["sync"]["followers"] = followers
-            if followers <= 0:
+            if not followers or followers <= 0:
                 raise ValueError(
                     "Instagram returned no usable follower denominator; refusing to write fabricated 0% engagement rates."
                 )
@@ -1104,12 +1248,19 @@ def _sync_and_retrain_pipeline():
                     "model_filename": train_result["model_filename"]
                 }
                 logger.info(f"[n8n Train] {name} ({train_scope}): accuracy={train_result['metrics']['accuracy']:.2%}")
-            except Exception as te:
-                brand_result["train"] = {"status": "failed", "error": str(te)}
+            except Exception:
+                logger.exception("Personal model training failed for brand %s", brand_id)
+                brand_result["train"] = {
+                    "status": "failed",
+                    "error": "Model training failed. Inspect the ML service logs for the cause.",
+                }
 
-        except Exception as e:
+        except Exception:
+            logger.exception("Instagram synchronization failed for brand %s", brand_id)
             brand_result["sync"]["status"] = "failed"
-            brand_result["sync"]["error"] = str(e)
+            brand_result["sync"]["error"] = (
+                "Instagram synchronization failed. Inspect the ML service logs for the cause."
+            )
         finally:
             if conn:
                 conn.close()
@@ -1133,8 +1284,13 @@ def _sync_and_retrain_pipeline():
                 "f1_score": train_result["metrics"]["f1_score"],
                 "model_filename": train_result["model_filename"],
             }
-        except Exception as exc:
-            cohort_train = {"status": "failed", "scope": "cohort", "error": str(exc)}
+        except Exception:
+            logger.exception("Cohort model training failed for niche %s", pending_niche)
+            cohort_train = {
+                "status": "failed",
+                "scope": "cohort",
+                "error": "Cohort model training failed. Inspect the ML service logs for the cause.",
+            }
         for result in results:
             if (
                 result.get("niche") == pending_niche

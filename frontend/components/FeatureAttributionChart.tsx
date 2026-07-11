@@ -51,3 +51,4 @@ export default function FeatureAttributionChart({ data }: FeatureAttributionChar
     </ResponsiveContainer>
   );
 }
+

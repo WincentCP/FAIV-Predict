@@ -302,21 +302,8 @@ export default function PredictPage() {
     return reasons;
   }, [featureImportances, predictionSnapshot, caption, scheduledAt]);
 
-  const dynamicGlowClass = useMemo(() => {
-    if (view === "insights" && prediction) {
-      if (prediction.tier === "High") return "bg-emerald-500/10 dark:bg-emerald-500/5";
-      if (prediction.tier === "Average") return "bg-amber-500/10 dark:bg-amber-500/5";
-      return "bg-rose-500/10 dark:bg-rose-500/5";
-    }
-    return "bg-indigo-500/10 dark:bg-indigo-500/5";
-  }, [view, prediction]);
-
   return (
     <div className="relative px-4 py-6 md:px-8 md:py-8 max-w-[1200px] mx-auto min-h-screen">
-      <div
-        className={`absolute top-20 left-1/2 -translate-x-1/2 w-[600px] h-[350px] rounded-full filter blur-[120px] transition-all duration-1000 -z-10 pointer-events-none ${dynamicGlowClass}`}
-      />
-
       {/* Header + view switch */}
       <div className="flex flex-col items-center justify-between gap-4 border-b border-border/60 pb-6 mb-8 md:flex-row md:items-end">
         <div>
@@ -347,7 +334,11 @@ export default function PredictPage() {
               <h3 className="text-base font-bold font-display text-foreground">Running classification…</h3>
               <p className="mt-1 text-xs text-muted-foreground">
                 Scoring your draft and measuring what-if improvements with the{" "}
-                {account?.model_type === "personal" ? "personal" : "niche"} model.
+                {account?.active_model_scope === "personal"
+                  ? "personal"
+                  : account?.active_model_scope === "cohort"
+                    ? "cohort"
+                    : "available"} model.
               </p>
             </div>
           </motion.div>

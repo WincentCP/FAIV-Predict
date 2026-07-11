@@ -10,6 +10,7 @@ out/
 # Python Virtual Environment and Cache
 venv/
 ml-service/venv/
+ml-service/.venv-packages/
 __pycache__/
 *.pyc
 *.pyo
@@ -23,6 +24,7 @@ __pycache__/
 frontend/.env.local
 ml-service/.env
 *.env.local
+n8n/.data/
 
 # Logs
 logs/

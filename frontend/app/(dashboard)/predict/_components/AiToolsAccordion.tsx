@@ -42,7 +42,7 @@ export function AiToolsAccordion({
           </span>
           <div className="min-w-0">
             <div className="text-xs font-bold text-foreground">AI Assistant</div>
-            <div className="text-[10px] text-muted-foreground truncate">
+            <div className="text-xs text-muted-foreground truncate">
               Optional — concept analysis and caption rewriting. Does not affect the score.
             </div>
           </div>
@@ -88,3 +88,4 @@ export function AiToolsAccordion({
     </div>
   );
 }
+

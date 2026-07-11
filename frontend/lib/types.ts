@@ -14,6 +14,8 @@ export interface Brand {
   niche: string;
   followers: number | null;
   model_type: "niche" | "personal";
+  /** Latest verified artifact actually available for this workspace. */
+  active_model_scope: "personal" | "cohort" | "none";
   /** Real count of historical posts stored for this brand. */
   samples: number;
   created_at?: string;
@@ -30,9 +32,9 @@ export interface MlModel {
   brandId?: string;
 }
 
-/** Derive the display handle for a brand (the brands table stores no handle). */
-export function brandHandle(name: string): string {
-  return `@${name.toLowerCase().replace(/\s+/g, "")}`;
+/** Normalize user-entered brand references for matching, never for display. */
+export function normalizeBrandReference(value: string): string {
+  return value.trim().toLowerCase().replace(/^@/, "").replace(/[\s_-]+/g, "");
 }
 
 // Tier metadata — HIGH = primary purple, AVERAGE = warning amber, LOW = muted destructive

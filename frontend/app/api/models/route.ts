@@ -11,9 +11,9 @@ export async function GET() {
     if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
     const ownedBrands = await getOwnedBrands(supabase, user.id);
     if (ownedBrands.length === 0) return NextResponse.json([]);
-    const { data: dbModels, error } = await supabase
-      .from("models")
-      .select(`
+    const ownedIds = ownedBrands.map((brand) => brand.id);
+    const ownedNiches = Array.from(new Set(ownedBrands.map((brand) => brand.niche).filter(Boolean)));
+    const selection = `
         id,
         niche,
         model_type,
@@ -24,9 +24,28 @@ export async function GET() {
         brands (
           name
         )
-      `)
+      `;
+    const personalModels = supabase
+      .from("models")
+      .select(selection)
+      .eq("model_type", "account")
+      .in("brand_id", ownedIds)
       .contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" })
       .order("created_at", { ascending: false });
+    const cohortModels = ownedNiches.length > 0
+      ? supabase
+          .from("models")
+          .select(selection)
+          .eq("model_type", "niche")
+          .is("brand_id", null)
+          .in("niche", ownedNiches)
+          .contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" })
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [], error: null });
+    const [personalResult, cohortResult] = await Promise.all([personalModels, cohortModels]);
+    const error = personalResult.error || cohortResult.error;
+    const dbModels = [...(personalResult.data || []), ...(cohortResult.data || [])]
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     if (error) {
       throw error;
@@ -41,13 +60,7 @@ export async function GET() {
     const seen = new Set<string>();
     const uniqueModels: any[] = [];
 
-    const ownedIds = new Set(ownedBrands.map((brand) => brand.id));
-    const ownedNiches = new Set(ownedBrands.map((brand) => brand.niche));
     for (const m of dbModels) {
-      const relevant = m.model_type === "account"
-        ? ownedIds.has(m.brand_id)
-        : ownedNiches.has(m.niche);
-      if (!relevant) continue;
       const key = m.model_type === "account" ? m.brand_id : m.niche;
       if (!key || seen.has(key)) continue;
       seen.add(key);
@@ -79,7 +92,7 @@ export async function GET() {
   } catch (error: any) {
     console.error("[BFF Models] Failed to fetch models:", error);
     return NextResponse.json(
-      { status: "error", message: error.message || "Failed to fetch models" },
+      { status: "error", message: "Model registry is temporarily unavailable." },
       { status: 500 }
     );
   }

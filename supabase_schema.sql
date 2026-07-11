@@ -18,17 +18,9 @@ CREATE TABLE IF NOT EXISTS brands (
 ALTER TABLE brands ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE brands ALTER COLUMN followers DROP DEFAULT;
 
--- A single-user thesis deployment can safely claim its legacy workspace. A
--- multi-user deployment deliberately leaves legacy rows unowned and invisible
--- until an administrator assigns them, avoiding accidental cross-user claims.
-DO $$
-BEGIN
-  IF (SELECT COUNT(*) FROM auth.users) = 1 THEN
-    UPDATE brands
-    SET owner_id = (SELECT id FROM auth.users LIMIT 1)
-    WHERE owner_id IS NULL;
-  END IF;
-END $$;
+-- Never infer ownership from the number of users in Auth. Legacy rows stay
+-- unowned and invisible until an administrator explicitly maps verified brand
+-- IDs to a user. This prevents old demo or third-party rows from being exposed.
 
 -- 2. Tabel posts
 CREATE TABLE IF NOT EXISTS posts (

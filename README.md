@@ -41,9 +41,13 @@
 * **Inference engine**: FastAPI hosting Random Forest classifiers per niche/brand. If no trained model exists it returns an honest `503` — there is no fabricated fallback model.
 * **Storage & Auth**: Supabase Postgres for brands/posts/predictions/model metadata; Supabase Storage for trained `.joblib` bundles; Supabase Auth for login sessions.
 * **Optional LLM**: Google Gemini powers the brand classifier (`/api/classify`) and caption refinement (`/api/refine-caption`). Both report themselves unavailable (`501`) when `LLM_API_KEY` is not configured.
-* **Automation**: one n8n workflow (`n8n/workflow_sync_retrain.json`) with two schedules — a **weekly** run (Mon 06:00 WIB) that calls `POST /sync/now` to pull Instagram Graph API data and retrain models, and a **daily** run (07:00 WIB) that calls `GET /instagram/health` and emails a warning if any access token is broken. Both runs email their outcome. n8n needs `INTERNAL_API_TOKEN` in its environment (the HTTP nodes send it as `X-Internal-Token`).
+* **Automation**: one inactive-by-default n8n workflow (`n8n/workflow_sync_retrain.json`) with two schedules — a **weekly** run (Mon 06:00 WIB) that calls `POST /sync/now` to pull Instagram Graph API data and retrain models, and a **daily** run (07:00 WIB) that calls `GET /instagram/health` and alerts operators if a verified connection is unhealthy. The pinned, persistent runtime and activation checklist are documented in [`n8n/README.md`](./n8n/README.md).
 * **Row-Level Security**: `brands.owner_id` is the ownership root and `predictions.created_by` records the initiating user. Every authenticated user sees only owned records. Legacy predictions and posts without verifiable provenance are quarantined from user-facing metrics and model training instead of being guessed or destructively deleted. The BFF repeats ownership checks before invoking the privileged ML service.
 * **CI**: GitHub Actions (`.github/workflows/ci.yml`) runs frontend lint + type-check + production build and the ML service test suite on every push and PR.
+
+The release-time trace from each UI surface to its authenticated query and
+authoritative integration is maintained in
+[`docs/DATA_PROVENANCE.md`](./docs/DATA_PROVENANCE.md).
 
 ### BFF API surface
 
@@ -112,7 +116,7 @@ Copy `.env.example` values into `frontend/.env.local` and `ml-service/.env` (see
 * `SUPABASE_KEY` (ML service) should be a secret/service-role key so model artifacts can be uploaded to Storage.
 * `INTERNAL_API_TOKEN` must match between the frontend, the ML service, and n8n; it is required in production.
 * `IG_BRANDS_JSON` (ML service, optional) links Instagram Business accounts for the sync pipeline. Each entry must bind credentials to an existing `brand_id`; sync never creates brands. Without a configured connection, the UI reports the account as disconnected and never fabricates metrics.
-* n8n reads `FAIV_ML_URL`, `INTERNAL_API_TOKEN`, `NOTIFICATION_FROM_EMAIL`, and `NOTIFICATION_TO_EMAIL` from its environment; operator addresses are never committed in the workflow.
+* n8n reads `FAIV_ML_URL`, `INTERNAL_API_TOKEN`, `NOTIFICATION_FROM_EMAIL`, and `NOTIFICATION_TO_EMAIL` from its environment; operator addresses are never committed in the workflow. Email nodes also require an SMTP credential selected in n8n before activation.
 * Login accounts are provisioned by an administrator (Supabase dashboard → Authentication → Users → *Add user* with auto-confirm; self-signup requires email confirmation).
 
 ### Run

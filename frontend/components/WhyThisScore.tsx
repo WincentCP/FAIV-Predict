@@ -25,7 +25,7 @@ export function WhyThisScore({ reasons, context }: WhyThisScoreProps) {
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-primary">
             Why this score
           </div>
           <h3
@@ -35,7 +35,7 @@ export function WhyThisScore({ reasons, context }: WhyThisScoreProps) {
             Top Contributing Signals
           </h3>
           {context && (
-            <p className="mt-0.5 text-[10px] text-muted-foreground">
+            <p className="mt-0.5 text-xs text-muted-foreground">
               {context}
             </p>
           )}
@@ -71,7 +71,7 @@ export function WhyThisScore({ reasons, context }: WhyThisScoreProps) {
                   )}
                   {r.label}
                 </div>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{r.detail}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{r.detail}</p>
                 <div className="mt-2 h-1 overflow-hidden rounded-full bg-surface-3">
                   <div
                     className={cn(
@@ -84,7 +84,7 @@ export function WhyThisScore({ reasons, context }: WhyThisScoreProps) {
               </div>
               <div
                 className={cn(
-                  "pt-0.5 font-mono text-[11px] font-semibold tabular-nums",
+                  "pt-0.5 font-mono text-xs font-semibold tabular-nums",
                   neutral ? "text-muted-foreground" : positive ? "text-success" : "text-destructive"
                 )}
               >
@@ -98,3 +98,4 @@ export function WhyThisScore({ reasons, context }: WhyThisScoreProps) {
     </section>
   );
 }
+

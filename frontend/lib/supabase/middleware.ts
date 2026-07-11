@@ -8,6 +8,7 @@ const PROTECTED_PREFIXES = [
   "/history",
   "/insights",
   "/niches",
+  "/model-health",
 ];
 
 export async function updateSession(request: NextRequest) {

@@ -1,5 +1,6 @@
 .env
 venv
+.venv-packages
 .venv
 models_cache
 __pycache__

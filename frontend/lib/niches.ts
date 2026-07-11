@@ -14,3 +14,4 @@ export const NICHES = [
   "Travel",
   "Media",
 ] as const;
+

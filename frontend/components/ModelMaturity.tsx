@@ -81,7 +81,7 @@ export function ModelMaturity({
     return (
       <span
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset",
+          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset",
           m.bg,
           m.tone,
           m.ring,
@@ -124,7 +124,7 @@ export function ModelMaturity({
                 <span className={cn("h-1.5 w-1.5 rounded-full", m.dot)} />
               </span>
             </div>
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               <span className="font-mono tabular-nums text-foreground">{samples}</span>
               <span className="text-muted-foreground">/{target} samples</span>
               <span className="mx-1.5 text-muted-foreground/50">·</span>
@@ -160,7 +160,8 @@ export function ModelMaturity({
         })}
       </div>
 
-      <p className="mt-2.5 text-[11px] leading-relaxed text-muted-foreground">{m.description}</p>
+      <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{m.description}</p>
     </div>
   );
 }
+

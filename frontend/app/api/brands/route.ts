@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getRequestUser } from "@/lib/authz";
+import { publicErrorResponse, readJsonObject } from "@/lib/http-errors";
 import { NICHES } from "@/lib/niches";
 
 export const dynamic = "force-dynamic";
@@ -34,35 +35,44 @@ export async function GET() {
       return count || 0;
     }));
     const brandIds = (brands || []).map((brand: any) => brand.id);
-    const { data: verifiedPersonalModels, error: modelError } = brandIds.length > 0
+    const { data: verifiedModels, error: modelError } = brandIds.length > 0
       ? await supabase
           .from("models")
-          .select("brand_id")
-          .in("brand_id", brandIds)
-          .eq("model_type", "account")
+          .select("brand_id, niche, model_type")
           .contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" })
       : { data: [], error: null };
     if (modelError) throw modelError;
-    const personalBrandIds = new Set((verifiedPersonalModels || []).map((model: any) => model.brand_id));
+    const personalBrandIds = new Set(
+      (verifiedModels || [])
+        .filter((model: any) => model.model_type === "account" && model.brand_id)
+        .map((model: any) => model.brand_id)
+    );
+    const cohortNiches = new Set(
+      (verifiedModels || [])
+        .filter((model: any) => model.model_type === "niche" && !model.brand_id && model.niche)
+        .map((model: any) => model.niche)
+    );
     const mapped = (brands || []).map((brand: any, index: number) => ({
       ...brand,
       samples: counts[index],
       model_type: personalBrandIds.has(brand.id) ? "personal" : "niche",
+      active_model_scope: personalBrandIds.has(brand.id)
+        ? "personal"
+        : cohortNiches.has(brand.niche)
+          ? "cohort"
+          : "none",
     }));
 
     return NextResponse.json(mapped);
-  } catch (error: any) {
+  } catch (error) {
     console.error("[BFF Brands] Failed to fetch brands:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to fetch brands" },
-      { status: 500 }
-    );
+    return publicErrorResponse(error, "Brand workspaces are temporarily unavailable.", 503);
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const { name, niche } = body;
 
     if (typeof name !== "string" || !name.trim() || typeof niche !== "string" || !niche.trim()) {
@@ -118,12 +128,20 @@ export async function POST(request: Request) {
       throw error;
     }
 
-    return NextResponse.json({ status: "success", brand: { ...newBrand, samples: 0 } });
-  } catch (error: any) {
+    return NextResponse.json({ status: "success", brand: { ...newBrand, samples: 0, active_model_scope: "none" } });
+  } catch (error) {
     console.error("[BFF Brands] Failed to create brand:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to create brand" },
-      { status: 500 }
-    );
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "23505"
+    ) {
+      return NextResponse.json(
+        { status: "error", message: "A brand workspace with this name already exists." },
+        { status: 409 }
+      );
+    }
+    return publicErrorResponse(error, "Brand workspace could not be created.", 503);
   }
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { publicErrorResponse, readJsonObject } from "@/lib/http-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ const CONTENT_TYPES = [
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const { concept, caption, brand, format } = body;
 
     if (typeof concept !== "string" || concept.trim().length < 10) {
@@ -41,13 +42,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const prompt = `You are a social media content strategist. Analyze the following raw creator brief for an Instagram ${format || "post"}${brand ? ` by the brand "${brand}"` : ""}. The brief may be messy: scripts, dialogue, camera directions, storyboards, mixed Indonesian/English, emojis, or loose keywords. Extract what you can; use null when a signal is genuinely absent. Never invent details.
+    const safeFormat = typeof format === "string" ? format.slice(0, 80) : "post";
+    const safeBrand = typeof brand === "string" ? brand.slice(0, 160) : "";
+    const safeCaption = typeof caption === "string" ? caption.slice(0, 1000) : "";
+    const prompt = `You are a social media content strategist. Analyze the following raw creator brief for an Instagram ${safeFormat}${safeBrand ? ` by the brand "${safeBrand}"` : ""}. The brief may be messy: scripts, dialogue, camera directions, storyboards, mixed Indonesian/English, emojis, or loose keywords. Extract what you can; use null when a signal is genuinely absent. Never invent details.
 
 RAW BRIEF:
 """
 ${concept.slice(0, 4000)}
 """
-${caption ? `\nDRAFT CAPTION (context only):\n"""\n${String(caption).slice(0, 1000)}\n"""` : ""}
+${safeCaption ? `\nDRAFT CAPTION (context only):\n"""\n${safeCaption}\n"""` : ""}
 
 Reply with ONLY a valid JSON object (no markdown fences, no commentary) with exactly these keys:
 {
@@ -106,7 +110,7 @@ Write strengths and suggestions in the same language the brief is mostly written
         };
         return NextResponse.json({ status: "success", analysis: result });
       } catch {
-        console.error("[BFF AnalyzeConcept] Gemini response was not valid JSON:", clean.slice(0, 200));
+        console.error("[BFF AnalyzeConcept] Gemini response was not valid JSON.");
       }
     } else {
       console.warn("[BFF AnalyzeConcept] Gemini API returned status:", geminiRes.status);
@@ -116,11 +120,8 @@ Write strengths and suggestions in the same language the brief is mostly written
       { status: "error", message: "Concept analysis failed — try again in a moment." },
       { status: 502 }
     );
-  } catch (error: any) {
+  } catch (error) {
     console.error("[BFF AnalyzeConcept] Fatal error:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to analyze concept" },
-      { status: 500 }
-    );
+    return publicErrorResponse(error, "Concept analysis could not be completed.", 500);
   }
 }

@@ -33,6 +33,7 @@ export function ViewSwitch({
             type="button"
             onClick={() => !s.disabled && onChange(s.id)}
             disabled={s.disabled}
+            aria-pressed={active}
             title={s.disabled ? "Run an analysis first — insights appear here" : undefined}
             className={cn(
               "inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold transition-all",

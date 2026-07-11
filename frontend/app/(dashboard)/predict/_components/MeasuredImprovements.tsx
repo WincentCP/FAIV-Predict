@@ -65,23 +65,23 @@ export function MeasuredImprovements({
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0 space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-primary">
                         <FlaskConical className="h-2.5 w-2.5" />
                         Measured
                       </span>
                       {c.tier_changed && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-600">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-emerald-600">
                           <TrendingUp className="h-2.5 w-2.5" />
                           Tier becomes {c.new_predicted_class}
                         </span>
                       )}
                     </div>
                     <p className="text-xs font-semibold text-foreground">{c.change}</p>
-                    <p className="flex items-center gap-1.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+                    <p className="flex items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground">
                       P(High) {c.from_prob_high}%
                       <ArrowRight className="h-3 w-3" />
                       <span className="font-bold text-foreground">{c.to_prob_high}%</span>
-                      <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600">
+                      <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-xs font-bold text-emerald-600">
                         +{c.delta_high}pp
                       </span>
                     </p>
@@ -105,7 +105,7 @@ export function MeasuredImprovements({
                       />
                     </button>
                   ) : (
-                    <span className="shrink-0 rounded-full border border-border px-2 py-1 text-[9px] font-bold uppercase tracking-wide text-muted-foreground/70">
+                    <span className="shrink-0 rounded-full border border-border px-2 py-1 text-xs font-bold uppercase tracking-wide text-muted-foreground/70">
                       Manual edit
                     </span>
                   )}
@@ -115,7 +115,7 @@ export function MeasuredImprovements({
           })}
 
           {flat.length > 0 && (
-            <p className="rounded-xl border border-border/60 bg-surface-2/30 px-4 py-3 text-[11px] text-muted-foreground">
+            <p className="rounded-xl border border-border/60 bg-surface-2/30 px-4 py-3 text-xs text-muted-foreground">
               No measured gain from:{" "}
               {flat.map((c) => c.change.toLowerCase()).join(" · ")} — the model was asked, and these
               changes didn&apos;t move this draft&apos;s score.
@@ -126,3 +126,4 @@ export function MeasuredImprovements({
     </Panel>
   );
 }
+

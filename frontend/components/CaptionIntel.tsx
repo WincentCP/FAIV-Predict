@@ -26,7 +26,10 @@ export function analyzeCaption(text: string): CaptionStats {
   const words = t.trim().split(/\s+/).filter(Boolean);
   const hashtags = t.match(/#[\w]+/g) || [];
   const mentions = t.match(/@[\w.]+/g) || [];
-  const ctaRegex = /\b(save|share|follow|tag|comment|click|link|swipe|tap|drop|grab|join|sign up|book|shop|read more|learn more|discover|don'?t miss|tell me|let me know|dm us|dm me)\b/gi;
+  // This detector is intentionally identical to the CTA vocabulary used by
+  // the deployed ML feature extractor. A broader UI-only vocabulary would
+  // claim a CTA is present while the trained model still receives has_cta=0.
+  const ctaRegex = /\b(beli|dapatkan|pesan|kunjungi|klik|daftar|hubungi|contact|order|yuk|promo|diskon|check|checkout|tonton|baca|share|follow)\b/gi;
   const ctaMatches = [...t.matchAll(ctaRegex)].map((m) => m[0].toLowerCase());
   const ctaTerms = Array.from(new Set(ctaMatches));
   const hasCTA = ctaTerms.length > 0;
@@ -81,7 +84,7 @@ export function CaptionMeter({ count, className }: { count: number; className?: 
           transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
         />
       </div>
-      <span className={cn("font-mono text-[11px] font-medium tabular-nums", textTone)}>
+      <span className={cn("font-mono text-xs font-medium tabular-nums", textTone)}>
         {count}/{CAPTION_MAX}
       </span>
     </div>
@@ -162,7 +165,7 @@ export function CaptionSignals({
             exit={{ opacity: 0, scale: 0.9 }}
             transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
+              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
               toneClass(it.tone),
             )}
           >

@@ -30,6 +30,17 @@ SERVICE_KEY="$(getvar "$ML_ENV" SUPABASE_KEY)"
 IG_BRANDS_JSON="$(getraw "$ML_ENV" IG_BRANDS_JSON)"
 LOGIN_EMAIL="${VERIFY_LOGIN_EMAIL:-}"
 LOGIN_PASSWORD="${VERIFY_LOGIN_PASSWORD:-}"
+ML_PYTHON="${ML_PYTHON:-}"
+
+if [ -z "$ML_PYTHON" ]; then
+  if [ -x "$ROOT/ml-service/venv/bin/python" ]; then
+    ML_PYTHON="$ROOT/ml-service/venv/bin/python"
+  elif [ -x "$ROOT/ml-service/venv/Scripts/python.exe" ]; then
+    ML_PYTHON="$ROOT/ml-service/venv/Scripts/python.exe"
+  elif command -v python3 >/dev/null 2>&1 && python3 -c "import psycopg2" >/dev/null 2>&1; then
+    ML_PYTHON="python3"
+  fi
+fi
 
 echo "== 1. Supabase project reachability + anon key =="
 if [ -z "$SUPABASE_URL" ] || [ -z "$ANON_KEY" ]; then
@@ -66,10 +77,31 @@ PY
 fi
 
 echo "== 3. DATABASE_URL + required schema =="
+if [ -n "$SUPABASE_URL" ] && [ -n "$SERVICE_KEY" ]; then
+  schema_ok=1
+  for endpoint in \
+    "brands?select=id,owner_id&limit=1" \
+    "posts?select=id,instagram_media_id,source,synced_at&limit=1" \
+    "predictions?select=id,created_by,actual_source&limit=1" \
+    "calendar_entries?select=id,owner_id,source&limit=1"; do
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$SUPABASE_URL/rest/v1/$endpoint" \
+      -K /dev/fd/3 \
+      3<<< $'header = "apikey: '"$SERVICE_KEY"$'"\nheader = "Authorization: Bearer '"$SERVICE_KEY"$'"')
+    [ "$code" = "200" ] || schema_ok=0
+  done
+  if [ "$schema_ok" = "1" ]; then
+    pass "ownership, calendar, and post-provenance columns are exposed by PostgREST"
+  else
+    fail "required ownership/calendar migration is missing or not exposed by PostgREST"
+  fi
+else
+  warn "service key unavailable; skipping PostgREST schema preflight"
+fi
+
 if [ -z "$DB_URL" ]; then
   fail "DATABASE_URL missing from ml-service/.env"
-elif [ -x "$ROOT/ml-service/venv/bin/python" ]; then
-  FAIV_VERIFY_DB_URL="$DB_URL" "$ROOT/ml-service/venv/bin/python" - <<'PY'
+elif [ -n "$ML_PYTHON" ]; then
+  FAIV_VERIFY_DB_URL="$DB_URL" "$ML_PYTHON" - <<'PY'
 import os, sys, psycopg2
 try:
     conn = psycopg2.connect(os.environ["FAIV_VERIFY_DB_URL"], connect_timeout=15)
@@ -100,7 +132,7 @@ except Exception as exc:
 PY
   [ $? -ne 0 ] && FAILURES=$((FAILURES + 1))
 else
-  warn "ml-service/venv not found — create it before running database checks"
+  warn "A Python runtime with psycopg2 was not found; set ML_PYTHON to run database checks"
 fi
 
 echo "== 4. Instagram credential bindings =="
@@ -141,7 +173,7 @@ if [ -z "$SERVICE_KEY" ]; then
 else
   resp=$(curl -s --max-time 15 -X POST "$SUPABASE_URL/storage/v1/object/list/models" \
     -K /dev/fd/3 --data-binary @- \
-    3<<< $'header = "Authorization: Bearer '"$SERVICE_KEY"$'"\nheader = "Content-Type: application/json"' \
+    3<<< $'header = "apikey: '"$SERVICE_KEY"$'"\nheader = "Authorization: Bearer '"$SERVICE_KEY"$'"\nheader = "Content-Type: application/json"' \
     <<< '{"prefix":"","limit":1}')
   case "$resp" in
     \[*) pass "service key can list the models bucket" ;;

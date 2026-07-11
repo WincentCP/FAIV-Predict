@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { NICHES } from "@/lib/niches";
+import { publicErrorResponse, readJsonObject } from "@/lib/http-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -8,12 +9,18 @@ const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.5-flash";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const { name, bio } = body;
 
-    if (!name || !bio) {
+    if (typeof name !== "string" || !name.trim() || typeof bio !== "string" || !bio.trim()) {
       return NextResponse.json(
         { status: "error", message: "Parameters 'name' and 'bio' are required." },
+        { status: 400 }
+      );
+    }
+    if (name.length > 255 || bio.length > 4000) {
+      return NextResponse.json(
+        { status: "error", message: "Brand name must be under 256 characters and bio under 4,001 characters." },
         { status: 400 }
       );
     }
@@ -80,7 +87,7 @@ export async function POST(request: Request) {
           }
         }
       } catch {
-        console.error("[BFF Classify] Failed to parse Gemini response as JSON:", rawText);
+        console.error("[BFF Classify] Failed to parse Gemini response as JSON.");
       }
     } else {
       console.warn("[BFF Classify] Gemini API returned error status:", geminiRes.status);
@@ -90,11 +97,8 @@ export async function POST(request: Request) {
       { status: "error", message: "AI classification failed. Select a niche manually." },
       { status: 502 }
     );
-  } catch (error: any) {
+  } catch (error) {
     console.error("[BFF Classify] Fatal error:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to classify niche" },
-      { status: 500 }
-    );
+    return publicErrorResponse(error, "Brand classification could not be completed.", 500);
   }
 }

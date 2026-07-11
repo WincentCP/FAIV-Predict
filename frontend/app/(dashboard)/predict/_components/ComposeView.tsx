@@ -59,11 +59,11 @@ export function ComposeView(props: {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
-      transition={{ type: "spring", stiffness: 350, damping: 28 }}
+      transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
       className="mx-auto max-w-3xl space-y-5"
     >
       {predictError && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 flex items-start gap-3">
+        <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 flex items-start gap-3">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
           <div className="flex-1">
             <div className="text-xs font-bold text-destructive">Prediction failed</div>
@@ -81,10 +81,10 @@ export function ComposeView(props: {
       )}
 
       {optimizationsApplied && (
-        <div className="rounded-xl border border-primary/20 bg-primary/[0.02] p-4 flex items-center gap-3">
+        <div role="status" className="rounded-xl border border-primary/20 bg-primary/[0.02] p-4 flex items-center gap-3">
           <Sparkles className="h-4 w-4 text-primary shrink-0" />
           <div className="text-xs text-foreground font-semibold">
-            Optimizations applied — run <span className="text-primary">Analyze Post</span> to re-score.
+            Optimizations applied. Run <span className="text-primary">Analyze Post</span> to re-score.
           </div>
         </div>
       )}
@@ -93,8 +93,9 @@ export function ComposeView(props: {
       <Panel title="Post Setup">
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <Label>Brand</Label>
+            <Label htmlFor="predict-brand">Brand</Label>
             <select
+              id="predict-brand"
               value={accountId ?? ""}
               onChange={(e) => setAccountId(e.target.value || null)}
               disabled={brandsList.length === 0}
@@ -124,8 +125,8 @@ export function ComposeView(props: {
           </div>
 
           <div>
-            <Label>Format</Label>
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1">
+            <Label id="predict-format-label">Format</Label>
+            <div role="group" aria-labelledby="predict-format-label" className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1">
               {FORMATS.map((f) => {
                 const active = contentFormat === f.id;
                 return (
@@ -135,7 +136,7 @@ export function ComposeView(props: {
                     onClick={() => setContentFormat(f.id)}
                     aria-pressed={active}
                     className={cn(
-                      "flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-[10px] font-bold transition-all",
+                      "flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-bold transition-colors",
                       active
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
@@ -150,23 +151,25 @@ export function ComposeView(props: {
           </div>
 
           <div>
-            <Label>Post Date</Label>
-            <DatePicker value={scheduledAt} onChange={setScheduledAt} />
+            <Label htmlFor="predict-date">Post Date</Label>
+            <DatePicker id="predict-date" aria-label="Scheduled post date" value={scheduledAt} onChange={setScheduledAt} />
           </div>
           <div>
-            <Label>Post Time</Label>
-            <TimePicker value={scheduledAt} onChange={setScheduledAt} />
+            <Label htmlFor="predict-time">Post Time</Label>
+            <TimePicker id="predict-time" aria-label="Scheduled post time in WIB" value={scheduledAt} onChange={setScheduledAt} />
           </div>
         </div>
       </Panel>
 
       {/* Caption: the hero input */}
       <Panel title="Caption">
-        <div className="flex items-center justify-end mb-2">
+        <div className="mb-2 flex items-center justify-between">
+          <Label htmlFor="predict-caption">Caption text</Label>
           <CaptionMeter count={stats.charCount} />
         </div>
         <div className="rounded-xl border border-border bg-surface transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 overflow-hidden shadow-inner">
           <textarea
+            id="predict-caption"
             value={caption}
             onChange={(e) => setCaption(e.target.value)}
             rows={8}
@@ -206,9 +209,10 @@ export function ComposeView(props: {
           )}
         </div>
         <button
+          type="button"
           onClick={onAnalyze}
           disabled={submitting || tooLong || !isFormValid}
-          className="flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-primary px-8 text-xs font-bold text-primary-foreground shadow-[var(--shadow-glow-purple)] transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 md:w-auto"
+          className="flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-primary px-8 text-xs font-bold text-primary-foreground transition-colors duration-200 hover:bg-primary/92 disabled:opacity-50 md:w-auto"
         >
           <Activity className="h-4.5 w-4.5" />
           Analyze Post

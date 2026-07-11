@@ -2,8 +2,8 @@
 
 import * as React from "react";
 import {
-  AreaChart,
-  Area,
+  BarChart,
+  Bar,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -12,24 +12,22 @@ import {
 } from "recharts";
 
 type DashboardChartProps = {
-  data: Array<{ day: string; accuracy: number }>;
+  data: Array<{ label: string; accuracy: number; scope: string }>;
 };
 
 export default function DashboardChart({ data }: DashboardChartProps) {
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={data} margin={{ top: 10, right: 8, left: -10, bottom: 0 }}>
-        <defs>
-          <linearGradient id="accuracy-grad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.45} />
-            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-          </linearGradient>
-        </defs>
+    <>
+      <div className="sr-only">
+        {data.map((run) => `${run.scope}: ${run.accuracy.toFixed(1)}% validation accuracy`).join(". ")}
+      </div>
+      <ResponsiveContainer width="100%" height="100%">
+      <BarChart accessibilityLayer data={data} margin={{ top: 10, right: 8, left: -10, bottom: 0 }}>
         <CartesianGrid stroke="hsl(var(--foreground) / 0.04)" vertical={false} />
-        <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" fontSize={10} fontWeight={600} tickLine={false} axisLine={false} />
+        <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} fontWeight={600} tickLine={false} axisLine={false} />
         <YAxis domain={[0, 100]} stroke="hsl(var(--muted-foreground))" fontSize={10} fontWeight={600} tickLine={false} axisLine={false} />
         <Tooltip
-          formatter={(value: any) => [`${value}%`, "Validation accuracy"]}
+          formatter={(value: any, _name: any, item: any) => [`${Number(value).toFixed(1)}%`, item?.payload?.scope || "Validation run"]}
           contentStyle={{
             background: "hsl(var(--surface))",
             border: "1px solid hsl(var(--border-strong))",
@@ -40,8 +38,9 @@ export default function DashboardChart({ data }: DashboardChartProps) {
           }}
           cursor={{ stroke: "hsl(var(--primary))", strokeWidth: 1.5, strokeDasharray: "3 3" }}
         />
-        <Area type="monotone" dataKey="accuracy" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#accuracy-grad)" />
-      </AreaChart>
-    </ResponsiveContainer>
+        <Bar dataKey="accuracy" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} maxBarSize={28} />
+      </BarChart>
+      </ResponsiveContainer>
+    </>
   );
 }

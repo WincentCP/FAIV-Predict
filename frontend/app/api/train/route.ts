@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getRequestUser } from "@/lib/authz";
+import {
+  publicErrorResponse,
+  publicUpstreamStatus,
+  readJsonObject,
+  whitelistedUpstreamMessage,
+} from "@/lib/http-errors";
 
 export const dynamic = "force-dynamic";
 
 const FASTAPI_URL = process.env.FASTAPI_URL || "http://127.0.0.1:8000";
 const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SAFE_TRAIN_STATUS_DETAILS = new Set(["Job not found"]);
+const SAFE_TRAIN_START_DETAILS = new Set<string>();
 
 // GET Handler to query retrain status
 export async function GET(request: Request) {
@@ -13,9 +22,9 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const job_id = searchParams.get("job_id");
 
-    if (!job_id) {
+    if (!job_id || !UUID_PATTERN.test(job_id)) {
       return NextResponse.json(
-        { status: "error", message: "Parameter job_id is required." },
+        { status: "error", message: "A valid retrain job ID is required." },
         { status: 400 }
       );
     }
@@ -23,12 +32,13 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const user = await getRequestUser(supabase);
     if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
-    const { data: job } = await supabase
+    const { data: job, error: jobError } = await supabase
       .from("model_retrain_jobs")
       .select("id, brands!inner(owner_id)")
       .eq("id", job_id)
       .eq("brands.owner_id", user.id)
       .maybeSingle();
+    if (jobError) throw jobError;
     if (!job) return NextResponse.json({ status: "error", message: "Retrain job not found." }, { status: 404 });
 
     const backendHeaders: Record<string, string> = {};
@@ -42,28 +52,43 @@ export async function GET(request: Request) {
     });
 
     if (!response.ok) {
-      const errText = await response.text();
+      const message = await whitelistedUpstreamMessage(
+        response,
+        SAFE_TRAIN_STATUS_DETAILS,
+        "Retrain status is temporarily unavailable."
+      );
       return NextResponse.json(
-        { status: "error", message: `FastAPI error: ${errText}` },
-        { status: response.status }
+        { status: "error", message },
+        { status: publicUpstreamStatus(response.status) }
       );
     }
 
     const data = await response.json();
-    return NextResponse.json(data);
-  } catch (error: any) {
+    if (!["pending", "running", "success", "failed"].includes(data?.status)) {
+      return NextResponse.json(
+        { status: "error", message: "Retraining service returned an invalid response." },
+        { status: 502 }
+      );
+    }
+    const status = data.status as "pending" | "running" | "success" | "failed";
+    return NextResponse.json({
+      status,
+      created_at: typeof data?.created_at === "string" ? data.created_at : null,
+      completed_at: typeof data?.completed_at === "string" ? data.completed_at : null,
+      error_message: status === "failed"
+        ? "Training could not be completed. Review the service logs for diagnostics."
+        : null,
+    });
+  } catch (error) {
     console.error("[BFF Proxy] Failed to fetch retrain status:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to fetch retrain status" },
-      { status: 500 }
-    );
+    return publicErrorResponse(error, "Retrain status is temporarily unavailable.", 503);
   }
 }
 
 // POST Handler to trigger retraining
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const { brand_id } = body;
     const supabase = await createClient();
     const user = await getRequestUser(supabase);
@@ -71,12 +96,13 @@ export async function POST(request: Request) {
     if (typeof brand_id !== "string" || !brand_id) {
       return NextResponse.json({ status: "error", message: "A registered brand is required." }, { status: 400 });
     }
-    const { data: ownedBrand } = await supabase
+    const { data: ownedBrand, error: brandError } = await supabase
       .from("brands")
       .select("id, niche")
       .eq("id", brand_id)
       .eq("owner_id", user.id)
       .maybeSingle();
+    if (brandError) throw brandError;
     if (!ownedBrand) return NextResponse.json({ status: "error", message: "Brand not found in this workspace." }, { status: 404 });
 
     const backendHeaders: Record<string, string> = {
@@ -97,20 +123,31 @@ export async function POST(request: Request) {
     });
 
     if (!response.ok) {
-      const errText = await response.text();
+      const message = await whitelistedUpstreamMessage(
+        response,
+        SAFE_TRAIN_START_DETAILS,
+        "Retraining could not be queued. Please try again later."
+      );
       return NextResponse.json(
-        { status: "error", message: `FastAPI error: ${errText}` },
-        { status: response.status }
+        { status: "error", message },
+        { status: publicUpstreamStatus(response.status) }
       );
     }
 
     const data = await response.json();
-    return NextResponse.json(data);
-  } catch (error: any) {
+    if (typeof data?.job_id !== "string" || !UUID_PATTERN.test(data.job_id)) {
+      return NextResponse.json(
+        { status: "error", message: "Retraining service returned an invalid response." },
+        { status: 502 }
+      );
+    }
+    return NextResponse.json({
+      status: "pending",
+      job_id: data.job_id,
+      message: "Retraining job queued successfully.",
+    });
+  } catch (error) {
     console.error("[BFF Proxy] Failed to trigger model retraining:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to trigger retraining" },
-      { status: 500 }
-    );
+    return publicErrorResponse(error, "Retraining could not be queued. Please try again later.", 503);
   }
 }

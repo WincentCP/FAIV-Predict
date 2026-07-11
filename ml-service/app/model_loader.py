@@ -181,8 +181,11 @@ class ModelLoader:
             cls._model_cache[cache_key] = model
             logger.info(f"Successfully loaded model {filename} and cached in memory.")
             return model, metadata
-        except Exception as e:
-            logger.error(f"Error loading model from storage: {e}")
+        except ModelUnavailableError:
+            # Provenance failures are already intentionally worded for callers.
+            raise
+        except Exception:
+            logger.exception("Error loading model from storage")
             raise ModelUnavailableError(
-                f"A model is registered but its artifact could not be loaded: {e}"
+                "A trained model is registered but its artifact is temporarily unavailable."
             )

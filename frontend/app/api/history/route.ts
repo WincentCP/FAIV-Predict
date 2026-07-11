@@ -1,9 +1,18 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { brandHandle } from "@/lib/types";
 import { getRequestUser, getOwnedBrands } from "@/lib/authz";
+import { publicErrorResponse, readJsonObject } from "@/lib/http-errors";
 
 export const dynamic = "force-dynamic";
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isRealIsoDate(value: string) {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value;
+}
 
 export async function GET() {
   try {
@@ -56,7 +65,9 @@ export async function GET() {
         brand: p.brands?.name || "Unknown Brand",
         brand_id: p.brand_id,
         niche: p.brands?.niche || null,
-        account: brandHandle(p.brands?.name || "brand"),
+        // A display name is not an Instagram username. Verified handles are
+        // surfaced only by the live Graph connection health endpoint.
+        account: p.brands?.name || "Unknown Brand",
         format,
         caption: p.caption || "",
         tier: p.pred_class.charAt(0).toUpperCase() + p.pred_class.slice(1).toLowerCase(),
@@ -71,12 +82,9 @@ export async function GET() {
     });
 
     return NextResponse.json(formatted);
-  } catch (error: any) {
+  } catch (error) {
     console.error("[BFF History] Failed to fetch history logs:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to fetch prediction history" },
-      { status: 500 }
-    );
+    return publicErrorResponse(error, "Prediction history is temporarily unavailable.", 503);
   }
 }
 
@@ -87,16 +95,42 @@ export async function PATCH(request: Request) {
     if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
     const brandIds = (await getOwnedBrands(supabase, user.id)).map((brand) => brand.id);
     if (brandIds.length === 0) return NextResponse.json({ status: "error", message: "Not found" }, { status: 404 });
-    const { id, scheduled_date, title, caption } = await request.json();
+    const { id, scheduled_date, title, caption } = await readJsonObject(request);
 
-    if (!id) {
+    if (typeof id !== "string" || !UUID_PATTERN.test(id)) {
       return NextResponse.json(
-        { status: "error", message: "Prediction ID is required" },
+        { status: "error", message: "A valid prediction ID is required." },
         { status: 400 }
       );
     }
 
-    const updates: any = {};
+    if (scheduled_date !== undefined && scheduled_date !== null &&
+        (typeof scheduled_date !== "string" || !isRealIsoDate(scheduled_date))) {
+      return NextResponse.json(
+        { status: "error", message: "Scheduled date must be a real date in YYYY-MM-DD format." },
+        { status: 400 }
+      );
+    }
+    if (title !== undefined && (typeof title !== "string" || title.length > 255)) {
+      return NextResponse.json(
+        { status: "error", message: "Title must be text no longer than 255 characters." },
+        { status: 400 }
+      );
+    }
+    if (caption !== undefined && (typeof caption !== "string" || caption.length > 5000)) {
+      return NextResponse.json(
+        { status: "error", message: "Caption must be text no longer than 5,000 characters." },
+        { status: 400 }
+      );
+    }
+    if (scheduled_date === undefined && title === undefined && caption === undefined) {
+      return NextResponse.json(
+        { status: "error", message: "Provide at least one field to update." },
+        { status: 400 }
+      );
+    }
+
+    const updates: Record<string, string | null> = {};
     if (scheduled_date !== undefined) updates.scheduled_date = scheduled_date;
     if (title !== undefined) updates.title = title;
     if (caption !== undefined) updates.caption = caption;
@@ -116,12 +150,9 @@ export async function PATCH(request: Request) {
     if (!updated) return NextResponse.json({ status: "error", message: "Prediction not found" }, { status: 404 });
 
     return NextResponse.json({ status: "success", message: "Prediction updated successfully" });
-  } catch (error: any) {
+  } catch (error) {
     console.error("[BFF History] Failed to update prediction:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to update prediction" },
-      { status: 500 }
-    );
+    return publicErrorResponse(error, "Prediction could not be updated.", 503);
   }
 }
 
@@ -132,11 +163,11 @@ export async function DELETE(request: Request) {
     if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
     const brandIds = (await getOwnedBrands(supabase, user.id)).map((brand) => brand.id);
     if (brandIds.length === 0) return NextResponse.json({ status: "error", message: "Not found" }, { status: 404 });
-    const { id } = await request.json();
+    const { id } = await readJsonObject(request);
 
-    if (!id) {
+    if (typeof id !== "string" || !UUID_PATTERN.test(id)) {
       return NextResponse.json(
-        { status: "error", message: "Prediction ID is required" },
+        { status: "error", message: "A valid prediction ID is required." },
         { status: 400 }
       );
     }
@@ -156,11 +187,8 @@ export async function DELETE(request: Request) {
     if (!deleted) return NextResponse.json({ status: "error", message: "Prediction not found" }, { status: 404 });
 
     return NextResponse.json({ status: "success", message: "Prediction deleted" });
-  } catch (error: any) {
+  } catch (error) {
     console.error("[BFF History] Failed to delete prediction:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to delete prediction" },
-      { status: 500 }
-    );
+    return publicErrorResponse(error, "Prediction could not be deleted.", 503);
   }
 }

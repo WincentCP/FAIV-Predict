@@ -66,9 +66,11 @@ export function ConceptAssistant({
 
   return (
     <div>
-      <Label>Visual Concept</Label>
+      <Label htmlFor="visual-concept">Visual Concept</Label>
       <div className="rounded-xl border border-border bg-surface transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 overflow-hidden shadow-inner">
         <textarea
+          id="visual-concept"
+          aria-describedby="visual-concept-help"
           value={visualConcept}
           onChange={(e) => setVisualConcept(e.target.value)}
           rows={3}
@@ -77,7 +79,7 @@ export function ConceptAssistant({
         />
       </div>
       <div className="mt-2 flex items-center justify-between gap-3">
-        <p className="text-[10px] text-muted-foreground/70">
+        <p id="visual-concept-help" className="text-xs text-muted-foreground">
           AI reads scripts, dialogue, and shot lists in any format.
         </p>
         <button
@@ -85,7 +87,7 @@ export function ConceptAssistant({
           onClick={analyzeConcept}
           disabled={conceptState === "loading" || visualConcept.trim().length < 10}
           title={visualConcept.trim().length < 10 ? "Write at least a short concept first" : undefined}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-[10px] font-bold text-foreground transition-all hover:bg-surface-2 disabled:opacity-50 active:scale-[0.98]"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50 active:scale-[0.98]"
         >
           {conceptState === "loading" ? (
             <>
@@ -102,14 +104,14 @@ export function ConceptAssistant({
       </div>
 
       {conceptState === "error" && (
-        <div className="mt-2 rounded-lg border border-warning/30 bg-warning/[0.03] px-3 py-2 text-[10px] text-muted-foreground">
+        <div role="alert" className="mt-2 rounded-lg border border-warning/30 bg-warning/[0.03] px-3 py-2 text-xs text-muted-foreground">
           {conceptError}
         </div>
       )}
 
       {conceptState === "done" && conceptAnalysis && (
         <div className="mt-3 rounded-xl border border-border bg-surface-2/50 p-4 space-y-3">
-          <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-primary">
+          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-primary">
             <Sparkles className="h-3 w-3" />
             AI Concept Read
           </div>
@@ -131,20 +133,20 @@ export function ConceptAssistant({
             />
           </div>
           {conceptAnalysis.hook && (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               <span className="font-bold text-foreground">Hook:</span> &quot;{conceptAnalysis.hook}&quot;
             </p>
           )}
           {(conceptAnalysis.strengths.length > 0 || conceptAnalysis.suggestions.length > 0) && (
             <ul className="space-y-1">
               {conceptAnalysis.strengths.map((s, i) => (
-                <li key={`s${i}`} className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+                <li key={`s${i}`} className="flex items-start gap-1.5 text-xs text-muted-foreground">
                   <Check className="h-3 w-3 shrink-0 text-emerald-500 mt-px" />
                   {s}
                 </li>
               ))}
               {conceptAnalysis.suggestions.map((s, i) => (
-                <li key={`i${i}`} className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+                <li key={`i${i}`} className="flex items-start gap-1.5 text-xs text-muted-foreground">
                   <ArrowRight className="h-3 w-3 shrink-0 text-primary mt-px" />
                   {s}
                 </li>
@@ -161,7 +163,7 @@ function ConceptChip({ label, highlight, warn }: { label: string; highlight?: bo
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide",
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-bold uppercase tracking-wide",
         highlight
           ? "bg-primary/10 border-primary/20 text-primary"
           : warn

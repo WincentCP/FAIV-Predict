@@ -1,5 +1,6 @@
 -- Per-user ownership and dedicated content calendar.
--- Safe legacy backfill occurs only when the project has exactly one auth user.
+-- Legacy rows remain quarantined until an administrator explicitly assigns
+-- their owner after verifying their provenance.
 
 ALTER TABLE public.brands
   ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
@@ -25,15 +26,6 @@ UPDATE public.brands b
 SET followers = NULL
 WHERE followers = 0
   AND NOT EXISTS (SELECT 1 FROM public.posts p WHERE p.brand_id = b.id AND p.is_synced);
-
-DO $$
-BEGIN
-  IF (SELECT COUNT(*) FROM auth.users) = 1 THEN
-    UPDATE public.brands
-    SET owner_id = (SELECT id FROM auth.users LIMIT 1)
-    WHERE owner_id IS NULL;
-  END IF;
-END $$;
 
 -- Keep legacy rows available to administrators while enforcing provenance on
 -- every new or updated record.

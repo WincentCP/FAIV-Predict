@@ -5,17 +5,16 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
-import { type Brand, brandHandle } from "@/lib/types";
+import { type Brand } from "@/lib/types";
 import dynamic from "next/dynamic";
 
 const DashboardChart = dynamic(() => import("@/components/DashboardChart"), {
   ssr: false,
-  loading: () => <div className="h-[260px] w-full animate-pulse bg-muted/40 rounded-xl" />,
+  loading: () => <div className="h-[260px] w-full motion-safe:animate-pulse bg-muted/40 rounded-xl" />,
 });
 
 import {
   ArrowUpRight,
-  CalendarRange,
   History,
   AlertTriangle,
   TrendingUp,
@@ -78,7 +77,7 @@ export default function DashboardPage() {
   const [isWorkspaceEmpty, setIsWorkspaceEmpty] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dashboardLoaded, setDashboardLoaded] = useState(false);
-  const [accuracyTrend, setAccuracyTrend] = useState<{ day: string; accuracy: number }[]>([]);
+  const [accuracyTrend, setAccuracyTrend] = useState<{ label: string; accuracy: number; scope: string }[]>([]);
   const [tierDistribution, setTierDistribution] = useState<Array<{
     tier: "High" | "Average" | "Low";
     count: number;
@@ -86,7 +85,7 @@ export default function DashboardPage() {
   }>>([]);
 
   const personalCount = useMemo(() => {
-    return brandsList.filter((b) => b.model_type === "personal").length;
+    return brandsList.filter((b) => b.active_model_scope === "personal").length;
   }, [brandsList]);
 
   const [kpis, setKpis] = useState(KPI_DEFINITIONS);
@@ -137,7 +136,7 @@ export default function DashboardPage() {
           if (data.recent && data.recent.length > 0) {
             const mappedRecent = data.recent.map((r: any) => ({
               id: r.id,
-              account: r.brand ? `@${r.brand.toLowerCase().replace(/\s+/g, "")}` : "@unknown",
+              account: r.brand || "Unknown Brand",
               caption: r.caption,
               tier: r.tier as any,
               confidence: r.confidence ?? null,
@@ -161,9 +160,14 @@ export default function DashboardPage() {
           const data = await res.json();
           setBrandsList(data || []);
           setIsWorkspaceEmpty((data || []).length === 0);
+        } else {
+          setIsWorkspaceEmpty(false);
+          setLoadError((current) => current || "Brand workspaces could not be loaded right now.");
         }
       } catch (err) {
         console.warn("Could not fetch brands on dashboard mount:", err);
+        setIsWorkspaceEmpty(false);
+        setLoadError((current) => current || "Brand workspaces could not be loaded right now.");
       }
     }
 
@@ -176,14 +180,14 @@ export default function DashboardPage() {
     show: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.08,
+        staggerChildren: 0.04,
       },
     },
   };
 
   const itemVariants: Variants = {
-    hidden: { opacity: 0, y: 20 },
-    show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } },
+    hidden: { opacity: 0, y: 8 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.22, ease: [0.2, 0, 0, 1] } },
   };
 
   return (
@@ -221,132 +225,42 @@ export default function DashboardPage() {
         </motion.section>
       )}
 
-      {/* HERO — fills viewport, no duplicate KPI strip */}
-      <motion.section 
+      {/* Compact workspace header */}
+      <motion.section
         variants={itemVariants}
-        className="relative overflow-hidden rounded-3xl border border-border-strong bg-gradient-to-br from-surface via-surface-2 to-surface p-1 shadow-[0_12px_40px_rgba(0,0,0,0.03)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.2)]"
+        className="rounded-2xl border border-border-strong bg-surface p-6 shadow-[var(--shadow-soft)] md:p-8"
       >
-        <div className="relative flex w-full flex-col overflow-hidden rounded-[22px] p-6 md:p-12 py-10 md:py-16">
-          <div aria-hidden className="absolute inset-0 grid-bg opacity-30" />
-          
-          <motion.div
-            animate={{
-              scale: [1, 1.05, 0.95, 1],
-              rotate: [0, 5, -5, 0],
-            }}
-            transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
-            aria-hidden
-            className="absolute -top-32 -right-20 h-[500px] w-[500px] rounded-full opacity-60"
-            style={{
-              background:
-                "radial-gradient(circle, color-mix(in oklab, hsl(var(--primary-glow)) 40%, transparent), transparent 70%)",
-              filter: "blur(80px)",
-            }}
-          />
-          
-          <motion.div
-            animate={{
-              scale: [1, 0.95, 1.05, 1],
-              rotate: [0, -4, 4, 0],
-            }}
-            transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
-            aria-hidden
-            className="absolute -bottom-40 -left-10 h-[500px] w-[500px] rounded-full opacity-50"
-            style={{
-              background:
-                "radial-gradient(circle, color-mix(in oklab, hsl(var(--secondary-glow)) 35%, transparent), transparent 70%)",
-              filter: "blur(80px)",
-            }}
-          />
-
-          {/* Top row: greeting + status pills */}
-          <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
-            <div className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface/70 px-3.5 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-primary shadow-sm backdrop-blur">
-              <span className="h-2 w-2 animate-ping rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary))]" />
-              {brandsList.length} brand workspaces
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 text-xs font-bold text-primary">
+              <Building2 className="h-4 w-4" />
+              Workspace overview
             </div>
-            {loadError && (
-              <div className="inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,hsl(var(--destructive))_45%,transparent)] bg-[color-mix(in_oklab,hsl(var(--destructive))_10%,transparent)] px-3.5 py-2 text-[10px] font-extrabold text-destructive shadow-sm backdrop-blur">
-                <AlertTriangle className="h-3.5 w-3.5" />
-                {loadError}
-              </div>
-            )}
+            <h1 className="mt-3 font-display text-2xl font-extrabold tracking-tight text-foreground md:text-3xl">
+              Make the next post a stronger decision.
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              Review verified workspace activity, then analyze a real draft with the latest available model.
+            </p>
           </div>
-
-          {/* Centered headline + sub — vertically anchored to fill space */}
-          <div className="relative z-10 my-auto max-w-3xl py-8">
-            <motion.h1 
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.2 }}
-              className="font-display text-[40px] font-extrabold leading-[1.05] tracking-tight md:text-[60px]"
-            >
-              Welcome back to{" "}
-              <span className="text-primary">FAIV Predict</span>.
-            </motion.h1>
-            
-            <motion.h2 
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.3 }}
-              className="mt-3.5 font-display text-2xl font-bold leading-tight tracking-tight text-muted-foreground md:text-3.5xl"
-            >
-              Forecast, diagnose, and optimize your content.
-            </motion.h2>
-            
-            <motion.p 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="mt-6 max-w-xl text-base font-medium text-muted-foreground/90 leading-relaxed"
-            >
-              <span className="font-extrabold text-foreground">{personalCount}</span> of your brands have an active personal model; the rest use their shared industry-cohort model while verified post history accumulates.
-            </motion.p>
-
-            <motion.div 
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.5 }}
-              className="mt-9 flex flex-wrap gap-3.5"
-            >
-              <Link
-                href="/predict"
-                className="group inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-sm font-bold text-primary-foreground shadow-[0_8px_25px_hsl(var(--primary-glow)/0.4)] transition-all hover:scale-[1.02] active:scale-[0.98]"
-              >
-                <Activity className="h-4.5 w-4.5" />
-                Analyze New Post
-                <ArrowUpRight className="h-4.5 w-4.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-              </Link>
-              <Link
-                href="/calendar"
-                className="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-surface/80 px-6 py-3.5 text-sm font-semibold text-foreground backdrop-blur shadow-sm transition-all hover:bg-surface-2 hover:scale-[1.01] active:scale-[0.98]"
-              >
-                <CalendarRange className="h-4.5 w-4.5 text-primary" />
-                Plan a Calendar
-              </Link>
-              <Link
-                href="/history"
-                className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface/50 px-6 py-3.5 text-sm font-semibold text-muted-foreground backdrop-blur shadow-sm transition-all hover:text-foreground hover:bg-surface-2 hover:scale-[1.01] active:scale-[0.98]"
-              >
-                <History className="h-4.5 w-4.5" />
-                View History
-              </Link>
-            </motion.div>
-          </div>
-
-          {/* Bottom row: scroll cue + brand snapshot strip (no duplicated KPIs) */}
-          <div className="relative z-10 mt-auto flex flex-wrap items-end justify-between gap-4 border-t border-border/50 pt-6">
-            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/60">
-              <span className="inline-block h-px w-8 bg-border-strong" />
-              Scroll for performance details
-            </div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5 text-[11px] font-semibold text-muted-foreground">
-              <span>
-                Dedicated AI accounts{" "}
-                <span className="font-mono font-bold text-foreground bg-surface-3/50 px-1.5 py-0.5 rounded">{personalCount}/{brandsList.length}</span>
-              </span>
-            </div>
-          </div>
+          <Link
+            href="/predict"
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/92 active:scale-[0.98]"
+          >
+            <Activity className="h-4 w-4" />
+            Analyze a post
+            <ArrowUpRight className="h-4 w-4" />
+          </Link>
+        </div>
+        <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border pt-4 text-xs font-semibold text-muted-foreground">
+          <span>{brandsList.length} registered brand{brandsList.length === 1 ? "" : "s"}</span>
+          <span>{personalCount} personal model{personalCount === 1 ? "" : "s"}</span>
+          {loadError && (
+            <span role="alert" className="inline-flex items-center gap-1.5 text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {loadError}
+            </span>
+          )}
         </div>
       </motion.section>
 
@@ -360,30 +274,19 @@ export default function DashboardPage() {
           return (
             <motion.div
               key={kpi.id}
-              whileHover={{ y: -4, scale: 1.01 }}
-              transition={{ type: "spring", stiffness: 350, damping: 25 }}
-              className="group relative overflow-hidden rounded-2xl border border-border bg-surface/70 p-5 backdrop-blur-xl transition-all duration-300 hover:border-primary/30 hover:shadow-[0_12px_30px_rgba(0,0,0,0.04)] dark:hover:shadow-[0_12px_30px_rgba(0,0,0,0.15)]"
+              className="relative overflow-hidden rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-soft)]"
             >
-              {/* Radial glow follow */}
-              <div
-                aria-hidden
-                className="absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-                style={{
-                  background: `radial-gradient(circle, ${kpi.glowColor}, transparent 70%)`,
-                  filter: "blur(28px)",
-                }}
-              />
               <div className="relative">
                 <div className="flex items-start justify-between gap-2">
-                  <div className={`grid h-10 w-10 place-items-center rounded-xl ${kpi.colorClass} shadow-sm group-hover:bg-primary group-hover:text-primary-foreground transition-all duration-300`}>
+                  <div className={`grid h-10 w-10 place-items-center rounded-xl ${kpi.colorClass} shadow-sm`}>
                     <KpiIcon className="h-5 w-5" />
                   </div>
                 </div>
                 <div className="mt-5 font-display text-3xl font-extrabold tabular-nums tracking-tight">
-                  {kpi.value}
+                  {dashboardLoaded ? kpi.value : <span className="block h-8 w-20 motion-safe:animate-pulse rounded-lg bg-surface-2" aria-label="Loading metric" />}
                 </div>
-                <div className="mt-1.5 text-[11px] font-bold text-muted-foreground/90">{kpi.label}</div>
-                <div className="mt-0.5 text-[10px] font-medium text-muted-foreground/60">{kpi.sub}</div>
+                <div className="mt-1.5 text-xs font-bold text-muted-foreground">{kpi.label}</div>
+                <div className="mt-1 text-xs font-medium text-muted-foreground">{kpi.sub}</div>
               </div>
             </motion.div>
           );
@@ -398,17 +301,17 @@ export default function DashboardPage() {
         <div className="rounded-2xl border border-border bg-surface/70 p-6 backdrop-blur-xl shadow-sm">
           <SectionHeader
             eyebrow="AI Validation"
-            title={<span className="text-2xl font-bold">Model Accuracy Trend</span>}
-            description={accuracyTrend.length > 0 ? `Last ${accuracyTrend.length} model training sessions.` : "No model training data available yet."}
+            title={<span className="text-2xl font-bold">Recent Validation Runs</span>}
+            description={accuracyTrend.length > 0 ? `Latest ${accuracyTrend.length} owned model runs. Each bar is a separate scope, not a continuous trend.` : "No model training data available yet."}
           />
           <div className="mt-6 h-[260px]">
             {accuracyTrend.length > 0 ? (
               <DashboardChart data={accuracyTrend} />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/65 text-center">
-                <span className="text-xl">📊</span>
+                <BarChart3 className="h-5 w-5 text-muted-foreground" />
                 <p className="text-xs font-semibold text-muted-foreground">No training sessions yet</p>
-                <p className="text-[10px] text-muted-foreground/60">Accuracy appears after the scheduled training pipeline registers a validated model.</p>
+                <p className="text-xs text-muted-foreground">Accuracy appears after the scheduled training pipeline registers a validated model.</p>
               </div>
             )}
           </div>
@@ -419,9 +322,9 @@ export default function DashboardPage() {
           <div>
             <div className="flex items-center justify-between border-b border-border/60 pb-4 mb-4">
               <div>
-                <div className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklab,hsl(var(--primary))_30%,transparent)] bg-[color-mix(in_oklab,hsl(var(--primary))_8%,transparent)] px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-primary">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-                  Live feed
+                <div className="inline-flex items-center gap-1.5 text-xs font-bold text-primary">
+                  <History className="h-3.5 w-3.5" />
+                  Recent activity
                 </div>
                 <h3 className="mt-2 font-display text-base font-bold">
                   Recent Forecasts
@@ -451,14 +354,14 @@ export default function DashboardPage() {
                         <p className="mt-1 text-xs text-muted-foreground/80 line-clamp-1 italic">
                           &quot;{r.caption}&quot;
                         </p>
-                        <div className="mt-1 text-[10px] font-medium text-muted-foreground/50">{r.when}</div>
+                        <div className="mt-1 text-xs font-medium text-muted-foreground/50">{r.when}</div>
                       </div>
                       <div className="flex flex-col items-end gap-1.5">
                         <TierBadge tier={r.tier} />
                         {r.confidence != null && (
-                          <div className="flex items-center gap-1 text-[11px] font-bold">
+                          <div className="flex items-center gap-1 text-xs font-bold">
                             <span className="font-mono text-foreground">{r.confidence}%</span>
-                            <span className="text-[9px] text-muted-foreground/60 font-medium">conf</span>
+                            <span className="text-xs text-muted-foreground/60 font-medium">conf</span>
                           </div>
                         )}
                       </div>
@@ -478,7 +381,7 @@ export default function DashboardPage() {
       >
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklab,hsl(var(--primary))_30%,transparent)] bg-[color-mix(in_oklab,hsl(var(--primary))_8%,transparent)] px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.18em] text-primary">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklab,hsl(var(--primary))_30%,transparent)] bg-[color-mix(in_oklab,hsl(var(--primary))_8%,transparent)] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-primary">
               <span className="h-1.5 w-1.5 rounded-full bg-primary" />
               AI Levels
             </div>
@@ -500,37 +403,44 @@ export default function DashboardPage() {
             </li>
           ) : (
             brandsList.slice(0, 6).map((b) => {
-              const isPersonal = b.model_type === "personal";
-              const stage = isPersonal ? "Personal" : "Niche";
+              const stage = b.active_model_scope === "personal"
+                ? "Personal"
+                : b.active_model_scope === "cohort"
+                  ? "Cohort"
+                  : "No model";
               const followers = typeof b.followers === "number" ? b.followers : null;
-              const handle = brandHandle(b.name);
-
               return (
                 <li
                   key={b.id}
-                  className="group rounded-2xl border border-border/88 bg-surface p-4 transition-all duration-300 hover:border-primary/20 hover:shadow-sm hover:-translate-y-0.5 text-left"
+                  className="rounded-2xl border border-border/88 bg-surface p-4 transition-colors duration-200 hover:border-primary/20 text-left"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate font-display text-sm font-bold text-foreground">{b.name}</div>
-                      <div className="mt-0.5 font-mono text-[10px] font-bold text-muted-foreground/70">{handle}</div>
+                      <div className="mt-1 text-xs font-semibold text-muted-foreground">{b.niche} cohort</div>
                     </div>
                     <span
-                      className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wider ring-1 ring-inset ${
+                      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-extrabold uppercase tracking-wider ring-1 ring-inset ${
                         stage === "Personal"
                           ? "bg-[color-mix(in_oklab,hsl(var(--accent-lime))_18%,transparent)] text-[oklch(0.40_0.18_130)] dark:text-[oklch(0.85_0.20_130)] ring-[color-mix(in_oklab,hsl(var(--accent-lime))_45%,transparent)]"
-                          : "bg-[color-mix(in_oklab,hsl(var(--primary))_12%,transparent)] text-primary ring-[color-mix(in_oklab,hsl(var(--primary))_35%,transparent)]"
+                          : stage === "Cohort"
+                            ? "bg-[color-mix(in_oklab,hsl(var(--primary))_12%,transparent)] text-primary ring-[color-mix(in_oklab,hsl(var(--primary))_35%,transparent)]"
+                            : "bg-warning/10 text-warning-foreground ring-warning/30"
                       }`}
                     >
-                      {stage} AI
+                      {stage}
                     </span>
                   </div>
-                  <div className="mt-4 flex items-center justify-between text-[11px] font-bold">
+                  <div className="mt-4 flex items-center justify-between text-xs font-bold">
                     <span className="text-muted-foreground/80">
                       {followers === null ? "Followers not synced" : <><span className="font-mono tabular-nums text-foreground">{followers.toLocaleString()}</span> followers</>}
                     </span>
                     <span className="inline-flex items-center gap-1.5 font-mono text-muted-foreground/80">
-                      {stage === "Personal" ? "Personal model active" : "Cohort model"}
+                      {stage === "Personal"
+                        ? "Personal model active"
+                        : stage === "Cohort"
+                          ? "Cohort model available"
+                          : "Train a cohort model"}
                     </span>
                   </div>
                 </li>
@@ -540,60 +450,11 @@ export default function DashboardPage() {
         </ul>
       </motion.section>
 
-      {/* Quick actions + Tier distribution */}
+      {/* Tier distribution */}
       <motion.section 
         variants={itemVariants}
-        className="grid gap-5 lg:grid-cols-[1fr_1.4fr]"
+        className="block"
       >
-        <div>
-          <h3 className="mb-4 font-display text-lg font-bold">Quick actions</h3>
-          <div className="grid gap-4">
-            {[
-              {
-                href: "/predict",
-                icon: Activity,
-                title: "Analyze New Post",
-                desc: "Forecast post potential in seconds",
-                glow: "hsl(var(--primary))",
-              },
-              {
-                href: "/calendar",
-                icon: CalendarRange,
-                title: "Content Calendar",
-                desc: "Import or plan an editable content schedule",
-                glow: "hsl(var(--secondary-glow))",
-              },
-              {
-                href: "/history",
-                icon: History,
-                title: "Forecast History",
-                desc: "Browse and filter past forecasts",
-                glow: "hsl(var(--success))",
-              },
-            ].map((a, i) => (
-              <Link
-                key={a.title}
-                href={a.href}
-                className="group relative flex items-center gap-6 overflow-hidden rounded-xl border border-border bg-surface/60 p-6 backdrop-blur transition-all duration-300 hover:border-primary/20 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm"
-              >
-                <div
-                  className="grid h-14 w-14 shrink-0 place-items-center rounded-xl border border-border-strong/60 transition-colors duration-300 group-hover:bg-primary group-hover:text-primary-foreground"
-                  style={{
-                    background: `color-mix(in oklab, ${a.glow} 14%, transparent)`,
-                    boxShadow: `inset 0 0 20px color-mix(in oklab, ${a.glow} 25%, transparent)`,
-                  }}
-                >
-                  <a.icon className="h-6 w-6 text-primary group-hover:text-inherit" style={{ color: a.glow }} />
-                </div>
-                <div className="flex-1">
-                  <div className="text-base font-bold text-foreground">{a.title}</div>
-                  <div className="text-xs text-muted-foreground/80 mt-1.5">{a.desc}</div>
-                </div>
-                <ArrowUpRight className="h-5 w-5 text-muted-foreground transition-all duration-300 group-hover:text-foreground group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-              </Link>
-            ))}
-          </div>
-        </div>
 
         {/* Tier Distribution Chart */}
         <div className="rounded-2xl border border-border bg-surface/70 p-6 backdrop-blur-xl shadow-sm flex flex-col justify-between">
@@ -606,7 +467,7 @@ export default function DashboardPage() {
           </div>
           <div className="mt-4 space-y-5">
             {!dashboardLoaded ? (
-              [1, 2, 3].map((item) => <div key={item} className="h-12 animate-pulse rounded-xl bg-surface-2" />)
+              [1, 2, 3].map((item) => <div key={item} className="h-12 motion-safe:animate-pulse rounded-xl bg-surface-2" />)
             ) : tierDistribution.reduce((sum, item) => sum + item.count, 0) === 0 ? (
               <div className="rounded-xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">
                 No prediction results yet.

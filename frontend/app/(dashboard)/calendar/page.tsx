@@ -3,7 +3,7 @@
 import { fetchWithRetry } from "@/lib/fetch-retry";
 import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
-import { type ContentFormat, type Brand, brandHandle } from "@/lib/types";
+import { type ContentFormat, type Brand, normalizeBrandReference } from "@/lib/types";
 import {
   UploadCloud,
   Download,
@@ -29,7 +29,7 @@ type CalendarEntry = {
   time: string | null;
   account: string;
   brand: string;
-  format: ContentFormat;
+  format: ContentFormat | "Unspecified";
   caption: string;
   title: string;
   brand_id: string | null;
@@ -37,6 +37,8 @@ type CalendarEntry = {
   voiceOver: "Need" | "No Need" | "Done" | null;
   pic: string;
   status: "Need Shooting" | "Need Design" | "Need Editing" | "Screening" | "Ready to Post" | "Posted" | null;
+  source: "manual" | "import";
+  createdAt: string | null;
 };
 
 type ImportReport = {
@@ -81,6 +83,9 @@ const CSV_FIELDS: { field: CsvField; label: string; required: boolean }[] = [
   { field: "pic", label: "PIC", required: false },
   { field: "status", label: "Status", required: false },
 ];
+
+const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
+const MAX_IMPORT_ROWS = 5_000;
 
 // Header synonyms so exports from different tools map automatically.
 const CSV_SYNONYMS: Record<CsvField, string[]> = {
@@ -166,7 +171,7 @@ export default function CalendarPage() {
         id: entry.id,
         date: entry.posting_date,
         time: entry.posting_time ? String(entry.posting_time).slice(0, 5) : null,
-        account: entry.brands?.name ? brandHandle(entry.brands.name) : "Unassigned",
+        account: entry.brands?.name || "Unassigned",
         brand: entry.brands?.name || "Unassigned",
         brand_id: entry.brand_id || null,
         format: normalizeFormat(entry.content_type),
@@ -176,6 +181,8 @@ export default function CalendarPage() {
         voiceOver: entry.voice_over || null,
         pic: entry.pic || "",
         status: entry.status || null,
+        source: entry.source === "import" ? "import" : "manual",
+        createdAt: entry.created_at || null,
       }));
       setEntries(mapped);
       setLoadError(null);
@@ -201,11 +208,21 @@ export default function CalendarPage() {
     loadBrands();
   }, [loadCalendar]);
 
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const syncView = () => {
+      if (media.matches) setView("list");
+    };
+    syncView();
+    media.addEventListener("change", syncView);
+    return () => media.removeEventListener("change", syncView);
+  }, []);
+
   const monthEntries = useMemo(
     () =>
       entries.filter((e) => {
-        const d = new Date(e.date);
-        return d.getFullYear() === cursor.y && d.getMonth() === cursor.m;
+        const [year, month] = e.date.split("-").map(Number);
+        return year === cursor.y && month === cursor.m + 1;
       }),
     [entries, cursor],
   );
@@ -214,11 +231,9 @@ export default function CalendarPage() {
 
   const resolveBrand = useCallback(
     (identifier: string): Brand | undefined => {
-      const needle = identifier.trim().toLowerCase().replace(/^@/, "");
+      const needle = normalizeBrandReference(identifier);
       return brandsList.find(
-        (b) =>
-          b.name.toLowerCase() === identifier.trim().toLowerCase() ||
-          brandHandle(b.name).replace(/^@/, "") === needle
+        (b) => normalizeBrandReference(b.name) === needle
       );
     },
     [brandsList]
@@ -231,6 +246,20 @@ export default function CalendarPage() {
     const file = e.target.files?.[0];
     if (fileRef.current) fileRef.current.value = "";
     if (!file) return;
+    if (!/\.(csv|xlsx)$/i.test(file.name)) {
+      setImportReport({
+        total: 0, imported: 0, skipped: 0, failed: 0, running: false,
+        errors: ["Choose a CSV or XLSX content-calendar file."],
+      });
+      return;
+    }
+    if (file.size > MAX_IMPORT_BYTES) {
+      setImportReport({
+        total: 0, imported: 0, skipped: 0, failed: 0, running: false,
+        errors: ["The spreadsheet is larger than 10 MB. Split it into smaller calendar files before importing."],
+      });
+      return;
+    }
 
     let rows: string[][];
     try {
@@ -259,6 +288,13 @@ export default function CalendarPage() {
       setImportReport({
         total: 0, imported: 0, skipped: 0, failed: 0, running: false,
         errors: ["The file has no data rows. Expected a header row plus content rows."],
+      });
+      return;
+    }
+    if (rows.length - 1 > MAX_IMPORT_ROWS) {
+      setImportReport({
+        total: rows.length - 1, imported: 0, skipped: rows.length - 1, failed: 0, running: false,
+        errors: [`This file contains more than ${MAX_IMPORT_ROWS.toLocaleString()} rows. Split it into smaller calendar files before review.`],
       });
       return;
     }
@@ -301,7 +337,8 @@ export default function CalendarPage() {
       const errors: string[] = [];
       const warnings: string[] = [];
       if (!dateValue) errors.push("posting date is missing or not recognized");
-      if (!formatRaw) warnings.push("content type missing; defaulted to Single Image");
+      if (!formatRaw) warnings.push("content type missing; imported as Unspecified");
+      else if (formatValue === "Unspecified") warnings.push(`content type "${formatRaw}" was not recognized; imported as Unspecified`);
       const brand = brandValue ? resolveBrand(brandValue) : undefined;
       if (brandValue && !brand) warnings.push(`brand "${brandValue}" is not registered; imported as unassigned`);
       if (get("voiceOver") && !voiceOver) warnings.push("voice-over value ignored; use Need, No Need, or Done");
@@ -552,6 +589,17 @@ export default function CalendarPage() {
             />
             <button
               type="button"
+              onClick={() => setEditing(blankCalendarEntry(
+                ymd(cursor.y, cursor.m, Math.min(today.getDate(), new Date(cursor.y, cursor.m + 1, 0).getDate())),
+                brandsList[0],
+              ))}
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/95"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add post
+            </button>
+            <button
+              type="button"
               onClick={() => fileRef.current?.click()}
               disabled={importReport?.running}
               className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 disabled:opacity-60"
@@ -575,7 +623,7 @@ export default function CalendarPage() {
             <button type="button" onClick={handleExportXlsx} disabled={monthEntries.length === 0} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 disabled:opacity-60">
               <Download className="h-3.5 w-3.5" /> XLSX
             </button>
-            <button type="button" onClick={handleExportPdf} disabled={monthEntries.length === 0} className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/95 disabled:opacity-60">
+            <button type="button" onClick={handleExportPdf} disabled={monthEntries.length === 0} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 disabled:opacity-60">
               <Download className="h-3.5 w-3.5" /> PDF
             </button>
           </div>
@@ -583,7 +631,7 @@ export default function CalendarPage() {
       />
 
       {loadError && (
-        <div className="mt-6 rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 flex items-center gap-3 text-xs">
+        <div role="alert" className="mt-6 rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 flex items-center gap-3 text-xs">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
           <span className="font-semibold text-destructive">{loadError}</span>
           <button
@@ -669,13 +717,13 @@ export default function CalendarPage() {
             <div className="p-5 space-y-5 overflow-y-auto flex-1">
               {/* Column mapping */}
               <div>
-                <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                <div className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   Column mapping <span className="font-normal normal-case">(auto-detected — adjust if wrong)</span>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
                   {CSV_FIELDS.map(({ field, label, required }) => (
                     <label key={field} className="block">
-                      <span className="text-[10px] font-semibold text-foreground">
+                      <span className="text-xs font-semibold text-foreground">
                         {label}
                         {required ? <span className="text-destructive"> *</span> : ""}
                       </span>
@@ -726,7 +774,7 @@ export default function CalendarPage() {
               <div className="overflow-x-auto rounded-xl border border-border">
                 <table className="w-full min-w-[640px] text-left text-xs">
                   <thead>
-                    <tr className="border-b border-border bg-surface-2/40 text-[9px] uppercase tracking-wider text-muted-foreground font-bold">
+                    <tr className="border-b border-border bg-surface-2/40 text-xs uppercase tracking-wider text-muted-foreground font-bold">
                       <th className="px-3 py-2.5 w-8">#</th>
                       <th className="px-3 py-2.5">Brand</th>
                       <th className="px-3 py-2.5">Format</th>
@@ -744,18 +792,18 @@ export default function CalendarPage() {
                         <td className="px-3 py-2.5 max-w-[200px] truncate italic text-muted-foreground">
                           {r.caption || "—"}
                         </td>
-                        <td className="px-3 py-2.5 font-mono text-[10px]">{r.dateValue || "—"}</td>
+                        <td className="px-3 py-2.5 font-mono text-xs">{r.dateValue || "—"}</td>
                         <td className="px-3 py-2.5">
                           {r.errors.length > 0 ? (
-                            <span className="text-[10px] font-bold text-destructive" title={r.errors.join("; ")}>
+                            <span className="text-xs font-bold text-destructive" title={r.errors.join("; ")}>
                               Skipped: {r.errors[0]}
                             </span>
                           ) : r.warnings.length > 0 ? (
-                            <span className="text-[10px] font-bold text-warning" title={r.warnings.join("; ")}>
+                            <span className="text-xs font-bold text-warning" title={r.warnings.join("; ")}>
                               Warning: {r.warnings[0]}
                             </span>
                           ) : (
-                            <span className="text-[10px] font-bold text-emerald-600">Ready</span>
+                            <span className="text-xs font-bold text-emerald-600">Ready</span>
                           )}
                         </td>
                       </tr>
@@ -763,7 +811,7 @@ export default function CalendarPage() {
                   </tbody>
                 </table>
                 {csvValidation.results.length > 8 && (
-                  <div className="border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
+                  <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
                     …and {csvValidation.results.length - 8} more row
                     {csvValidation.results.length - 8 === 1 ? "" : "s"} (validated the same way).
                   </div>
@@ -833,8 +881,10 @@ export default function CalendarPage() {
               key={v.id}
               type="button"
               onClick={() => setView(v.id)}
+              aria-pressed={view === v.id}
               className={cn(
-                "flex-1 md:flex-none inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition active:scale-95",
+                "flex-1 md:flex-none items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition active:scale-95",
+                v.id === "month" ? "hidden md:inline-flex" : "inline-flex",
                 view === v.id
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:text-foreground"
@@ -855,7 +905,7 @@ export default function CalendarPage() {
               {WEEK_LABELS.map((w) => (
                 <div
                   key={w}
-                  className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
+                  className="px-3 py-2.5 text-xs font-bold uppercase tracking-wider text-muted-foreground"
                 >
                   {w}
                 </div>
@@ -900,7 +950,7 @@ export default function CalendarPage() {
                         <button
                           type="button"
                           onClick={() => setEditing(blankCalendarEntry(dateStr, brandsList[0]))}
-                          className="grid h-5 w-5 place-items-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-surface-3 transition-opacity"
+                          className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground opacity-100 hover:bg-surface-3 transition-colors md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
                           aria-label="Add calendar entry"
                           title="Add calendar entry"
                         >
@@ -911,15 +961,17 @@ export default function CalendarPage() {
 
                     <div className="space-y-2">
                       {dayEntries.slice(0, 3).map((e) => (
-                        <div
+                        <button
+                          type="button"
                           key={e.id}
                           draggable
                           onDragStart={(evt) => handleDragStart(evt, e.id)}
                           onClick={() => setEditing(e)}
-                          className="relative flex flex-col gap-1.5 rounded-lg border border-border bg-surface p-2 cursor-grab active:cursor-grabbing hover:border-border-strong hover:shadow-xs transition-all text-[10px]"
+                          className="relative flex w-full flex-col gap-1.5 rounded-lg border border-border bg-surface p-2 text-left cursor-grab active:cursor-grabbing hover:border-border-strong hover:shadow-xs transition-colors text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-label={`Edit ${e.brand} ${e.format} planned for ${e.date}`}
                         >
                           <div className="flex items-center gap-1.5">
-                            <div className="h-6 w-6 rounded bg-gradient-to-br from-primary/10 to-primary/30 flex items-center justify-center font-bold text-[8px] text-primary shrink-0">
+                            <div className="h-6 w-6 rounded bg-primary/10 flex items-center justify-center font-bold text-[8px] text-primary shrink-0">
                               {e.format[0]}
                             </div>
                             <div className="min-w-0 flex-1 leading-tight">
@@ -927,22 +979,22 @@ export default function CalendarPage() {
                                 {e.account}
                               </span>
                               {e.time && (
-                                <span className="text-[8px] text-muted-foreground font-semibold">{e.time}</span>
+                                <span className="text-xs text-muted-foreground font-semibold">{e.time}</span>
                               )}
                             </div>
                           </div>
                           <div className="flex items-center justify-between gap-1.5 border-t border-border/40 pt-1.5">
-                            <span className="rounded border border-border bg-surface-2 px-1 py-0.5 text-[8px] font-bold text-muted-foreground font-mono">
+                            <span className="rounded border border-border bg-surface-2 px-1 py-0.5 text-xs font-bold text-muted-foreground font-mono">
                               {e.format}
                             </span>
                             {e.status && (
-                              <span className="truncate rounded-full bg-primary/10 px-1.5 py-0.5 text-[8px] font-bold text-primary">{e.status}</span>
+                              <span className="truncate rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-bold text-primary">{e.status}</span>
                             )}
                           </div>
-                        </div>
+                        </button>
                       ))}
                       {dayEntries.length > 3 && (
-                        <div className="px-1 text-[8px] font-bold text-primary">
+                        <div className="px-1 text-xs font-bold text-primary">
                           +{dayEntries.length - 3} posts
                         </div>
                       )}
@@ -957,17 +1009,59 @@ export default function CalendarPage() {
         {/* LIST VIEW */}
         {view === "list" && (
           <section className="overflow-hidden rounded-xl border border-border bg-surface/30 shadow-[var(--shadow-soft)]">
-            <div className="overflow-x-auto">
+            <div className="space-y-3 p-3 md:hidden">
+              {monthEntries
+                .slice()
+                .sort((a, b) => (a.date + (a.time ?? "")).localeCompare(b.date + (b.time ?? "")))
+                .map((entry) => (
+                  <button
+                    type="button"
+                    key={entry.id}
+                    onClick={() => setEditing(entry)}
+                    className="w-full rounded-xl border border-border bg-surface p-4 text-left transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-bold text-foreground">{entry.brand}</div>
+                        <div className="mt-1 text-xs font-semibold text-muted-foreground">
+                          {formatDayLabel(entry.date)}{entry.time ? ` at ${entry.time}` : ""}
+                        </div>
+                      </div>
+                      <span className="rounded-lg border border-border bg-surface-2 px-2 py-1 text-xs font-semibold text-muted-foreground">
+                        {entry.format}
+                      </span>
+                    </div>
+                    {(entry.title || entry.caption) && (
+                      <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">
+                        {entry.title || entry.caption}
+                      </p>
+                    )}
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-muted-foreground">
+                      <span>{entry.status || "No workflow status"}</span>
+                      <span aria-hidden="true">·</span>
+                      <span>{entry.source === "import" ? "Spreadsheet import" : "Created manually"}</span>
+                    </div>
+                  </button>
+                ))}
+              {monthEntries.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                  No planned content this month. Add an entry or import a CSV/XLSX calendar.
+                </div>
+              )}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-sm text-left">
                 <thead>
-                  <tr className="border-b border-border bg-surface-2/60 text-[9px] uppercase tracking-wider text-muted-foreground font-bold">
+                  <tr className="border-b border-border bg-surface-2/60 text-xs uppercase tracking-wider text-muted-foreground font-bold">
                     <th className="px-6 py-4 font-semibold">Date</th>
                     <th className="px-6 py-4 font-semibold">Time</th>
-                    <th className="px-6 py-4 font-semibold">Account</th>
+                    <th className="px-6 py-4 font-semibold">Brand</th>
                     <th className="px-6 py-4 font-semibold">Format</th>
                     <th className="px-6 py-4 font-semibold">Caption Preview</th>
                     <th className="px-6 py-4 font-semibold">PIC</th>
                     <th className="px-6 py-4 font-semibold">Status</th>
+                    <th className="px-6 py-4 font-semibold">Origin</th>
+                    <th className="px-6 py-4 font-semibold"><span className="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -982,13 +1076,12 @@ export default function CalendarPage() {
                       return (
                         <tr
                           key={r.id}
-                          onClick={() => setEditing(r)}
-                          className="cursor-pointer hover:bg-surface-2/40 transition-colors group/row"
+                          className="hover:bg-surface-2/40 transition-colors group/row"
                         >
                           <td className="px-6 py-4 align-middle">
                             <div className="flex items-center gap-3">
                               <div className="flex flex-col items-center justify-center shrink-0 w-11 h-11 rounded-lg bg-surface-2 border border-border transition-colors group-hover/row:border-primary/30">
-                                <span className="text-[9px] uppercase font-extrabold text-muted-foreground/80 tracking-wider leading-none">
+                                <span className="text-xs uppercase font-extrabold text-muted-foreground/80 tracking-wider leading-none">
                                   {weekday}
                                 </span>
                                 <span className="text-sm font-extrabold text-foreground leading-none mt-1">
@@ -999,6 +1092,14 @@ export default function CalendarPage() {
                                 {dateObj.toLocaleDateString("en-US", { month: "short", year: "numeric" })}
                               </span>
                             </div>
+                          </td>
+                          <td className="px-6 py-4 align-middle text-xs font-semibold text-muted-foreground">
+                            {r.source === "import" ? "Spreadsheet import" : "Created manually"}
+                          </td>
+                          <td className="px-6 py-4 align-middle text-right">
+                            <button type="button" onClick={() => setEditing(r)} className="h-9 rounded-lg border border-border bg-surface px-3 text-xs font-bold text-foreground hover:bg-surface-2">
+                              Edit
+                            </button>
                           </td>
                           <td className="px-6 py-4 align-middle font-mono text-xs font-semibold">
                             {r.time ?? "—"}
@@ -1023,7 +1124,7 @@ export default function CalendarPage() {
                           </td>
                           <td className="px-6 py-4 align-middle">
                             {r.status ? (
-                              <span className="rounded-full border border-border bg-surface-2 px-2 py-1 text-[10px] font-bold">{r.status}</span>
+                              <span className="rounded-full border border-border bg-surface-2 px-2 py-1 text-xs font-bold">{r.status}</span>
                             ) : "—"}
                           </td>
                         </tr>
@@ -1031,7 +1132,7 @@ export default function CalendarPage() {
                     })}
                   {monthEntries.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-6 py-10 text-center text-xs text-muted-foreground">
+                      <td colSpan={9} className="px-6 py-10 text-center text-xs text-muted-foreground">
                         No planned content this month. Add an entry or import a CSV/XLSX calendar.
                       </td>
                     </tr>
@@ -1095,7 +1196,7 @@ function EntryModal({
       >
         <div className="flex items-start justify-between border-b border-border p-4">
           <div>
-            <div className="text-[9px] font-bold uppercase tracking-wider text-primary">
+            <div className="text-xs font-bold uppercase tracking-wider text-primary">
               {draft.id.startsWith("new:") ? "New Calendar Entry" : "Edit Calendar Entry"}
             </div>
             <h3 className="mt-1 font-display text-sm font-bold">
@@ -1131,7 +1232,7 @@ function EntryModal({
               value={draft.brand_id || ""}
               onChange={(e) => {
                 const brand = brands.find((item) => item.id === e.target.value);
-                setDraft({ ...draft, brand_id: brand?.id || null, brand: brand?.name || "Unassigned", account: brand ? brandHandle(brand.name) : "Unassigned" });
+                setDraft({ ...draft, brand_id: brand?.id || null, brand: brand?.name || "Unassigned", account: brand?.name || "Unassigned" });
               }}
               className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
             >
@@ -1141,8 +1242,8 @@ function EntryModal({
           </ModalField>
 
           <ModalField label="Content Type">
-            <select value={draft.format} onChange={(e) => setDraft({ ...draft, format: e.target.value as ContentFormat })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary">
-              <option value="Reels">Reels</option><option value="Carousel">Carousel</option><option value="Single Image">Single Image</option>
+            <select value={draft.format} onChange={(e) => setDraft({ ...draft, format: e.target.value as CalendarEntry["format"] })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary">
+              <option value="Unspecified">Unspecified</option><option value="Reels">Reels</option><option value="Carousel">Carousel</option><option value="Single Image">Single Image</option>
             </select>
           </ModalField>
 
@@ -1218,7 +1319,7 @@ function EntryModal({
 function ModalField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <div className="mb-1 text-[9px] font-bold uppercase tracking-wider text-muted-foreground/80">
+      <div className="mb-1 text-xs font-bold text-muted-foreground">
         {label}
       </div>
       {children}
@@ -1328,11 +1429,12 @@ function csvEscape(value: string): string {
   return safe;
 }
 
-function normalizeFormat(value: unknown): ContentFormat {
+function normalizeFormat(value: unknown): CalendarEntry["format"] {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized.includes("reel") || normalized === "video") return "Reels";
   if (normalized.includes("carousel") || normalized.includes("slide")) return "Carousel";
-  return "Single Image";
+  if (normalized.includes("single") || normalized.includes("image") || normalized.includes("photo")) return "Single Image";
+  return "Unspecified";
 }
 
 function normalizeDate(value: unknown): string {
@@ -1433,7 +1535,7 @@ function blankCalendarEntry(date: string, brand?: Brand): CalendarEntry {
     id: `new:${date}:${Date.now()}`,
     date,
     time: "19:00",
-    account: brand ? brandHandle(brand.name) : "Unassigned",
+    account: brand?.name || "Unassigned",
     brand: brand?.name || "Unassigned",
     brand_id: brand?.id || null,
     format: "Single Image",
@@ -1443,5 +1545,7 @@ function blankCalendarEntry(date: string, brand?: Brand): CalendarEntry {
     voiceOver: null,
     pic: "",
     status: null,
+    source: "manual",
+    createdAt: null,
   };
 }

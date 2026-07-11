@@ -14,6 +14,7 @@ export async function GET() {
 
     const ownedBrands = await getOwnedBrands(supabase, user.id);
     const brandIds = ownedBrands.map((brand) => brand.id);
+    const ownedNiches = Array.from(new Set(ownedBrands.map((brand) => brand.niche).filter(Boolean)));
     if (brandIds.length === 0) {
       return NextResponse.json({
         totalPredictions: 0, totalModels: 0, totalBrands: 0,
@@ -22,7 +23,23 @@ export async function GET() {
       });
     }
 
-    const [totalResult, highResult, averageResult, lowResult, confidenceResult, recentResult, modelResult, modelScopeResult] =
+    const personalModels = supabase
+      .from("models")
+      .select("id, accuracy, created_at, brand_id, niche, model_type, brands(name)")
+      .eq("model_type", "account")
+      .in("brand_id", brandIds)
+      .contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" });
+    const cohortModels = ownedNiches.length > 0
+      ? supabase
+          .from("models")
+          .select("id, accuracy, created_at, brand_id, niche, model_type, brands(name)")
+          .eq("model_type", "niche")
+          .is("brand_id", null)
+          .in("niche", ownedNiches)
+          .contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" })
+      : Promise.resolve({ data: [], error: null });
+
+    const [totalResult, highResult, averageResult, lowResult, confidenceResult, recentResult, personalModelResult, cohortModelResult] =
       await Promise.all([
         supabase.from("predictions").select("*", { count: "exact", head: true }).in("brand_id", brandIds).eq("created_by", user.id),
         supabase.from("predictions").select("*", { count: "exact", head: true }).in("brand_id", brandIds).eq("created_by", user.id).eq("pred_class", "HIGH"),
@@ -30,13 +47,13 @@ export async function GET() {
         supabase.from("predictions").select("*", { count: "exact", head: true }).in("brand_id", brandIds).eq("created_by", user.id).eq("pred_class", "LOW"),
         supabase.from("predictions").select("features").in("brand_id", brandIds).eq("created_by", user.id).order("created_at", { ascending: false }).limit(50),
         supabase.from("predictions").select("id, caption, pred_class, created_at, features, brands(name)").in("brand_id", brandIds).eq("created_by", user.id).order("created_at", { ascending: false }).limit(5),
-        supabase.from("models").select("id, accuracy, created_at").contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" }).order("created_at", { ascending: false }).limit(14),
-        supabase.from("models").select("brand_id, niche, model_type").contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" }),
+        personalModels,
+        cohortModels,
       ]);
 
     const firstError = [
       totalResult.error, highResult.error, averageResult.error, lowResult.error,
-      confidenceResult.error, recentResult.error, modelResult.error, modelScopeResult.error,
+      confidenceResult.error, recentResult.error, personalModelResult.error, cohortModelResult.error,
     ].find(Boolean);
     if (firstError) throw firstError;
 
@@ -51,17 +68,24 @@ export async function GET() {
       ? `${(confidences.reduce((sum, value) => sum + value, 0) / confidences.length).toFixed(1)}%`
       : "—";
 
-    const accuracyTrend = (modelResult.data || []).slice().reverse()
+    const relevantModels = [
+      ...(personalModelResult.data || []),
+      ...(cohortModelResult.data || []),
+    ].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const accuracyTrend = relevantModels.slice(0, 8).reverse()
       .filter((model: any) => Number(model.accuracy) > 0)
       .map((model: any) => {
         const date = new Date(model.created_at);
         return {
-          day: `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`,
+          label: `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`,
           accuracy: Number(model.accuracy) * 100,
+          scope: model.model_type === "account"
+            ? `Personal: ${model.brands?.name || "Owned brand"}`
+            : `Cohort: ${model.niche || "Unknown"}`,
         };
       });
     const modelScopes = new Set(
-      (modelScopeResult.data || [])
+      relevantModels
         .map((model: any) => model.model_type === "account" ? `account:${model.brand_id}` : `cohort:${model.niche}`)
         .filter((key: string) => !key.endsWith(":null"))
     );
@@ -86,7 +110,7 @@ export async function GET() {
   } catch (error: any) {
     console.error("[BFF Dashboard] Failed to fetch dashboard aggregates:", error);
     return NextResponse.json(
-      { status: "error", message: error.message || "Failed to fetch dashboard metrics" },
+      { status: "error", message: "Dashboard data is temporarily unavailable." },
       { status: 503 }
     );
   }

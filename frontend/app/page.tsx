@@ -36,18 +36,7 @@ export default function Page() {
   };
 
   return (
-    <div className="light relative flex min-h-screen w-full items-center justify-center bg-background px-4 py-12 text-foreground">
-      {/* Subtle background glow */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed -top-40 left-1/2 h-[600px] w-[600px] -translate-x-1/2 rounded-full"
-        style={{
-          background:
-            "radial-gradient(circle, color-mix(in oklab, hsl(var(--primary-glow)) 20%, transparent), transparent 70%)",
-          filter: "blur(100px)",
-        }}
-      />
-
+    <div className="relative flex min-h-[100dvh] w-full items-center justify-center bg-background px-4 py-12 text-foreground">
       {/* Auth card */}
       <div className="relative w-full max-w-sm animate-[fade-in_0.4s_ease-out]">
         {/* Logo + brand */}
@@ -56,7 +45,7 @@ export default function Page() {
             <div className="font-display text-xl font-semibold tracking-tight">
               FAIV<span className="text-primary"> Predict</span>
             </div>
-            <div className="mt-0.5 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            <div className="mt-1 text-xs font-semibold text-muted-foreground">
               Performance Analytics
             </div>
           </div>
@@ -74,7 +63,7 @@ export default function Page() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {authError && (
-              <div className="rounded-xl border border-destructive/25 bg-destructive/[0.06] p-3 text-xs font-medium text-destructive text-center">
+              <div role="alert" className="rounded-xl border border-destructive/25 bg-destructive/[0.06] p-3 text-xs font-medium text-destructive text-center">
                 {authError}
               </div>
             )}
@@ -82,6 +71,7 @@ export default function Page() {
               icon={<Mail className="h-4 w-4" />}
               label="Email"
               type="email"
+              autoComplete="email"
               placeholder="you@studio.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -90,6 +80,7 @@ export default function Page() {
               icon={<Lock className="h-4 w-4" />}
               label="Password"
               type="password"
+              autoComplete="current-password"
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -97,20 +88,17 @@ export default function Page() {
 
             <button
               type="submit"
+              aria-busy={loading}
               disabled={loading}
-              className="group relative mt-1 flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-primary px-5 py-3.5 text-sm font-semibold text-primary-foreground transition-all duration-300 hover:shadow-[var(--shadow-glow-purple)] disabled:opacity-70"
+              className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 text-sm font-semibold text-primary-foreground transition-colors duration-200 hover:bg-primary/92 disabled:opacity-70"
             >
               <span className="relative z-10">
                 {loading ? "Signing in…" : "Sign in"}
               </span>
-              <ArrowRight className="relative z-10 h-4 w-4 transition-transform group-hover:translate-x-1" />
-              <span
-                aria-hidden
-                className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full"
-              />
+              <ArrowRight className="h-4 w-4" />
             </button>
 
-            <p className="pt-1 text-center text-[11px] text-muted-foreground">
+            <p className="pt-1 text-center text-xs text-muted-foreground">
               Accounts are provisioned by the workspace administrator.
             </p>
           </form>

@@ -16,3 +16,4 @@ export async function getOwnedBrands(supabase: SupabaseClient, userId: string) {
   }
   return data || [];
 }
+

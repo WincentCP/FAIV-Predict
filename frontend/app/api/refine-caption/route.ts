@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { publicErrorResponse, readJsonObject } from "@/lib/http-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,7 @@ const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.5-flash";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
     const { visual_concept, caption, brand, format } = body;
 
     if (typeof caption !== "string" || !caption.trim()) {
@@ -19,6 +20,16 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+    if (caption.length > 5000) {
+      return NextResponse.json(
+        { status: "error", message: "Caption must be at most 5,000 characters." },
+        { status: 400 }
+      );
+    }
+
+    const safeBrand = typeof brand === "string" ? brand.slice(0, 160) : "Unknown brand";
+    const safeFormat = typeof format === "string" ? format.slice(0, 80) : "Single Image";
+    const safeConcept = typeof visual_concept === "string" ? visual_concept.slice(0, 4000) : "None provided";
 
     if (!LLM_API_KEY) {
       return NextResponse.json(
@@ -34,11 +45,11 @@ export async function POST(request: Request) {
 You are an experienced social media strategist.
 
 Context:
-Brand: ${brand || "Unknown brand"}
-Format: ${format || "Single Image"}
+Brand: ${safeBrand || "Unknown brand"}
+Format: ${safeFormat || "Single Image"}
 
 Visual Concept:
-${visual_concept || "None provided"}
+${safeConcept || "None provided"}
 
 Current Caption:
 ${caption}
@@ -71,8 +82,7 @@ Output Requirements:
     );
 
     if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.warn(`[BFF Refine] Gemini API call failed: ${geminiRes.status} - ${errText}`);
+      console.warn(`[BFF Refine] Gemini API call failed with status ${geminiRes.status}.`);
       return NextResponse.json(
         { status: "error", message: "Failed to fetch response from AI engine." },
         { status: 502 }
@@ -93,11 +103,8 @@ Output Requirements:
       status: "success",
       suggestions: suggestion.trim(),
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("[BFF Refine] Error generating caption refinement:", error);
-    return NextResponse.json(
-      { status: "error", message: error.message || "Failed to refine caption." },
-      { status: 500 }
-    );
+    return publicErrorResponse(error, "Caption refinement could not be completed.", 500);
   }
 }

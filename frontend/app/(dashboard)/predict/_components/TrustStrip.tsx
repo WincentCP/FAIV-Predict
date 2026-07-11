@@ -28,8 +28,8 @@ export function TrustStrip({
   outOfRange: string[];
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-surface/50 p-4 text-[10px] font-bold backdrop-blur">
-      <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-surface/50 p-4 text-xs font-bold backdrop-blur">
+      <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
         Scored by:
       </span>
       <Chip icon={<Cpu className="h-3 w-3" />}>
@@ -95,3 +95,4 @@ function Chip({
     </span>
   );
 }
+

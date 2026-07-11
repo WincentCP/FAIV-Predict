@@ -192,3 +192,4 @@ class DataPreprocessor:
             return "AVERAGE"
         else:
             return "HIGH"
+

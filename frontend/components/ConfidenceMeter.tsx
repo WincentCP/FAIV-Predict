@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { motion, useMotionValue, useTransform, animate } from "framer-motion";
+import { animate, motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion";
 
 interface ConfidenceMeterProps {
   value: number; // 0-100
@@ -19,18 +19,19 @@ export function ConfidenceMeter({
   const stroke = 12;
   const radius = (size - stroke - 30) / 2; // Extra padding for outer decorative rings
   const circumference = 2 * Math.PI * radius;
+  const clampedValue = Math.min(100, Math.max(0, value));
   const motionVal = useMotionValue(0);
   const dash = useTransform(motionVal, (v) => circumference - (v / 100) * circumference);
-  const [displayed, setDisplayed] = React.useState(0);
+  const prefersReducedMotion = useReducedMotion();
+  const gradientId = `confidence-${React.useId().replace(/:/g, "")}`;
 
   React.useEffect(() => {
-    const controls = animate(motionVal, value, {
-      duration: 1.6,
-      ease: [0.25, 1, 0.5, 1],
-      onUpdate: (v) => setDisplayed(Math.round(v)),
+    const controls = animate(motionVal, clampedValue, {
+      duration: prefersReducedMotion ? 0 : 0.32,
+      ease: [0.2, 0, 0, 1],
     });
     return controls.stop;
-  }, [value, motionVal]);
+  }, [clampedValue, motionVal, prefersReducedMotion]);
 
   // Clean the tier string to match cases
   const parsedTier = React.useMemo(() => {
@@ -47,41 +48,29 @@ export function ConfidenceMeter({
     switch (parsedTier) {
       case "High":
         return {
-          gradientId: "high-conf-grad",
           colorStart: "#10B981", // Emerald 500
           colorEnd: "#84CC16", // Lime 500
-          glow: "rgba(16, 185, 129, 0.4)",
-          glowStrong: "rgba(16, 185, 129, 0.8)",
           labelColor: "text-emerald-500 dark:text-emerald-400",
           innerBg: "rgba(16, 185, 129, 0.03)"
         };
       case "Average":
         return {
-          gradientId: "average-conf-grad",
           colorStart: "#F59E0B", // Amber 500
           colorEnd: "#F97316", // Orange 500
-          glow: "rgba(245, 158, 11, 0.35)",
-          glowStrong: "rgba(245, 158, 11, 0.7)",
           labelColor: "text-amber-500 dark:text-amber-400",
           innerBg: "rgba(245, 158, 11, 0.03)"
         };
       case "Low":
         return {
-          gradientId: "low-conf-grad",
           colorStart: "#EF4444", // Red 500
           colorEnd: "#F43F5E", // Rose 500
-          glow: "rgba(239, 68, 68, 0.35)",
-          glowStrong: "rgba(239, 68, 68, 0.7)",
           labelColor: "text-red-500 dark:text-red-400",
           innerBg: "rgba(239, 68, 68, 0.03)"
         };
       default:
         return {
-          gradientId: "default-conf-grad",
           colorStart: "hsl(var(--primary))",
           colorEnd: "hsl(var(--primary-glow, 270 91% 65%))",
-          glow: "rgba(168, 85, 247, 0.4)",
-          glowStrong: "rgba(168, 85, 247, 0.7)",
           labelColor: "text-primary",
           innerBg: "rgba(168, 85, 247, 0.03)"
         };
@@ -89,35 +78,24 @@ export function ConfidenceMeter({
   }, [parsedTier]);
 
   return (
-    <div className="relative grid place-items-center select-none" style={{ width: size, height: size }}>
-      
-      {/* Dynamic Glow Sphere in background */}
-      <div 
-        className="absolute rounded-full filter blur-2xl opacity-20 transition-all duration-1000"
-        style={{ 
-          width: size - 60, 
-          height: size - 60, 
-          background: `radial-gradient(circle, ${theme.colorStart} 0%, transparent 70%)`,
-          boxShadow: `0 0 40px ${theme.glow}`
-        }} 
-      />
+    <div
+      className="relative grid place-items-center select-none"
+      style={{ width: size, height: size }}
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(clampedValue)}
+      aria-valuetext={`${Math.round(clampedValue)} percent${tier ? `, ${parsedTier} potential` : ""}`}
+    >
 
       {/* SVG Dial System */}
       <svg width={size} height={size} className="-rotate-90 overflow-visible">
         <defs>
-          <linearGradient id={theme.gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+          <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor={theme.colorStart} />
             <stop offset="100%" stopColor={theme.colorEnd} />
           </linearGradient>
-          
-          {/* Subtle drop shadow filter */}
-          <filter id="neon-glow" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="8" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
         </defs>
 
         {/* 1. Outer Tech Dotted Ring */}
@@ -160,11 +138,10 @@ export function ConfidenceMeter({
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke={`url(#${theme.gradientId})`}
+          stroke={`url(#${gradientId})`}
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={circumference}
-          filter="url(#neon-glow)"
           style={{ 
             strokeDashoffset: dash,
           }}
@@ -196,18 +173,18 @@ export function ConfidenceMeter({
         <div className="space-y-1">
           {/* Animated score number */}
           <div className="font-display text-[42px] font-black leading-none tracking-tight text-foreground flex items-baseline justify-center">
-            <span className="tabular-nums transition-all">{displayed}</span>
+            <span className="tabular-nums">{Math.round(clampedValue)}</span>
             <span className="text-lg font-bold text-muted-foreground ml-0.5">%</span>
           </div>
           
           {/* Metric label */}
-          <div className="text-[9px] uppercase tracking-[0.2em] font-extrabold text-muted-foreground/90">
+          <div className="text-xs uppercase tracking-[0.16em] font-extrabold text-muted-foreground/90">
             {label}
           </div>
 
           {/* Dynamic Small Badge Indicator inside the core */}
           {tier && (
-            <div className={`text-[8.5px] uppercase font-black tracking-widest leading-none mt-1.5 ${theme.labelColor}`}>
+            <div className={`text-xs uppercase font-black tracking-widest leading-none mt-1.5 ${theme.labelColor}`}>
               {parsedTier} POTENTIAL
             </div>
           )}

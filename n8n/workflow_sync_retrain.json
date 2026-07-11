@@ -1,4 +1,5 @@
 {
+  "id": "faiv-sync-retrain",
   "name": "FAIV Predict - Verified Sync and Retrain",
   "nodes": [
     {
@@ -59,7 +60,8 @@
       "name": "Check Instagram Connections",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [470, 560]
+      "position": [470, 560],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -68,7 +70,7 @@
           "conditions": [
             {
               "id": "any-unhealthy",
-              "leftValue": "={{ $json.connections.length === 0 || $json.connections.some(c => c.status !== 'connected') }}",
+              "leftValue": "={{ !Array.isArray($json.connections) || $json.connections.length === 0 || $json.connections.some(c => c.status !== 'connected') }}",
               "rightValue": true,
               "operator": { "type": "boolean", "operation": "true", "singleValue": true }
             }
@@ -89,7 +91,7 @@
         "toEmail": "={{ $env.NOTIFICATION_TO_EMAIL }}",
         "subject": "=FAIV Predict: Instagram connection needs attention ({{ $now.format('dd/MM/yyyy HH:mm') }})",
         "emailType": "html",
-        "html": "=<h2>Instagram connection health</h2><p>One or more verified brand connections need attention before the next sync.</p><table border=\"1\" cellpadding=\"8\" cellspacing=\"0\"><tr><th>Brand</th><th>Status</th></tr>{{ $json.connections.map(c => '<tr><td>' + c.brand + '</td><td>' + c.status + (c.error ? ': ' + c.error : '') + '</td></tr>').join('') }}</table><p>Review the server-side Meta credential configuration. No user-facing data was substituted.</p>",
+        "html": "=<h2>Instagram connection health</h2><p>One or more verified brand connections need attention before the next sync.</p><table border=\"1\" cellpadding=\"8\" cellspacing=\"0\"><tr><th>Brand</th><th>Status</th></tr>{{ Array.isArray($json.connections) ? $json.connections.map(c => '<tr><td>' + c.brand + '</td><td>' + c.status + (c.error ? ': ' + c.error : '') + '</td></tr>').join('') : '<tr><td colspan=\"2\">Health request failed before connection data was returned.</td></tr>' }}</table><p>Review the server-side Meta credential configuration. No user-facing data was substituted.</p>",
         "options": {}
       },
       "id": "health-email",
@@ -117,7 +119,8 @@
       "name": "Sync Instagram and Retrain",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [470, 260]
+      "position": [470, 260],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -162,7 +165,7 @@
         "toEmail": "={{ $env.NOTIFICATION_TO_EMAIL }}",
         "subject": "=FAIV Predict: sync requires attention ({{ $now.format('dd/MM/yyyy HH:mm') }})",
         "emailType": "html",
-        "html": "=<h2>Sync or retraining was not fully successful</h2><p>Status: {{ $json.status }}</p><pre>{{ JSON.stringify($json.results, null, 2) }}</pre>",
+        "html": "=<h2>Sync or retraining was not fully successful</h2><p>Status: {{ $json.status || 'request failed' }}</p><pre>{{ JSON.stringify($json.results || $json.error || $json, null, 2) }}</pre>",
         "options": {}
       },
       "id": "failure-email",
@@ -199,6 +202,7 @@
     "executionOrder": "v1",
     "timezone": "Asia/Jakarta"
   },
+  "active": false,
   "tags": [
     { "name": "FAIV Predict", "id": "faiv-predict" }
   ]
