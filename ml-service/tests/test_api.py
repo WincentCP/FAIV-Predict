@@ -142,6 +142,20 @@ def test_train_status_without_db_is_honest(monkeypatch):
 # ── v2 feature set + counterfactuals ────────────────────────────────────────
 
 from app.preprocessing import DataPreprocessor, FEATURE_ORDER_V1, FEATURE_ORDER_V2
+from app.train_pipeline import (
+    InsufficientDataError,
+    ModelQualityError,
+    ModelTrainer,
+    build_model_version,
+    build_classification_evidence,
+    build_dataset_evidence,
+)
+from app.thesis_evidence import (
+    configured_brand_ids,
+    effective_models_for_brands,
+    format_markdown,
+    latest_per_scope,
+)
 from app.main import (
     build_counterfactuals,
     _get_brands_config,
@@ -228,6 +242,319 @@ def test_process_dataframe_weekend_across_wib_boundary():
     assert list(X["is_weekend"]) == [1.0, 0.0]
 
 
+def test_sync_training_and_inference_share_one_feature_contract():
+    """Golden evidence that one real post produces the same model vector."""
+    import pandas as pd
+
+    caption = "Promo akhir pekan? Yuk order 🎉 #hemat"
+    inference = DataPreprocessor.extract_features(
+        caption, "Carousel", 3, is_weekend=True
+    )
+    # Friday 20:00 UTC is Saturday 03:00 WIB, matching sync semantics.
+    stored = pd.DataFrame([{
+        "caption": caption,
+        "is_single_image": bool(inference["is_single_image"]),
+        "is_carousel": bool(inference["is_carousel"]),
+        "is_reels": bool(inference["is_reels"]),
+        "post_hour": inference["post_hour"],
+        "caption_length": inference["caption_length"],
+        "hashtag_count": inference["hashtag_count"],
+        "has_cta": bool(inference["has_cta"]),
+        "created_at": "2026-07-03T20:00:00+00:00",
+    }])
+    training, order = DataPreprocessor.process_dataframe(stored)
+
+    assert order == FEATURE_ORDER_V2
+    assert training.iloc[0].to_dict() == inference
+    assert DataPreprocessor.features_to_list(
+        training.iloc[0].to_dict(), order
+    ) == DataPreprocessor.features_to_list(inference, order)
+
+
+def test_classification_evidence_has_fixed_confusion_matrix_and_per_class_metrics():
+    evidence = build_classification_evidence(
+        ["LOW", "AVERAGE", "HIGH", "HIGH"],
+        ["LOW", "LOW", "HIGH", "AVERAGE"],
+    )
+
+    assert evidence["confusion_matrix"] == {
+        "labels": ["LOW", "AVERAGE", "HIGH"],
+        "matrix": [[1, 0, 0], [1, 0, 0], [0, 1, 1]],
+    }
+    assert evidence["per_class"]["HIGH"]["support"] == 2
+    assert evidence["accuracy"] == 0.5
+    assert set(evidence) == {
+        "accuracy", "weighted", "macro", "per_class", "confusion_matrix"
+    }
+
+
+def test_dataset_evidence_is_deterministic_private_and_change_sensitive():
+    import pandas as pd
+
+    source = pd.DataFrame([{
+        "brand_id": "brand-1",
+        "instagram_media_id": "media-1",
+        "caption": "Private caption should not enter evidence",
+        "er": 2.5,
+        "is_single_image": False,
+        "is_carousel": False,
+        "is_reels": True,
+        "post_hour": 19,
+        "created_at": "2026-07-01T12:00:00+00:00",
+    }])
+    features, order = DataPreprocessor.process_dataframe(source)
+    first = build_dataset_evidence(source, features, order)
+    repeated = build_dataset_evidence(source.copy(), features.copy(), order)
+
+    assert first == repeated
+    assert first["verified_posts"] == 1
+    assert first["unique_media_ids"] == 1
+    assert "Private caption" not in json.dumps(first)
+
+    changed = source.copy()
+    changed.loc[0, "er"] = 2.6
+    changed_evidence = build_dataset_evidence(changed, features, order)
+    assert changed_evidence["dataset_sha256"] != first["dataset_sha256"]
+
+
+def test_training_versions_are_collision_resistant_and_sortable():
+    versions = [build_model_version() for _ in range(100)]
+
+    assert len(set(versions)) == len(versions)
+    assert all(len(version) == 29 and version[20] == "_" for version in versions)
+
+
+def test_training_persists_complete_thesis_evaluation_artifact(monkeypatch, tmp_path):
+    import pandas as pd
+
+    base_time = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    rows = []
+    for index in range(60):
+        format_index = index % 3
+        caption = f"Promo ke-{index}? Yuk order #promo" + (" 🎉" if index % 2 else "")
+        rows.append({
+            "brand_id": "brand-1",
+            "instagram_media_id": f"media-{index:03d}",
+            "caption": caption,
+            "er": float(index + 1),
+            "is_single_image": format_index == 0,
+            "is_carousel": format_index == 1,
+            "is_reels": format_index == 2,
+            "post_hour": index % 24,
+            "created_at": base_time + datetime.timedelta(days=index),
+        })
+    dataset = pd.DataFrame(rows)
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        @staticmethod
+        def execute(*_args, **_kwargs):
+            pass
+
+        @staticmethod
+        def fetchone():
+            return ("model-id",)
+
+    class Connection:
+        @staticmethod
+        def cursor(*_args, **_kwargs):
+            return Cursor()
+
+        @staticmethod
+        def commit():
+            pass
+
+        @staticmethod
+        def close():
+            pass
+
+    monkeypatch.setattr("app.train_pipeline.CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        ModelTrainer,
+        "fetch_historical_data",
+        classmethod(lambda cls, brand_id=None, niche=None: dataset.copy()),
+    )
+    monkeypatch.setattr(
+        ModelTrainer,
+        "upload_to_supabase_storage",
+        classmethod(lambda cls, file_path, storage_path: f"https://storage.invalid/{storage_path}"),
+    )
+    monkeypatch.setattr(
+        ModelTrainer,
+        "_get_db_connection",
+        staticmethod(lambda: Connection()),
+    )
+
+    result = ModelTrainer.run_training(niche="Thesis Test")
+    metrics = result["metrics"]
+
+    assert result["status"] == "success"
+    assert metrics["evaluation_contract"] == "faiv-thesis-v1"
+    assert metrics["baseline"]["model"] == "DummyClassifier"
+    assert metrics["candidate"]["confusion_matrix"]["labels"] == [
+        "LOW", "AVERAGE", "HIGH"
+    ]
+    assert len(metrics["dataset"]["dataset_sha256"]) == 64
+    assert len(metrics["training_code_sha256"]) == 64
+    assert metrics["dataset"]["verified_posts"] == 60
+    assert metrics["minimum_post_age_days"] == 7
+    assert metrics["engagement_observation_policy"] == (
+        "cumulative_at_latest_sync_after_maturity_gate"
+    )
+    report_path = tmp_path / result["evaluation_filename"]
+    assert report_path.exists()
+    persisted = json.loads(report_path.read_text(encoding="utf-8"))
+    assert persisted["dataset"] == metrics["dataset"]
+    assert persisted["model_parameters"]["random_state"] == 42
+
+
+def test_training_rejects_candidate_that_does_not_beat_baseline(monkeypatch, tmp_path):
+    import pandas as pd
+
+    rows = []
+    for index in range(60):
+        rows.append({
+            "brand_id": "brand-1",
+            "instagram_media_id": f"constant-{index:03d}",
+            "caption": "same",
+            "er": 0.0 if index < 5 else (1.0 if index < 43 else 2.0),
+            "is_single_image": True,
+            "is_carousel": False,
+            "is_reels": False,
+            "post_hour": 10,
+            "created_at": "2026-01-05T03:00:00+00:00",
+        })
+    dataset = pd.DataFrame(rows)
+
+    monkeypatch.setattr("app.train_pipeline.CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        ModelTrainer,
+        "fetch_historical_data",
+        classmethod(lambda cls, brand_id=None, niche=None: dataset.copy()),
+    )
+    monkeypatch.setattr(
+        ModelTrainer,
+        "upload_to_supabase_storage",
+        classmethod(lambda cls, *_args: pytest.fail("rejected candidate was uploaded")),
+    )
+
+    with pytest.raises(ModelQualityError, match="previous model remains active"):
+        ModelTrainer.run_training(niche="Rejected Candidate")
+
+    reports = list(tmp_path.glob("*.evaluation.json"))
+    assert len(reports) == 1
+    evidence = json.loads(reports[0].read_text(encoding="utf-8"))
+    assert evidence["promotion_gate"]["passed"] is False
+    assert evidence["promotion_gate"]["decision"] == "reject_keep_previous"
+    assert not list(tmp_path.glob("*.joblib"))
+
+
+def test_training_rejects_missing_three_tier_class(monkeypatch):
+    import pandas as pd
+
+    dataset = pd.DataFrame([{
+        "brand_id": "brand-1",
+        "instagram_media_id": f"tied-{index:03d}",
+        "caption": "same",
+        "er": 1.0 if index % 2 else 2.0,
+        "is_single_image": True,
+        "is_carousel": False,
+        "is_reels": False,
+        "post_hour": 10,
+        "created_at": datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        + datetime.timedelta(days=index),
+    } for index in range(60)])
+    monkeypatch.setattr(
+        ModelTrainer,
+        "fetch_historical_data",
+        classmethod(lambda cls, brand_id=None, niche=None: dataset.copy()),
+    )
+
+    with pytest.raises(InsufficientDataError, match="three-tier model"):
+        ModelTrainer.run_training(niche="Tied Labels")
+
+
+def test_rejected_evaluation_cache_is_bounded_without_deleting_promoted_evidence(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr("app.train_pipeline.CACHE_DIR", str(tmp_path))
+    prefix = "model_niche_Fitness_"
+    for index in range(7):
+        (tmp_path / f"{prefix}{index}.evaluation.json").write_text(
+            "{}", encoding="utf-8"
+        )
+    promoted_evidence = tmp_path / f"{prefix}promoted.evaluation.json"
+    promoted_evidence.write_text("{}", encoding="utf-8")
+    (tmp_path / f"{prefix}promoted.joblib").write_bytes(b"model")
+
+    ModelTrainer._cleanup_rejected_evaluations("niche", "Fitness", keep_limit=5)
+
+    rejected = [
+        path for path in tmp_path.glob(f"{prefix}*.evaluation.json")
+        if path != promoted_evidence
+    ]
+    assert len(rejected) == 5
+    assert promoted_evidence.exists()
+
+
+def test_thesis_evidence_export_selects_latest_scope_and_omits_secrets():
+    metrics = {
+        "accuracy": 0.75,
+        "candidate": {"accuracy": 0.75, "macro": {"f1_score": 0.7}},
+        "baseline": {"accuracy": 0.4},
+        "accuracy_gain_over_baseline": 0.35,
+        "train_samples": 48,
+        "test_samples": 12,
+        "dataset": {"dataset_sha256": "a" * 64, "verified_posts": 60},
+        "training_code_sha256": "b" * 64,
+        "evaluation_contract": "faiv-thesis-v1",
+    }
+    rows = [
+        {"brand_id": "brand-1", "brand_name": "Bison Gym", "version": "2", "model_type": "account", "metrics": metrics},
+        {"brand_id": "brand-1", "brand_name": "Bison Gym", "version": "1", "model_type": "account", "metrics": metrics},
+    ]
+
+    latest = latest_per_scope(rows)
+    rendered = format_markdown(latest)
+    assert len(latest) == 1
+    assert "Bison Gym" in rendered
+    assert "faiv-thesis-v1" in rendered
+    assert "DATABASE_URL" not in rendered
+    assert "access_token" not in rendered
+
+
+def test_thesis_evidence_scope_uses_only_valid_explicit_and_configured_brands(monkeypatch):
+    first = "7c8316af-6692-481d-b6f7-2e5483afa5e1"
+    second = "d2850e10-2788-4833-be1b-cbbb782b68e9"
+    monkeypatch.setenv(
+        "IG_BRANDS_JSON",
+        json.dumps([
+            {"brand_id": first, "access_token": "must-not-be-returned"},
+            {"brand_id": "invalid"},
+        ]),
+    )
+
+    assert configured_brand_ids([second, first, "also-invalid"]) == [second, first]
+
+
+def test_thesis_evidence_uses_served_account_model_instead_of_legacy_cohort():
+    rows = [
+        {"id": "account-new", "brand_id": "brand-1", "model_type": "account", "niche": None},
+        {"id": "cohort-old", "brand_id": None, "model_type": "niche", "niche": "Fitness"},
+    ]
+    selected = effective_models_for_brands(
+        rows,
+        [{"id": "brand-1", "niche": "Fitness"}],
+    )
+
+    assert [row["id"] for row in selected] == ["account-new"]
+
+
 def _tiny_model(classes=("HIGH", "AVERAGE", "LOW"), n_features=10):
     import numpy as np
     from sklearn.ensemble import RandomForestClassifier
@@ -279,6 +606,7 @@ def test_predict_success_contract_uses_real_bundle_outputs(monkeypatch):
         "time_known": True,
         "scenario_hours": [],
         "scenario_support_basis": "exact_time",
+        "scenario_weights": [],
         "input_hash": body["prediction_context"]["input_hash"],
         "feature_schema_version": body["prediction_context"]["feature_schema_version"],
     }
@@ -301,6 +629,7 @@ def test_predict_without_post_time_is_explicitly_provisional(monkeypatch):
             "hashtag_count": [0.0, 5.0],
             "emoji_count": [0.0, 2.0],
         },
+        "post_hour_support": {"8": 1, "20": 3},
     }
     metadata = {
         "id": "model-optional-time",
@@ -324,12 +653,13 @@ def test_predict_without_post_time_is_explicitly_provisional(monkeypatch):
     assert body["prediction_context"] == {
         "status": "provisional",
         "time_known": False,
-        "scenario_hours": list(range(8, 21)),
-        "scenario_support_basis": "training_range",
+        "scenario_hours": [8, 20],
+        "scenario_support_basis": "empirical_training_distribution",
+        "scenario_weights": [0.25, 0.75],
         "input_hash": body["prediction_context"]["input_hash"],
         "feature_schema_version": body["prediction_context"]["feature_schema_version"],
     }
-    assert "training-range hours 8:00 through 20:00 equally" in body["counterfactuals_note"]
+    assert "frequency-weighted hours observed" in body["counterfactuals_note"]
     assert "post_hour" not in body["out_of_range"]
     assert len(body["counterfactuals"]) == 1
     assert body["counterfactuals"][0]["parameter"] == "post_hour"
@@ -756,13 +1086,15 @@ def test_instagram_media_sync_updates_by_source_id_without_deleting_history():
             return self.fetchone_values.pop(0)
 
     cursor = Cursor()
+    caption = "Verified promo? Yuk order 🎉 #one"
     result = _upsert_instagram_media(cursor, "brand-id", {
         "id": "ig-media-1",
-        "caption": "Verified post #one",
+        "caption": caption,
         "like_count": 10,
         "comments_count": 5,
-        "media_type": "IMAGE",
-        "timestamp": "2026-07-01T12:00:00+0000",
+        "media_type": "CAROUSEL_ALBUM",
+        # Friday 20:00 UTC = Saturday 03:00 WIB.
+        "timestamp": "2026-07-03T20:00:00+0000",
     }, current_followers=1000)
 
     assert result == "updated"
@@ -771,6 +1103,31 @@ def test_instagram_media_sync_updates_by_source_id_without_deleting_history():
     assert "instagram_media_id" in update_query
     assert update_params[2] == 15.0  # preserved 100-follower snapshot, not current 1,000
     assert update_params[3] == 100
+    expected = DataPreprocessor.extract_features(caption, "Carousel", 3, is_weekend=True)
+    assert update_params[4:11] == (
+        bool(expected["is_single_image"]),
+        bool(expected["is_carousel"]),
+        bool(expected["is_reels"]),
+        int(expected["post_hour"]),
+        int(expected["caption_length"]),
+        int(expected["hashtag_count"]),
+        bool(expected["has_cta"]),
+    )
+
+
+def test_instagram_media_sync_rejects_unknown_media_type():
+    class Cursor:
+        pass
+
+    with pytest.raises(ValueError, match="Unsupported Instagram media type"):
+        _upsert_instagram_media(Cursor(), "brand-id", {
+            "id": "ig-media-future",
+            "caption": "Future format",
+            "like_count": 1,
+            "comments_count": 0,
+            "media_type": "FUTURE_FORMAT",
+            "timestamp": "2026-07-03T20:00:00+0000",
+        }, current_followers=100)
 
 
 def test_model_loader_rejects_artifact_without_verified_post_provenance(monkeypatch):

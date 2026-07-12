@@ -216,6 +216,7 @@ export async function POST(request: Request) {
         time_known: timeKnown,
         scenario_hours: [],
         scenario_support_basis: timeKnown ? "exact_time" : "unknown",
+        scenario_weights: [],
         input_hash: null,
         feature_schema_version: null,
       },

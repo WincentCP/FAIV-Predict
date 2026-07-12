@@ -7,12 +7,18 @@ Scope: FAIV Predict source code, database schema, ML pipeline, Next.js BFF, n8n 
 
 FAIV Predict performs real Random Forest inference and fails closed when no certified model exists. It is not a fabricated demo. It is also not ready to be sold as an enterprise-grade prediction platform yet.
 
-The Predict workflow is the strongest part of the product, but its current probabilities are uncalibrated, duplicate POST requests are not idempotent, browser and Python feature extraction can disagree, model deployment has no champion/candidate control, and the product has no durable content revision plus publication job architecture. Calendar is a planning workspace, not an Instagram publishing engine.
+## Bachelor-thesis release boundary
+
+Enterprise readiness is a future-work review, not the acceptance contract for the bachelor-thesis prototype. The thesis release requires real-data provenance, leakage-resistant chronological evaluation, a transparent baseline, per-class/confusion-matrix evidence, reproducible dataset/code fingerprints, secure local integration, automated tests, and one recorded end-to-end demonstration. Those gates are maintained separately in `THESIS_TEST_REPORT.md` and `THESIS_DEMO_RUNBOOK.md`.
+
+The thesis does not claim public Instagram publishing, calibrated causal uplift, enterprise multi-user governance, globally distributed scaling, managed disaster recovery, or contractual SLA compliance.
+
+The Predict workflow is the strongest part of the product, but its current scores are uncalibrated, duplicate POST requests are not idempotent, deployment has only a thesis-level majority-baseline promotion gate rather than full champion/candidate control, and the product has no durable publication-job architecture. Calendar is a planning workspace, not an Instagram publishing engine.
 
 This release adds a safety foundation:
 
 - Posting time is optional.
-- A prediction without time averages the model artifact's train-range hours and is labeled provisional. Legacy artifacts without support metadata fall back to all 24 hours and disclose that limitation.
+- A prediction without time frequency-weights the model artifact's empirically observed training hours and is labeled provisional. Legacy artifacts without support metadata fall back to all 24 hours and disclose that limitation.
 - Scheduled date is required because the model derives a weekend feature from it.
 - Prediction snapshots are immutable.
 - Recalculation creates a successor rather than rewriting prior evidence.
@@ -453,7 +459,7 @@ Initial Predict service target:
 4. Calendar is not a publishing engine, despite schedule-like product language.
 5. Engagement observations are overwritten rather than maturity-versioned.
 6. Training runs in process-local background tasks instead of a durable queue.
-7. Model activation lacks candidate/champion/rollback state and promotion gates.
+7. Model activation has a minimal majority-baseline rejection gate but lacks explicit candidate/champion state, regression against the current champion, and one-click rollback.
 8. Unsigned joblib deserialization creates an artifact supply-chain risk.
 9. Browser and Python feature extraction can disagree.
 10. Exact prediction-to-publication linkage is incomplete end to end.

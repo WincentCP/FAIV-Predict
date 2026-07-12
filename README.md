@@ -17,7 +17,7 @@
 
 ### What it is NOT
 * 🚫 Not a generative AI copywriter (AI caption refinement is an optional, clearly-labeled Gemini helper).
-* 🚫 Not a reach estimator — it outputs classification tiers and model confidence, never absolute metrics ("+15% reach" style claims are deliberately absent).
+* 🚫 Not a reach estimator — it outputs classification tiers and an uncalibrated raw class score, never absolute metrics ("+15% reach" style claims are deliberately absent).
 
 ---
 
@@ -41,7 +41,7 @@
 * **Inference engine**: FastAPI hosting Random Forest classifiers per niche/brand. If no trained model exists it returns an honest `503` — there is no fabricated fallback model.
 * **Storage & Auth**: Supabase Postgres for brands/posts/predictions/model metadata; Supabase Storage for trained `.joblib` bundles; Supabase Auth for login sessions.
 * **Optional LLM**: Google Gemini powers the brand classifier (`/api/classify`) and caption refinement (`/api/refine-caption`). Both report themselves unavailable (`501`) when `LLM_API_KEY` is not configured.
-* **Automation**: one inactive-by-default n8n workflow (`n8n/workflow_sync_retrain.json`) with two schedules — a **weekly** run (Mon 06:00 WIB) that calls `POST /sync/now` to pull Instagram Graph API data and retrain models, and a **daily** run (07:00 WIB) that calls `GET /instagram/health` and alerts operators if a verified connection is unhealthy. The pinned, persistent runtime and activation checklist are documented in [`n8n/README.md`](./n8n/README.md).
+* **Automation**: one inactive-by-default n8n workflow (`n8n/workflow_sync_retrain.json`) with two schedules — a **weekly** run (Mon 06:00 WIB) that calls `POST /sync/now` to pull Instagram Graph API data and retrain models, and a **daily** run (07:00 WIB) that calls `GET /instagram/health` and alerts operators if a verified connection is unhealthy. API and SMTP secrets live in encrypted n8n Credentials; `$env` access is blocked. The pinned, persistent runtime and activation checklist are documented in [`n8n/README.md`](./n8n/README.md).
 * **Row-Level Security**: `brands.owner_id` is the ownership root and `predictions.created_by` records the initiating user. Every authenticated user sees only owned records. Legacy predictions and posts without verifiable provenance are quarantined from user-facing metrics and model training instead of being guessed or destructively deleted. The BFF repeats ownership checks before invoking the privileged ML service.
 * **CI**: GitHub Actions (`.github/workflows/ci.yml`) runs frontend lint + type-check + production build and the ML service test suite on every push and PR.
 
@@ -75,7 +75,7 @@ authoritative integration is maintained in
 3. **Labeling**: ER percentiles (P33/P67) computed **on the training split only** (no leakage) map posts to `LOW / AVERAGE / HIGH`.
    The train/test split is **chronological (80:20)** — the model trains on older posts and is validated on the newest, mirroring production use and avoiding look-ahead leakage on time-ordered data.
 4. **Model**: `RandomForestClassifier(n_estimators=100, max_depth=4, min_samples_leaf=5)` — regularized for small datasets. Shared cohorts require ≥ 30 pooled real posts; a personal model requires ≥ 200 posts from that account. Training also refuses degenerate one-class data.
-5. **Evaluation**: accuracy, weighted precision/recall/F1 on a held-out 20% split, stored in the `models.metrics` JSONB column.
+5. **Evaluation and promotion**: the held-out 20% split records accuracy, macro/weighted/per-class precision, recall and F1, a fixed-label confusion matrix, and comparison with a majority-class `DummyClassifier`. A candidate that does not beat that baseline is rejected without replacing the active model. The dataset and training implementation receive SHA-256 fingerprints; class distributions, maturity policy, empirical hour support, runtime versions, parameters and evidence are stored in `models.metrics` and a companion `.evaluation.json` artifact.
 6. **Serving**: model bundles (`model + thresholds + feature order + data provenance`) are uploaded to Supabase Storage, registered in the `models` table, downloaded, provenance-verified, and memory-cached by the inference service. Pre-migration models without certified Graph media IDs are not served.
 7. **Hierarchy**: prediction requests resolve a brand-specific (`account`) model first, falling back to the shared niche model. The response reports which one served the request (`is_personal_model_active`).
 8. **Explainability**: two complementary layers. **Global**: real MDI feature importance describes overall model behavior but is not presented as a signed local explanation. **Sensitivity scenarios**: the model re-scores single-feature variants of the same draft. These are non-causal model simulations, not guaranteed engagement uplift, and the actual edited draft must be scored again.
@@ -91,7 +91,7 @@ The core flow lives on **`/predict`** as two focused views:
 Compose (draft the post) → Insights (everything the model has to say, one screen)
 ```
 
-* **Compose**: one column with brand, format, required date, optional posting time, caption signals, and an optional AI Assistant. With no time, the model averages the artifact's train-range hours and stores an explicitly provisional result. A legacy artifact without hour-support metadata falls back to all 24 hours and discloses that limitation. Visual Concept is not a model feature; applying a concept-conditioned caption rewrite changes the draft and requires a new prediction.
+* **Compose**: one column with brand, format, required date, optional posting time, caption signals, and an optional AI Assistant. With no time, the model frequency-weights only posting hours observed in its training split and stores an explicitly provisional result. A legacy artifact without empirical hour metadata falls back to all 24 hours and discloses that limitation. Visual Concept is not a model feature; applying a concept-conditioned caption rewrite changes the draft and requires a new prediction.
 * **Insights**: a single scrollable screen with tier, raw class score, class scores, model scope, validation accuracy, model version, sensitivity scenarios, and global model signals. Raw Random Forest scores are explicitly not described as calibrated probabilities. Edited inputs make the result stale and disable applying old recommendations.
 
 Other pages:
@@ -108,16 +108,16 @@ Instagram connection health is shown per brand on **`/niches`**. The daily n8n c
 ## 5. Getting Started
 
 ### Prerequisites
-`Node.js 20+`, `Python 3.12`, and a Supabase project (run [supabase_schema.sql](./supabase_schema.sql) in its SQL editor).
+Docker Desktop for the recommended full-stack run, or `Node.js 20+` and `Python 3.12` for native development, plus a Supabase project with the repository migrations applied.
 
 ### Environment
-Copy `.env.example` values into `frontend/.env.local` and `ml-service/.env` (see the file for details). Notes:
+For Docker Compose, copy `.env.example` to repository-root `.env`. Native development may split the matching values between `frontend/.env.local` and `ml-service/.env`. Notes:
 
 * `DATABASE_URL` must be a Postgres DSN, **not** the project `https://` URL.
 * `SUPABASE_KEY` (ML service) should be a secret/service-role key so model artifacts can be uploaded to Storage.
-* `INTERNAL_API_TOKEN` must match between the frontend, the ML service, and n8n; it is required in production.
+* `INTERNAL_API_TOKEN` must match between the frontend and ML service. Enter that same value into the encrypted n8n Header Auth credential; do not expose it to the n8n process environment.
 * `IG_BRANDS_JSON` (ML service, optional) links Instagram Business accounts for the sync pipeline. Each entry must bind credentials to an existing `brand_id`; sync never creates brands. Without a configured connection, the UI reports the account as disconnected and never fabricates metrics.
-* n8n reads `FAIV_ML_URL`, `INTERNAL_API_TOKEN`, `NOTIFICATION_FROM_EMAIL`, and `NOTIFICATION_TO_EMAIL` from its environment; operator addresses are never committed in the workflow. Email nodes also require an SMTP credential selected in n8n before activation.
+* n8n has no access to application environment secrets. Create a Header Auth credential for `X-Internal-Token`, select it in both HTTP Request nodes, replace the safe `.invalid` email placeholders, and select an SMTP credential before activation. See [`n8n/README.md`](./n8n/README.md).
 * Login accounts are provisioned by an administrator (Supabase dashboard → Authentication → Users → *Add user* with auto-confirm; self-signup requires email confirmation).
 
 ### Run
@@ -132,7 +132,7 @@ cd frontend
 npm install
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000). Or run both with `docker compose up`.
+Open [http://localhost:3000](http://localhost:3000). Or run the complete stack with `docker compose up -d --build --wait --wait-timeout 180` for the first build and `docker compose up -d --wait --wait-timeout 180` thereafter, then confirm `docker compose ps` reports all three services healthy.
 
 ### Tests
 ```bash
@@ -140,6 +140,14 @@ cd ml-service && ./venv/bin/python -m pytest   # ML service API tests
 cd frontend && npm run lint && npx tsc --noEmit
 ```
 
+After a final retraining run, export the actual model evidence without exposing secrets:
+
+```bash
+docker compose exec -T ml-service python -m app.thesis_evidence --format markdown
+```
+
+The academic method, acceptance criteria, recorded verification evidence, and demonstration sequence are maintained in [`docs/THESIS_ML_METHOD.md`](./docs/THESIS_ML_METHOD.md), [`docs/THESIS_TEST_REPORT.md`](./docs/THESIS_TEST_REPORT.md), and [`docs/THESIS_DEMO_RUNBOOK.md`](./docs/THESIS_DEMO_RUNBOOK.md).
+
 ---
 
-*Last Updated: 2026-07-11*
+*Last Updated: 2026-07-12*

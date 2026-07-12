@@ -21,6 +21,7 @@ error, empty, or unavailable state; it must never substitute example records.
 | Insights post list | `GET /api/instagram-posts` → FastAPI | Meta Graph media plus verified stored post observations | The BFF supplies one owned brand ID. Stored comparisons match immutable media IDs and only verified `source = instagram_graph` rows. Live reactions and media preview come from Graph; captured engagement rate and tier context come from the corresponding sync observation. |
 | Insights post metrics | `POST /api/instagram-post-insights` → FastAPI | Meta Graph lifetime insights for the selected owned media ID | The BFF verifies the brand before forwarding. Unsupported or unavailable Meta metrics remain unavailable; they are not estimated. |
 | Model Health | `GET /api/models`, `GET/POST /api/train` | `models`, `model_retrain_jobs`, ML training pipeline | Personal models are restricted to owned brand IDs and cohort models to owned cohorts. Accuracy is the stored held-out validation value, not live monitoring. Training calls are authenticated service-to-service. |
+| Thesis model evidence | `python -m app.thesis_evidence` inside `ml-service` | Latest application-append-only `models.metrics` row per configured account/cohort | Exports baseline/candidate metrics, confusion matrix, class distributions, dataset/code SHA-256 and data window. Captions, database URLs, tokens and model binaries are never exported. Privileged database administrators can still alter these rows; the prototype does not claim tamper-proof storage. |
 | Calendar | `GET/POST/PATCH/DELETE /api/calendar` | `calendar_entries` | Every row is filtered by `owner_id = auth.uid()`. `source` is `manual` or `import`. Prediction history is not implicitly copied into Calendar. |
 | Calendar import | Client parser and reviewed mapping → `POST /api/calendar` | User-selected CSV/XLSX file, then `calendar_entries` | Nothing is written before mapping review. Unknown content types become `Unspecified` with a warning; optional fields do not invalidate a row. The API caps a batch at 500 rows. |
 | Calendar export | Current authenticated Calendar state | The owned `calendar_entries` already returned by the API | CSV/XLSX/PDF are projections of the filtered workspace state; export creates no database records. |
@@ -49,8 +50,11 @@ Before a release, all gates below must pass:
 4. Confirm every production brand has an explicit owner assignment.
 5. Configure `IG_BRANDS_JSON` with existing owned brand UUIDs; never bind a
    token by display-name inference.
-6. Run frontend lint, TypeScript, production build, and the ML test suite.
-7. Verify empty accounts show empty states on Dashboard, History, Insights, and
+6. Run frontend lint, TypeScript, production build, the ML test suite, and `python scripts/verify_thesis_readiness.py`.
+7. Confirm n8n blocks `$env`, both HTTP nodes use the encrypted Header Auth credential, and the imported workflow remains inactive until both branches pass manually.
+8. Retrain final thesis models with evaluation contract `faiv-thesis-v1` and export the baseline, confusion matrix, per-class metrics, data window, and fingerprints.
+9. Run `scripts/thesis_preflight.ps1` and record A01–A12 from `docs/THESIS_TEST_REPORT.md`.
+10. Verify empty accounts show empty states on Dashboard, History, Insights, and
    Calendar before connecting real integrations.
 
 Reports, Settings, notifications, and user-management pages are intentionally

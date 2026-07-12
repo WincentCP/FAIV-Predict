@@ -1,75 +1,82 @@
 # FAIV Predict automation
 
-The workflow in `workflow_sync_retrain.json` has two operator-owned schedules:
+`workflow_sync_retrain.json` is a portable, inactive-by-default template with two schedules:
 
-- Monday 06:00 Asia/Jakarta: call the authenticated ML sync/retrain pipeline.
-- Daily 07:00 Asia/Jakarta: verify configured Instagram connections.
+- Monday 06:00 Asia/Jakarta: authenticated Instagram sync and retraining.
+- Daily 07:00 Asia/Jakarta: Instagram connection health check.
 
-The workflow is deliberately imported **inactive**. Importing code must never
-start production synchronization or send email without an operator review.
+The template intentionally contains no token, SMTP password, personal email address, or `$env` expression. The Compose runtime sets `N8N_BLOCK_ENV_ACCESS_IN_NODE=true`, so editable workflow code cannot read deployment environment variables.
 
 ## Supported runtime
 
-n8n is pinned to `2.29.10`. Its current Node requirement is Node `>=22.22`, so
-the repository's Node 24 runtime is supported. Docker Compose remains the
-recommended deployment because it pins the n8n image and persists its encrypted
-credential database in the `n8n_data` volume.
+n8n is pinned to `2.29.10` and persists its encrypted database in the named `n8n_data` volume. Keep the existing `N8N_ENCRYPTION_KEY` stable and back it up separately. Changing or losing that key makes stored credentials unreadable.
 
-## Local Docker setup
+## First import
 
-1. Copy the variables in `.env.example` into the repository root `.env` (the
-   file is gitignored). Use the same `INTERNAL_API_TOKEN` as the frontend and ML
-   service. Generate one stable encryption key, for example with
-   `openssl rand -hex 32`.
-2. Start the stack with `docker compose up --build`.
-3. Open `http://localhost:5678`, create the local owner account, then import the
-   workflow once:
+1. Start the stack:
 
    ```bash
-   docker compose exec n8n n8n import:workflow \
-     --input=/workflows/workflow_sync_retrain.json
+   docker compose up -d --wait --wait-timeout 180
    ```
 
-4. In the editor, select a real SMTP credential for each Email Send node.
-5. Run the health branch manually. Confirm that it reaches the private ML
-   service and that no email is sent to an unintended recipient.
-6. Only then activate the workflow.
+   Continue only after `frontend`, `ml-service`, and n8n report healthy. The
+   n8n readiness probe includes its database and migrations, preventing the
+   transient `503 Database is not ready!` state from being mistaken for ready.
 
-The editor is bound to loopback by default. Production deployment requires an
-HTTPS reverse proxy, `N8N_PROTOCOL=https`, public editor/webhook URLs, secure
-cookies, access control, backups for the n8n volume, and a stable encryption
-key supplied by the deployment secret manager.
+2. Open `http://localhost:5678`, create the local owner, and import the workflow once:
 
-## Local native smoke test
+   ```bash
+   docker compose exec n8n n8n import:workflow --input=/workflows/workflow_sync_retrain.json
+   ```
 
-Docker is not required to verify the runtime. The commands below keep all n8n
-state inside the gitignored `n8n/.data` directory and do not activate schedules:
+3. Create one **Header Auth** credential named `FAIV Internal API`:
+
+   ```text
+   Name:  X-Internal-Token
+   Value: the same INTERNAL_API_TOKEN used by frontend and ml-service
+   ```
+
+4. Open both HTTP Request nodes:
+
+   - `Check Instagram Connections`
+   - `Sync Instagram and Retrain`
+
+   Select `Generic Credential Type` → `Header Auth` → `FAIV Internal API`. The internal Docker URLs are already configured as `http://ml-service:8000/...`.
+
+5. In all three Email Send nodes:
+
+   - replace `alerts@example.invalid` and `operator@example.invalid`;
+   - select the real SMTP credential;
+   - never paste an SMTP password into a node field.
+
+6. Save, execute both branches manually, inspect the output, then activate the workflow. A successful import alone does not prove Meta, Supabase, SMTP, or ML credentials work. Warning/failure emails lead into **Stop And Error** nodes so an unhealthy or partial business result is visibly failed in n8n execution history.
+
+## Security verification
+
+The following safe check prints only booleans, never secret values:
 
 ```bash
-cd n8n
-export N8N_USER_FOLDER="$PWD/.data"
-export N8N_DIAGNOSTICS_ENABLED=false
-export N8N_PERSONALIZATION_ENABLED=false
-export N8N_BLOCK_ENV_ACCESS_IN_NODE=false
-npm --cache /tmp/faiv-n8n-cache exec --yes --package=n8n@2.29.10 -- \
-  n8n import:workflow --input=workflow_sync_retrain.json
-npm --cache /tmp/faiv-n8n-cache exec --yes --package=n8n@2.29.10 -- n8n start
+docker compose exec n8n node -e "console.log({blocked:process.env.N8N_BLOCK_ENV_ACCESS_IN_NODE,hasToken:Boolean(process.env.INTERNAL_API_TOKEN),hasMlUrl:Boolean(process.env.FAIV_ML_URL)})"
 ```
 
-Check `http://127.0.0.1:5678/healthz`. A `200` proves only that n8n is healthy;
-it does not prove Meta, SMTP, Supabase, or the ML pipeline credentials work.
+Expected output:
 
-## Safety and failure behavior
+```text
+{ blocked: 'true', hasToken: false, hasMlUrl: false }
+```
 
-- The ML requests carry `X-Internal-Token`; n8n and the ML service must share
-  the same non-empty secret.
-- n8n 2.x blocks `$env` expressions by default. This workflow intentionally
-  enables them so secrets stay out of the JSON. The editor must therefore stay
-  private and access-controlled; untrusted users must never receive editor
-  access.
-- HTTP errors continue to the failure branch so an API timeout does not skip
-  the operator notification path.
-- Execution history is pruned after seven days in the Compose runtime.
-- No Meta, Supabase, SMTP, or user credentials belong in the workflow JSON.
-- `IG_BRANDS_JSON` remains an ML-service concern. With no verified brand
-  bindings, sync must report that it is unavailable rather than invent data.
+The Header Auth and SMTP values remain encrypted in the n8n database by `N8N_ENCRYPTION_KEY`. Do not commit `.env`, exported credentials, or the `n8n_data` volume.
+
+## Existing installation
+
+If the workflow already works in a persistent n8n volume, do not import the template again. Depending on workflow ID handling, importing can overwrite the installed workflow and clear local credential assignments or create a duplicate. Update the existing workflow in the UI, test it, and keep this JSON as the clean-install template.
+
+## Recovery and backup
+
+- Normal stop: `docker compose stop`.
+- Recreate only n8n: `docker compose up -d --force-recreate --wait n8n`.
+- Database-ready check: `http://127.0.0.1:5678/healthz/readiness` (plain `/healthz` is liveness only).
+- Never use `docker compose down -v` unless permanent deletion of workflow and credential data is intended.
+- Back up both the `n8n_data` volume and the stable `N8N_ENCRYPTION_KEY` before the thesis demonstration.
+
+Production internet exposure is outside the bachelor-thesis scope. If deployed publicly later, place n8n behind HTTPS, enable secure cookies, restrict editor access, and use a managed secret store appropriate to the selected hosting environment.

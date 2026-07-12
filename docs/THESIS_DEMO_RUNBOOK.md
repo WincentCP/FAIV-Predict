@@ -1,0 +1,182 @@
+# FAIV Predict thesis demonstration runbook
+
+This runbook is for the bachelor-thesis prototype on the Windows thesis machine. It assumes the Supabase migrations, two brand bindings, n8n Header Auth credential, and SMTP credential have already been configured.
+
+## Scope statement for the examiner
+
+FAIV Predict is a Docker-based decision-support prototype that predicts Instagram content-performance tiers from verified historical post metadata. It demonstrates authenticated prediction, immutable lifecycle history, Instagram synchronization, and automated retraining. Public Instagram publishing, enterprise multi-tenancy, global high availability, and calibrated causal uplift are outside the research scope.
+
+## One day before the demonstration
+
+1. Connect the laptop to power and confirm sufficient disk space.
+2. Start Docker Desktop and wait until the engine is ready.
+3. Pull the latest verified `main`:
+
+   ```powershell
+   cd C:\Users\User\Downloads\skripsiDraft\FaivPredict
+   git pull origin main
+   ```
+
+4. Rebuild after ML source changes, then wait for health checks:
+
+   ```powershell
+   docker compose up -d --build --wait --wait-timeout 180
+   docker compose ps
+   ```
+
+5. Open `http://localhost:3000` and `http://localhost:5678`.
+6. Execute both n8n branches manually. Do not re-import the workflow when the existing one already works in the persistent volume.
+7. Ensure the final sync/retrain creates models using evaluation contract `faiv-thesis-v1`.
+8. Export final model evidence:
+
+   ```powershell
+   docker compose exec -T ml-service python -m app.thesis_evidence --format markdown | Out-File -Encoding utf8 .\docs\FINAL_MODEL_EVIDENCE.md
+   ```
+
+9. Run the automated machine preflight:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\thesis_preflight.ps1
+   ```
+
+10. Complete A01–A12 in `docs/THESIS_TEST_REPORT.md` and retain screenshots outside Git.
+
+## Private backup
+
+Create a local backup directory; it is gitignored:
+
+```powershell
+New-Item -ItemType Directory -Force .\backups
+```
+
+Back up the n8n volume without deleting or decrypting it:
+
+```powershell
+$N8nContainer = (docker compose ps -q n8n).Trim()
+$N8nVolume = (docker inspect --format '{{range .Mounts}}{{if eq .Destination "/home/node/.n8n"}}{{.Name}}{{end}}{{end}}' $N8nContainer).Trim()
+if (-not $N8nVolume) { throw "Could not resolve the n8n data volume" }
+docker compose stop n8n
+try {
+    docker run --rm -v "${N8nVolume}:/source:ro" -v "${PWD}\backups:/backup" alpine sh -c "tar -czf /backup/n8n_data.tar.gz -C /source ."
+    if ($LASTEXITCODE -ne 0) { throw "n8n backup failed" }
+} finally {
+    docker compose up -d --wait --wait-timeout 120 n8n
+}
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5678/healthz/readiness
+```
+
+Stopping only n8n makes the SQLite archive transaction-consistent. The
+frontend and ML service may remain running during this short backup.
+
+Separately store these in an encrypted password manager or encrypted drive:
+
+- repository-root `.env`;
+- stable `N8N_ENCRYPTION_KEY`;
+- Supabase database backup/export;
+- `n8n_data.tar.gz`;
+- final model evidence and screenshots.
+
+Supabase database backup availability depends on the project plan. At minimum, create a logical export before the defense and verify that the file is non-empty. Supabase Storage model objects require a separate backup because a database-only export contains object metadata, not the model binaries.
+
+Never run `docker compose down -v` during preparation or demonstration.
+
+## Presentation sequence
+
+### 1. Architecture and trust boundary
+
+Show:
+
+- browser → authenticated Next.js BFF;
+- BFF → private FastAPI using internal token;
+- Supabase Auth/Postgres/Storage;
+- n8n → private ML endpoints using encrypted Header Auth credential.
+
+State that the browser never receives the service key, Meta token, SMTP password, or internal API token.
+
+### 2. Real-data readiness
+
+Open Brands/Niches and show:
+
+- Bison Gym and Lasence Bakeshop;
+- explicit connected/disconnected state;
+- real verified post counts;
+- no fabricated sample data.
+
+### 3. Normal prediction
+
+1. Select a brand.
+2. Select a supported format.
+3. Enter a real date, posting time, and caption.
+4. Analyze.
+5. Explain tier, raw class score, model scope/version, validation evidence, OOD warning, and non-causal sensitivity scenarios.
+
+Do not call the raw Random Forest score a calibrated probability.
+
+### 4. Optional posting time
+
+Run a second draft without posting time. Show that:
+
+- submission remains allowed;
+- the result is labelled `provisional`;
+- the service frequency-weights only hours actually observed in the model's
+  training split (legacy artifacts visibly fall back to all 24 hours);
+- setting a time later requires recalculation.
+
+### 5. Immutable lifecycle
+
+Change caption, format, weekend status, or posting hour and recalculate. Show:
+
+- original prediction remains visible;
+- old evidence becomes stale/superseded;
+- successor has its own model/input hashes;
+- old recommendations cannot be applied as if still current.
+
+### 6. Instagram and automation
+
+Show verified Instagram insights, then open the latest successful n8n execution. Explain that immutable Instagram media ID is the post identity and synchronization never maps outcomes using caption similarity alone.
+
+### 7. Academic evaluation
+
+Open the locally exported `FINAL_MODEL_EVIDENCE.md` and present:
+
+- sample counts and chronological split;
+- baseline versus Random Forest;
+- confusion matrix;
+- per-class and macro/weighted metrics;
+- dataset and code fingerprints;
+- limitations caused by small/brand-specific history.
+
+## Failure demonstrations
+
+Only perform controlled, reversible demonstrations:
+
+- invalid caption/date/hour → typed validation message;
+- no trained model for a new brand → honest unavailable state;
+- temporarily stop only `ml-service`, refresh prediction, show service error, then restore it:
+
+  ```powershell
+  docker compose stop ml-service
+  docker compose up -d --wait --wait-timeout 120 ml-service
+  ```
+
+Do not delete volumes, rotate keys, alter production RLS policies, revoke Meta tokens, or restore the database during a live defense.
+
+## Recovery shortcuts
+
+```powershell
+docker compose up -d --wait --wait-timeout 180
+docker compose ps
+docker compose logs --tail=100 frontend
+docker compose logs --tail=100 ml-service
+docker compose logs --tail=100 n8n
+```
+
+If internet access fails, continue with locally persisted prediction history, architecture, test evidence, and the previously exported model report. Never replace unavailable live information with invented results.
+
+## Normal shutdown
+
+```powershell
+docker compose stop
+```
+
+This preserves all named volumes and Supabase data.

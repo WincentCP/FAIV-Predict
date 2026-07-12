@@ -87,7 +87,7 @@ services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:5678/healthz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
+        - "fetch('http://127.0.0.1:5678/healthz/readiness').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
       interval: 10s
       timeout: 5s
       retries: 12

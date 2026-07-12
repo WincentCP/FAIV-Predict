@@ -124,7 +124,7 @@ class DataPreprocessor:
         """
         processed_data = []
         for _, row in df.iterrows():
-            caption = row.get("caption", "")
+            caption = row.get("caption") or ""
             
             # Use raw values or extract
             is_single_image = 1.0 if row.get("is_single_image", False) else 0.0

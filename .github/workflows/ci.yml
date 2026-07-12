@@ -7,6 +7,46 @@ on:
     branches: [main]
 
 jobs:
+  repository-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/verify_thesis_readiness.py
+      - run: bash -n scripts/verify_env.sh
+      - name: Validate Docker Compose interpolation and service graph
+        env:
+          DATABASE_URL: postgresql://ci:ci@database.invalid:5432/ci
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-compile-only
+          SUPABASE_KEY: ci-compile-only
+          INTERNAL_API_TOKEN: ci-internal-test-token
+          N8N_ENCRYPTION_KEY: ci-encryption-key-not-used-at-runtime
+          FRONTEND_URL: http://localhost:3000
+          IG_BRANDS_JSON: "[]"
+        run: docker compose config --quiet
+
+  powershell-syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse thesis preflight script
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\scripts\thesis_preflight.ps1),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 1
+          }
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

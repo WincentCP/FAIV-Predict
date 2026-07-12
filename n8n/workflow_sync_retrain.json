@@ -4,6 +4,19 @@
   "nodes": [
     {
       "parameters": {
+        "content": "## Required before activation\n1. Create a Header Auth credential named **FAIV Internal API** with header `X-Internal-Token`.\n2. Select it in both HTTP Request nodes.\n3. Replace the `.invalid` sender/recipient addresses and select an SMTP credential in all Email nodes.\n4. Execute both branches manually.\n\nSecrets must never be pasted into this workflow JSON.",
+        "height": 280,
+        "width": 430,
+        "color": 5
+      },
+      "id": "setup-note",
+      "name": "Secure Setup Checklist",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [180, -80]
+    },
+    {
+      "parameters": {
         "rule": {
           "interval": [
             {
@@ -43,17 +56,10 @@
     },
     {
       "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "method": "GET",
-        "url": "={{ $env.FAIV_ML_URL || 'http://127.0.0.1:8000' }}/instagram/health",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-Internal-Token",
-              "value": "={{ $env.INTERNAL_API_TOKEN }}"
-            }
-          ]
-        },
+        "url": "http://ml-service:8000/instagram/health",
         "options": { "timeout": 60000 }
       },
       "id": "health-request",
@@ -87,10 +93,10 @@
     },
     {
       "parameters": {
-        "fromEmail": "={{ $env.NOTIFICATION_FROM_EMAIL }}",
-        "toEmail": "={{ $env.NOTIFICATION_TO_EMAIL }}",
+        "fromEmail": "alerts@example.invalid",
+        "toEmail": "operator@example.invalid",
         "subject": "=FAIV Predict: Instagram connection needs attention ({{ $now.format('dd/MM/yyyy HH:mm') }})",
-        "emailType": "html",
+        "emailFormat": "html",
         "html": "=<h2>Instagram connection health</h2><p>One or more verified brand connections need attention before the next sync.</p><table border=\"1\" cellpadding=\"8\" cellspacing=\"0\"><tr><th>Brand</th><th>Status</th></tr>{{ Array.isArray($json.connections) ? $json.connections.map(c => '<tr><td>' + c.brand + '</td><td>' + c.status + (c.error ? ': ' + c.error : '') + '</td></tr>').join('') : '<tr><td colspan=\"2\">Health request failed before connection data was returned.</td></tr>' }}</table><p>Review the server-side Meta credential configuration. No user-facing data was substituted.</p>",
         "options": {}
       },
@@ -102,17 +108,10 @@
     },
     {
       "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "method": "POST",
-        "url": "={{ $env.FAIV_ML_URL || 'http://127.0.0.1:8000' }}/sync/now",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-Internal-Token",
-              "value": "={{ $env.INTERNAL_API_TOKEN }}"
-            }
-          ]
-        },
+        "url": "http://ml-service:8000/sync/now",
         "options": { "timeout": 300000 }
       },
       "id": "sync-request",
@@ -146,10 +145,10 @@
     },
     {
       "parameters": {
-        "fromEmail": "={{ $env.NOTIFICATION_FROM_EMAIL }}",
-        "toEmail": "={{ $env.NOTIFICATION_TO_EMAIL }}",
+        "fromEmail": "alerts@example.invalid",
+        "toEmail": "operator@example.invalid",
         "subject": "=FAIV Predict: verified sync completed ({{ $now.format('dd/MM/yyyy HH:mm') }})",
-        "emailType": "html",
+        "emailFormat": "html",
         "html": "=<h2>Sync and retraining completed</h2><table border=\"1\" cellpadding=\"8\" cellspacing=\"0\"><tr><th>Brand</th><th>Posts</th><th>Training</th></tr>{{ $json.results.map(r => '<tr><td>' + r.brand + '</td><td>' + (r.sync.posts_synced ?? 0) + '</td><td>' + r.train.status + (r.train.scope ? ' (' + r.train.scope + ')' : '') + '</td></tr>').join('') }}</table>",
         "options": {}
       },
@@ -161,10 +160,10 @@
     },
     {
       "parameters": {
-        "fromEmail": "={{ $env.NOTIFICATION_FROM_EMAIL }}",
-        "toEmail": "={{ $env.NOTIFICATION_TO_EMAIL }}",
+        "fromEmail": "alerts@example.invalid",
+        "toEmail": "operator@example.invalid",
         "subject": "=FAIV Predict: sync requires attention ({{ $now.format('dd/MM/yyyy HH:mm') }})",
-        "emailType": "html",
+        "emailFormat": "html",
         "html": "=<h2>Sync or retraining was not fully successful</h2><p>Status: {{ $json.status || 'request failed' }}</p><pre>{{ JSON.stringify($json.results || $json.error || $json, null, 2) }}</pre>",
         "options": {}
       },
@@ -173,6 +172,28 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [970, 340]
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "FAIV Instagram connection health is not fully connected. Review the preceding warning email and execution payload."
+      },
+      "id": "health-stop-error",
+      "name": "Fail Unhealthy Connection Execution",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1220, 520]
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "FAIV synchronization or retraining was not fully successful. Review the preceding failure email and execution payload."
+      },
+      "id": "sync-stop-error",
+      "name": "Fail Partial Pipeline Execution",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1220, 340]
     }
   ],
   "connections": {
@@ -196,6 +217,12 @@
     },
     "Any Connection Unhealthy?": {
       "main": [[{ "node": "Send Connection Warning", "type": "main", "index": 0 }], []]
+    },
+    "Send Connection Warning": {
+      "main": [[{ "node": "Fail Unhealthy Connection Execution", "type": "main", "index": 0 }]]
+    },
+    "Send Failure Summary": {
+      "main": [[{ "node": "Fail Partial Pipeline Execution", "type": "main", "index": 0 }]]
     }
   },
   "settings": {

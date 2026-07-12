@@ -6,6 +6,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT_ENV="$ROOT/.env"
 FRONTEND_ENV="$ROOT/frontend/.env.local"
 ML_ENV="$ROOT/ml-service/.env"
 
@@ -31,6 +32,17 @@ IG_BRANDS_JSON="$(getraw "$ML_ENV" IG_BRANDS_JSON)"
 LOGIN_EMAIL="${VERIFY_LOGIN_EMAIL:-}"
 LOGIN_PASSWORD="${VERIFY_LOGIN_PASSWORD:-}"
 ML_PYTHON="${ML_PYTHON:-}"
+
+# Docker Compose uses the repository-root .env. Native development may use the
+# service-specific files, so accept either without printing any value.
+if [ -f "$ROOT_ENV" ]; then
+  [ -n "$SUPABASE_URL" ] || SUPABASE_URL="$(getvar "$ROOT_ENV" NEXT_PUBLIC_SUPABASE_URL)"
+  [ -n "$ANON_KEY" ] || ANON_KEY="$(getvar "$ROOT_ENV" NEXT_PUBLIC_SUPABASE_ANON_KEY)"
+  [ -n "$LLM_KEY" ] || LLM_KEY="$(getvar "$ROOT_ENV" LLM_API_KEY)"
+  [ -n "$DB_URL" ] || DB_URL="$(getvar "$ROOT_ENV" DATABASE_URL)"
+  [ -n "$SERVICE_KEY" ] || SERVICE_KEY="$(getvar "$ROOT_ENV" SUPABASE_KEY)"
+  [ -n "$IG_BRANDS_JSON" ] || IG_BRANDS_JSON="$(getraw "$ROOT_ENV" IG_BRANDS_JSON)"
+fi
 
 if [ -z "$ML_PYTHON" ]; then
   if [ -x "$ROOT/ml-service/venv/bin/python" ]; then
@@ -198,6 +210,44 @@ else
     3<<< $'header = "x-goog-api-key: '"$LLM_KEY"$'"\nheader = "Content-Type: application/json"' \
     <<< '{"contents":[{"parts":[{"text":"Reply with the single word: ok"}]}]}')
   [ "$code" = "200" ] && pass "Gemini accepted the key" || fail "Gemini returned HTTP $code"
+fi
+
+echo "== 7. Repository-safe n8n template =="
+if python3 - "$ROOT" <<'PY'
+import json, pathlib, sys
+
+root = pathlib.Path(sys.argv[1])
+compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+workflow_text = (root / "n8n" / "workflow_sync_retrain.json").read_text(encoding="utf-8")
+workflow = json.loads(workflow_text)
+
+try:
+    n8n_block = compose.split("\n  n8n:\n", 1)[1].split("\nvolumes:\n", 1)[0]
+except IndexError as exc:
+    raise RuntimeError("could not locate n8n Compose service") from exc
+
+if "N8N_BLOCK_ENV_ACCESS_IN_NODE=true" not in n8n_block:
+    raise RuntimeError("n8n environment access is not blocked")
+for forbidden in ("FAIV_ML_URL=", "INTERNAL_API_TOKEN=", "NOTIFICATION_FROM_EMAIL=", "NOTIFICATION_TO_EMAIL="):
+    if forbidden in n8n_block:
+        raise RuntimeError(f"forbidden n8n environment variable remains: {forbidden}")
+if "$env" in workflow_text:
+    raise RuntimeError("workflow template still reads $env")
+if workflow.get("active") is not False:
+    raise RuntimeError("workflow template must be inactive")
+requests = [node for node in workflow.get("nodes", []) if node.get("type") == "n8n-nodes-base.httpRequest"]
+if len(requests) != 2:
+    raise RuntimeError("expected exactly two HTTP Request nodes")
+for node in requests:
+    parameters = node.get("parameters", {})
+    if parameters.get("authentication") != "genericCredentialType" or parameters.get("genericAuthType") != "httpHeaderAuth":
+        raise RuntimeError(f"{node.get('name')} does not require Header Auth credential")
+print("  PASS Compose blocks $env and the inactive workflow requires encrypted Header Auth credentials")
+PY
+then
+  :
+else
+  FAILURES=$((FAILURES + 1))
 fi
 
 echo

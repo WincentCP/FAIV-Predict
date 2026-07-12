@@ -3,7 +3,6 @@ import re
 import json
 import uuid
 import hashlib
-import math
 import datetime
 import logging
 from typing import Optional, Dict, Any, Literal
@@ -21,12 +20,17 @@ import psycopg2.extras
 
 from app.preprocessing import DataPreprocessor, HASHTAG_PATTERN, CTA_PATTERN, FEATURE_ORDER_V1
 from app.model_loader import ModelLoader, ModelUnavailableError
-from app.train_pipeline import ModelTrainer
+from app.train_pipeline import (
+    MIN_ACCOUNT_TRAINING_SAMPLES,
+    MIN_POST_AGE_DAYS,
+    ModelTrainer,
+)
 
 MAX_INSTAGRAM_HEALTH_BRANDS = 100
+SUPPORTED_INSTAGRAM_MEDIA_TYPES = {"IMAGE", "CAROUSEL_ALBUM", "VIDEO"}
 # Legacy bundles do not carry a learned posting-hour distribution. For them,
-# use all clock hours as an explicit provisional fallback. Newer bundles at
-# least restrict marginalization to their train-split min/max support.
+# use all clock hours as an explicit provisional fallback. Newer bundles use
+# the frequency distribution of hours actually observed in their train split.
 UNKNOWN_TIME_SCENARIOS = tuple(range(24))
 
 # Configure Logging
@@ -290,7 +294,7 @@ def build_counterfactuals(model, base_features, feature_order, classes, base_pro
 def predict(req: PredictionRequest):
     """
     Extracts features, loads the appropriate Random Forest model (personal or niche),
-    classifies the performance tier, and returns the confidence & class probabilities.
+    classifies the performance tier, and returns uncalibrated raw class scores.
     Persists brand-scoped predictions with authenticated-user provenance.
     """
     try:
@@ -350,21 +354,32 @@ def predict(req: PredictionRequest):
         # explicitly provisional instead of pretending that 19:00 was chosen.
         time_known = req.post_hour is not None
         scenario_support_basis = "exact_time"
+        scenario_weights = None
         if time_known:
             scenario_hours = [req.post_hour]
         else:
             scenario_hours = list(UNKNOWN_TIME_SCENARIOS)
-            hour_bounds = (bundle.get("feature_ranges") or {}).get("post_hour")
-            if isinstance(hour_bounds, (list, tuple)) and len(hour_bounds) == 2:
-                try:
-                    supported_min = max(0, int(math.ceil(float(hour_bounds[0]))))
-                    supported_max = min(23, int(math.floor(float(hour_bounds[1]))))
-                    if supported_min <= supported_max:
-                        scenario_hours = list(range(supported_min, supported_max + 1))
-                        scenario_support_basis = "training_range"
-                except (TypeError, ValueError, OverflowError):
-                    pass
-            if scenario_support_basis != "training_range":
+            support = bundle.get("post_hour_support")
+            parsed_support = []
+            if isinstance(support, dict):
+                for raw_hour, raw_count in support.items():
+                    try:
+                        hour = int(raw_hour)
+                        count = int(raw_count)
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if 0 <= hour <= 23 and count > 0:
+                        parsed_support.append((hour, count))
+            if parsed_support:
+                parsed_support.sort(key=lambda item: item[0])
+                scenario_hours = [hour for hour, _ in parsed_support]
+                counts = np.asarray([count for _, count in parsed_support], dtype=float)
+                scenario_weights = counts / counts.sum()
+                scenario_support_basis = "empirical_training_distribution"
+            else:
+                # Legacy bundles lack exact observed-hour counts. Keep their
+                # broad all-hours fallback explicit instead of interpolating
+                # unseen hours between a min/max range.
                 scenario_support_basis = "legacy_all_hours"
         scenario_features = [
             DataPreprocessor.extract_features(
@@ -380,7 +395,11 @@ def predict(req: PredictionRequest):
             for row in scenario_features
         ]
         scenario_probabilities = model.predict_proba(feature_matrix)
-        probs_raw = np.mean(scenario_probabilities, axis=0)
+        probs_raw = (
+            np.average(scenario_probabilities, axis=0, weights=scenario_weights)
+            if scenario_weights is not None
+            else np.mean(scenario_probabilities, axis=0)
+        )
         pred_raw = classes[int(np.argmax(probs_raw))]
         # Keep one middle scenario vector for non-time explanations. The stored
         # feature explicitly replaces its hour with null when time is unknown.
@@ -391,7 +410,8 @@ def predict(req: PredictionRequest):
         if not time_known:
             out_of_range = [name for name in out_of_range if name != "post_hour"]
         
-        # Map class and probabilities to Title Case for Frontend consistency ("High", "Average", "Low")
+        # Map the class and raw Random Forest vote proportions to Title Case
+        # for frontend compatibility. These scores are not calibrated probabilities.
         predicted_class = pred_raw.title()
         probabilities = {classes[i].title(): round(float(probs_raw[i]) * 100, 2) for i in range(len(classes))}
         confidence = round(float(np.max(probs_raw)) * 100, 2)
@@ -440,9 +460,9 @@ def predict(req: PredictionRequest):
                     "tier_changed": best_class.upper() != str(pred_raw).upper(),
                 })
             scenario_description = (
-                f"training-range hours {scenario_hours[0]}:00 through {scenario_hours[-1]}:00"
-                if scenario_support_basis == "training_range"
-                else "all 24 hours because this legacy bundle has no hour-support metadata"
+                "the frequency-weighted hours observed in this model's training split"
+                if scenario_support_basis == "empirical_training_distribution"
+                else "all 24 hours because this legacy bundle has no observed-hour metadata"
             )
             cf_note = (
                 "Posting time is not set. This provisional tier averages "
@@ -475,6 +495,10 @@ def predict(req: PredictionRequest):
                     if not time_known:
                         json_features["post_hour"] = None
                         json_features["time_scenarios"] = scenario_hours
+                        if scenario_weights is not None:
+                            json_features["time_scenario_weights"] = [
+                                round(float(weight), 8) for weight in scenario_weights
+                            ]
                     json_features["confidence"] = confidence
                     json_features["time_known"] = time_known
                     prediction_status = "current" if time_known else "provisional"
@@ -570,6 +594,10 @@ def predict(req: PredictionRequest):
                 "time_known": time_known,
                 "scenario_hours": [] if time_known else scenario_hours,
                 "scenario_support_basis": scenario_support_basis,
+                "scenario_weights": (
+                    [] if time_known or scenario_weights is None
+                    else [round(float(weight), 8) for weight in scenario_weights]
+                ),
                 "input_hash": input_hash,
                 "feature_schema_version": feature_schema_version,
             },
@@ -1221,7 +1249,9 @@ def _upsert_instagram_media(cur, brand_id: str, post: Dict[str, Any], current_fo
 
     The immutable Instagram media ID is the identity key. On the first run
     after migration, one legacy row may be claimed only when both timestamp
-    and caption match exactly. Its original follower denominator is preserved.
+    and caption match exactly. The first observed follower denominator is
+    preserved; for posts imported long after publication this is an explicit
+    proxy, not a historical follower-at-publication measurement.
     """
     media_id = str(post["id"])
     caption = post.get("caption") or ""
@@ -1229,9 +1259,26 @@ def _upsert_instagram_media(cur, brand_id: str, post: Dict[str, Any], current_fo
     likes = float(post["like_count"])
     comments = float(post["comments_count"])
     media_type = post.get("media_type", "IMAGE")
+    if media_type not in SUPPORTED_INSTAGRAM_MEDIA_TYPES:
+        raise ValueError(f"Unsupported Instagram media type: {media_type!r}")
     ts_clean = timestamp.replace("Z", "+00:00").replace("+0000", "+00:00")
     dt_utc = datetime.datetime.fromisoformat(ts_clean)
-    post_hour = (dt_utc + datetime.timedelta(hours=7)).hour
+    dt_wib = dt_utc + datetime.timedelta(hours=7)
+    post_hour = dt_wib.hour
+    format_type = {
+        "IMAGE": "Single Image",
+        "CAROUSEL_ALBUM": "Carousel",
+        "VIDEO": "Reels",
+    }.get(media_type, "Single Image")
+    # The synchronization path and prediction path share the same authoritative
+    # extractor. This prevents a model from being trained on feature semantics
+    # that differ from the values used during inference.
+    extracted = DataPreprocessor.extract_features(
+        caption=caption,
+        format_type=format_type,
+        post_hour=post_hour,
+        is_weekend=dt_wib.weekday() >= 5,
+    )
 
     cur.execute(
         """SELECT id, follower_count_at_post FROM posts
@@ -1263,9 +1310,14 @@ def _upsert_instagram_media(cur, brand_id: str, post: Dict[str, Any], current_fo
     er = round(((likes + comments) / denominator) * 100, 4)
     values = (
         media_id, caption, er, denominator,
-        media_type == "IMAGE", media_type == "CAROUSEL_ALBUM", media_type == "VIDEO",
-        post_hour, len(caption), len(HASHTAG_PATTERN.findall(caption)),
-        bool(CTA_PATTERN.search(caption)), timestamp,
+        bool(extracted["is_single_image"]),
+        bool(extracted["is_carousel"]),
+        bool(extracted["is_reels"]),
+        int(extracted["post_hour"]),
+        int(extracted["caption_length"]),
+        int(extracted["hashtag_count"]),
+        bool(extracted["has_cta"]),
+        timestamp,
     )
 
     if existing:
@@ -1301,8 +1353,8 @@ def _sync_and_retrain_pipeline():
     """Sync configured Instagram accounts and train the appropriate model.
 
     Connections must already be bound to an existing brand; sync never creates
-    user-facing rows. Accounts with at least 200 posts train a personal model.
-    Smaller accounts contribute to one shared cohort model per run.
+    user-facing rows. Accounts with at least 200 eligible, mature posts train a
+    personal model. Smaller accounts contribute to one shared cohort model per run.
     """
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
@@ -1347,9 +1399,10 @@ def _sync_and_retrain_pipeline():
                 and isinstance(post.get("comments_count"), (int, float))
                 and post.get("id")
                 and post.get("timestamp")
+                and post.get("media_type") in SUPPORTED_INSTAGRAM_MEDIA_TYPES
             ]
             if not valid_posts:
-                raise ValueError("Instagram returned no posts with complete engagement and timestamp fields; existing history was preserved.")
+                raise ValueError("Instagram returned no posts with complete supported media, engagement, and timestamp fields; existing history was preserved.")
             if len(valid_posts) != len(posts):
                 logger.warning(f"Skipping {len(posts) - len(valid_posts)} incomplete Instagram media rows for {name}.")
             conn = psycopg2.connect(db_url)
@@ -1364,13 +1417,20 @@ def _sync_and_retrain_pipeline():
                     sync_result = _upsert_instagram_media(cur, brand_id, post, followers)
                     sync_counts[sync_result] += 1
                 cur.execute(
-                    """SELECT COUNT(*) FROM posts
+                    """SELECT COUNT(*),
+                              COUNT(*) FILTER (
+                                WHERE er IS NOT NULL
+                                  AND post_hour IS NOT NULL
+                                  AND created_at IS NOT NULL
+                                  AND created_at <= now() - (%s * interval '1 day')
+                              )
+                       FROM posts
                        WHERE brand_id = %s
                          AND source = 'instagram_graph'
                          AND instagram_media_id IS NOT NULL""",
-                    (brand_id,),
+                    (MIN_POST_AGE_DAYS, brand_id),
                 )
-                stored_count = int(cur.fetchone()[0])
+                stored_count, mature_count = (int(value) for value in cur.fetchone())
             conn.commit()
             conn.close()
             conn = None
@@ -1380,6 +1440,7 @@ def _sync_and_retrain_pipeline():
             brand_result["sync"]["posts_updated"] = sync_counts["updated"]
             brand_result["sync"]["legacy_rows_claimed"] = sync_counts["claimed"]
             brand_result["sync"]["stored_verified_posts"] = stored_count
+            brand_result["sync"]["mature_training_posts"] = mature_count
             brand_result["sync"]["status"] = "success"
             logger.info(
                 f"[n8n Sync] {name}: {len(valid_posts)}/{len(posts)} posts synced "
@@ -1388,7 +1449,7 @@ def _sync_and_retrain_pipeline():
             )
 
             try:
-                if stored_count >= 200:
+                if mature_count >= MIN_ACCOUNT_TRAINING_SAMPLES:
                     train_scope = "personal"
                     train_result = ModelTrainer.run_training(brand_id=brand_id)
                 else:
