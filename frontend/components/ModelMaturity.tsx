@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 export type MaturityState = "low" | "learning" | "personal";
 
 export interface ModelMaturityProps {
-  /** Number of posts currently attributed to this account. */
+  /** Number of verified, mature, model-format-eligible posts for this account. */
   samples: number;
   /** Threshold at which an account model can become available. Default 200. */
   target?: number;
@@ -103,7 +103,7 @@ export function ModelMaturity({
           m.ring,
           className,
         )}
-        title={`${samples}/${target} stored posts · ${m.label}. Eligibility also requires verified mature posts and a successful model evaluation. This is not a confidence score.`}
+        title={`${samples}/${target} training-eligible posts · ${m.label}. Model activation also requires a successful model evaluation. This is not a confidence score.`}
       >
         <m.Icon className="h-3 w-3" />
         {shortLabel} · <span className="font-mono tabular-nums">{samples}/{target}</span>
@@ -127,7 +127,7 @@ export function ModelMaturity({
             </div>
             <div className="text-xs text-muted-foreground">
               <span className="font-mono tabular-nums text-foreground">{samples}</span>
-              <span>/{target} posts</span>
+              <span>/{target} eligible posts</span>
               <span className="mx-1.5 text-muted-foreground/50">·</span>
               <span className="font-mono tabular-nums">{pct}%</span>
             </div>
@@ -162,7 +162,7 @@ export function ModelMaturity({
 
       <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
       <p className="mt-1 text-xs text-muted-foreground/80">
-        Stored-post count is only a maturity indicator; model eligibility also requires verified mature posts and successful evaluation.
+        Training-eligible post count is a maturity indicator; model activation also requires successful training and evaluation.
       </p>
     </div>
   );

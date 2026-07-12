@@ -27,6 +27,47 @@ def main() -> int:
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     training_source = (ROOT / "ml-service" / "app" / "train_pipeline.py").read_text(encoding="utf-8")
     inference_source = (ROOT / "ml-service" / "app" / "main.py").read_text(encoding="utf-8")
+    brand_patterns_source = (ROOT / "ml-service" / "app" / "brand_patterns.py").read_text(encoding="utf-8")
+    schema_source = (ROOT / "supabase_schema.sql").read_text(encoding="utf-8")
+    brand_patterns_migration = (
+        ROOT / "supabase" / "migrations" / "202607120003_brand_patterns_and_media_product.sql"
+    ).read_text(encoding="utf-8")
+    brand_patterns_bff = (
+        ROOT / "frontend" / "app" / "api" / "brand-patterns" / "route.ts"
+    ).read_text(encoding="utf-8")
+    brand_patterns_server_context = (
+        ROOT / "frontend" / "lib" / "server" / "brand-pattern-context.ts"
+    ).read_text(encoding="utf-8")
+    brand_patterns_ui = (
+        ROOT
+        / "frontend"
+        / "app"
+        / "(dashboard)"
+        / "predict"
+        / "_components"
+        / "BrandPatterns.tsx"
+    ).read_text(encoding="utf-8")
+    instagram_posts_bff = (
+        ROOT / "frontend" / "app" / "api" / "instagram-posts" / "route.ts"
+    ).read_text(encoding="utf-8")
+    instagram_post_insights_bff = (
+        ROOT / "frontend" / "app" / "api" / "instagram-post-insights" / "route.ts"
+    ).read_text(encoding="utf-8")
+    insights_ui = (
+        ROOT / "frontend" / "app" / "(dashboard)" / "insights" / "page.tsx"
+    ).read_text(encoding="utf-8")
+    calendar_ui = (
+        ROOT / "frontend" / "app" / "(dashboard)" / "calendar" / "page.tsx"
+    ).read_text(encoding="utf-8")
+    classify_bff = (
+        ROOT / "frontend" / "app" / "api" / "classify" / "route.ts"
+    ).read_text(encoding="utf-8")
+    analyze_concept_bff = (
+        ROOT / "frontend" / "app" / "api" / "analyze-concept" / "route.ts"
+    ).read_text(encoding="utf-8")
+    refine_caption_bff = (
+        ROOT / "frontend" / "app" / "api" / "refine-caption" / "route.ts"
+    ).read_text(encoding="utf-8")
     powershell_preflight = (ROOT / "scripts" / "thesis_preflight.ps1").read_text(encoding="utf-8")
 
     require(workflow.get("active") is False, "workflow template must import inactive")
@@ -148,6 +189,115 @@ def main() -> int:
         "optional-time inference must use empirical observed-hour support",
     )
     require(
+        "ADD COLUMN IF NOT EXISTS media_product_type" in brand_patterns_migration
+        and "posts_media_product_type_check" in brand_patterns_migration
+        and "media_product_type" in schema_source,
+        "Meta product type must be versioned in both migration and canonical schema",
+    )
+    require(
+        '"media_product_type"' in inference_source
+        and '"/brand/patterns"' in inference_source
+        and "build_brand_patterns" in inference_source,
+        "ML service must preserve Meta product type and expose aggregate brand patterns",
+    )
+    for required_pattern_contract in (
+        "MIN_GROUP_SAMPLES = 5",
+        "DIRECTIONAL_GROUP_SAMPLES = 15",
+        "MIN_TOTAL_FOR_HIGHLIGHT = 20",
+        '"median_er"',
+        '"q1_er"',
+        '"q3_er"',
+        '"recent_publishing_mix"',
+        '"audience_demographics"',
+        '"visual_style"',
+        '"external_trends"',
+    ):
+        require(
+            required_pattern_contract in brand_patterns_source,
+            f"brand-pattern evidence contract is missing {required_pattern_contract}",
+        )
+    require(
+        "requireOwnedBrand" in brand_patterns_bff
+        and "getRequestUser" in brand_patterns_server_context
+        and 'eq("owner_id", user.id)' in brand_patterns_server_context
+        and "/brand/patterns" in brand_patterns_server_context,
+        "Brand Performance Snapshot BFF must authenticate and authorize brand ownership",
+    )
+    require(
+        "Brand Performance Snapshot" in brand_patterns_ui
+        and "/api/brand-patterns" in brand_patterns_ui
+        and "Not measured" in brand_patterns_ui,
+        "Predict UI must expose observed brand evidence and honest unavailable dimensions",
+    )
+    require(
+        "IQR" in brand_patterns_ui
+        and "excluded_unmodeled_posts" in brand_patterns_ui
+        and "not statistical-significance" in brand_patterns_ui,
+        "Predict UI must disclose dispersion, excluded formats, and non-significance evidence labels",
+    )
+    require(
+        "media_product_type" in instagram_posts_bff
+        and "Feed Video (not modeled)" in insights_ui
+        and "Video (type unverified)" in insights_ui
+        and 'media_type === "VIDEO" ? "Reels"' not in insights_ui,
+        "Published-content analytics must distinguish explicit Reels from Feed/unknown video",
+    )
+    require(
+        'normalized === "video"' not in calendar_ui,
+        "Calendar import must not guess that a generic video is a Reel",
+    )
+    require(
+        "comparison_eligible" in inference_source
+        and "comparison_eligible" in instagram_posts_bff
+        and "comparison_eligible" in instagram_post_insights_bff
+        and "comparison_eligible" in insights_ui,
+        "post-to-history comparisons must expose and preserve eligibility",
+    )
+    require(
+        "recent_median_er" not in inference_source
+        and "recent_median_er" not in instagram_post_insights_bff
+        and "recent_median_er" not in insights_ui
+        and "fixed_horizon_snapshots_unavailable" in inference_source
+        and "Recent performance trend unavailable" in insights_ui,
+        "unequal-age cumulative ER must never be presented as a recent performance trend",
+    )
+    for route_name, route_source in (
+        ("classify", classify_bff),
+        ("analyze-concept", analyze_concept_bff),
+        ("refine-caption", refine_caption_bff),
+    ):
+        require(
+            "getRequestUser" in route_source or "requireOwnedBrand" in route_source,
+            f"{route_name} Gemini route must require an authenticated user",
+        )
+        require(
+            '"x-goog-api-key"' in route_source and "?key=" not in route_source,
+            f"{route_name} Gemini route must keep its key out of request URLs",
+        )
+    combined_thesis_docs = "\n".join(
+        (readme,)
+        + tuple(
+            (ROOT / path).read_text(encoding="utf-8")
+            for path in (
+                "docs/THESIS_ML_METHOD.md",
+                "docs/DATA_PROVENANCE.md",
+                "docs/THESIS_DEMO_RUNBOOK.md",
+                "docs/THESIS_TEST_REPORT.md",
+            )
+        )
+    )
+    for required_disclosure in (
+        "Brand Performance Snapshot",
+        "not statistical significance",
+        "cumulative ER",
+        "external trend",
+        "not scored by Random Forest",
+    ):
+        require(
+            required_disclosure.lower() in combined_thesis_docs.lower(),
+            f"thesis documentation is missing disclosure: {required_disclosure}",
+        )
+    require(
         re.search(r"\$[A-Za-z_][A-Za-z0-9_]*:", powershell_preflight) is None,
         "PowerShell variables immediately followed by ':' must use ${Variable} syntax",
     )
@@ -160,6 +310,19 @@ def main() -> int:
         'evaluation_contract -ne "faiv-thesis-v2"' in powershell_preflight
         and "evaluation_status" in powershell_preflight,
         "runtime preflight must require v2 evidence and disclose scientific status",
+    )
+    require(
+        "from app.train_pipeline import training_code_sha256" in powershell_preflight
+        and "$CurrentTrainingCodeHash" in powershell_preflight
+        and "$Metrics.training_code_sha256" in powershell_preflight
+        and "execute sync/retrain again" in powershell_preflight,
+        "runtime preflight must reject model evidence trained by different current source",
+    )
+    require(
+        "posts.media_product_type" in powershell_preflight
+        and "202607120003" in powershell_preflight
+        and "Meta media-product migration is applied" in powershell_preflight,
+        "runtime preflight must verify the Meta product-type database migration",
     )
     for private_evidence_path in ("docs/FINAL_MODEL_EVIDENCE.md",):
         require(
@@ -176,7 +339,7 @@ def main() -> int:
     ):
         require((ROOT / required_path).is_file(), f"missing required document: {required_path}")
 
-    print("PASS thesis repository contract: ML evidence, secure n8n template, docs, and demo artifacts are present")
+    print("PASS thesis repository contract: ML evidence, observed brand patterns, secure n8n template, docs, and demo artifacts are present")
     return 0
 
 

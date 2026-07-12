@@ -31,6 +31,15 @@ This release adds a safety foundation:
 - Stale Insights render the original scored snapshot and cannot apply old recommendations.
 - The UI now calls Random Forest output a raw class score, not a calibrated probability.
 - Counterfactuals are described as non-causal model sensitivity scenarios.
+- Compose now includes a brand-scoped Brand Performance Snapshot before the
+  Creative Brief and scored inputs. It reports medians, IQR boundaries, sample
+  counts, evidence levels, and freshness from mature verified history without
+  claiming causal audience preference.
+- Audience demographics, content pillars, visual/video style,
+  hooks/storytelling, seasonality, and external trends are explicitly shown as
+  not measured rather than being invented by an LLM.
+- Meta product classification is retained so Feed video is not silently mapped
+  to Reels.
 
 These changes are an important safety slice. They do not replace the remaining production architecture described below.
 
@@ -175,6 +184,41 @@ Counterfactual recommendations must be called model sensitivity scenarios. They 
 
 AI outputs should store provider, exact model, prompt version, content revision, input hash, response, timestamp, and acceptance state. LLM advice must never be mixed with model evidence.
 
+### Brand Performance Snapshot and trend policy
+
+The thesis-scope system now provides useful pre-prediction context without
+claiming capabilities absent from its data. For each selected brand it
+summarizes observed format, WIB daypart, weekday/weekend, CTA, question, emoji,
+caption-length, and hashtag groups using median cumulative ER, first/third
+quartiles, sample size, and median difference from the overall brand in
+percentage points. Robust summaries reduce the effect of viral outliers, but do
+not remove confounding.
+
+Evidence-level rules are deliberately conservative UI guards:
+
+- fewer than 5 posts: `limited` and never highlighted;
+- 5–14 posts: `exploratory`;
+- 15 or more posts: `directional`;
+- at least 20 total eligible posts and two eligible groups before naming a
+  highest-observed group.
+
+These cutoffs are not p-values, confidence intervals, minimum causal sample
+sizes, or proof of audience preference. Product copy must say “highest observed
+median ER,” include `n` and IQR, and keep the data scope visible. When a brand
+uses a niche fallback model, the UI distinguishes brand-only descriptive
+patterns from cohort-based prediction.
+
+Current trend adaptation is limited to fresh Graph synchronization, weekly
+retraining, a freshness indicator, and recent 90-day **publishing mix**. Recent
+and prior performance are not compared because cumulative ER measured at the
+latest sync gives older posts more opportunity to accumulate engagement. No
+demographic, visual/multimodal, reviewed content-pillar, seasonal-event, or
+external trend source exists today. A defensible future trend layer requires
+append-only fixed-horizon metric snapshots, time-aware drift evaluation, and
+sourced/versioned trend signals with region, niche, retrieval time, expiry, and
+prediction-time availability. The history/trend weight must be selected by
+temporal validation, not an arbitrary product percentage.
+
 ## Visual Concept and Content Details
 
 ### Codebase verdict
@@ -185,13 +229,19 @@ The current model trains on Graph-derived historical data. That history contains
 
 Current behavior:
 
-- Predict page keeps Visual Concept in React memory.
-- AI Assistant sends it to Gemini concept analysis and caption refinement.
+- Predict page shows the optional Creative Brief/Visual Concept as a visible
+  planning section after the Brand Performance Snapshot and keeps it in React
+  memory.
+- AI Assistant sends it to authenticated, brand-authorized Gemini concept
+  analysis and caption refinement routes. Only aggregate safe brand-pattern
+  context is added; raw historical captions and media IDs are not sent.
 - Predict BFF, FastAPI, preprocessing, training, model bundle, sync, n8n, and prediction history do not use it.
 - Calendar content_details and visual_reference are separate planning fields.
 - Calendar does not load Visual Concept into Predict.
 - A concept-only change does not change the Random Forest result.
 - Applying a concept-conditioned caption rewrite can indirectly change prediction features.
+- Client request snapshots, cancellation, and stale-output guards prevent an
+  older concept/caption response from silently replacing newer draft work.
 
 Recommended user copy:
 
@@ -210,14 +260,12 @@ Recommended user copy:
 | Maintainability | Low complexity | High prompt and embedding drift | Feature registry and fallback model without semantic features |
 | Scalability | Straightforward | LLM cost and rate limits | Async cached concept analysis, not synchronous core inference |
 
-### Visual Concept defects to clean up
+### Remaining Visual Concept limitations
 
 Critical or high:
 
 - Concept, analysis, prompt version, and accepted AI outputs are not persisted.
 - Calendar Content Details, Visual Reference, and Predict Visual Concept are disconnected.
-- AI results do not carry an input hash and can become stale.
-- Old caption rewrites can replace newer work.
 - Gemini receives unpublished briefs without a tenant-level disable policy or explicit enterprise disclosure.
 - No direct tests verify that concept never enters the prediction payload.
 
@@ -226,7 +274,6 @@ Medium or low:
 - Gemini content_type means creative archetype, while Calendar content_type means media format.
 - Calendar content_details behaves like a title or summary and should be renamed.
 - Analyze Concept output is not reused by Caption Refine, duplicating cost and interpretation.
-- README endpoint inventory previously omitted Analyze Concept.
 - Calendar export and desktop rendering treat visual fields inconsistently.
 
 Recommended data model:
@@ -472,7 +519,9 @@ Initial Predict service target:
 2. Counterfactuals need support checks and non-causal contracts.
 3. Calendar prediction_id is not wired by the product flow.
 4. Visual Concept and Calendar Content Details are disconnected and ephemeral.
-5. AI outputs lack prompt/model/input lineage and stale protection.
+5. AI outputs still lack durable prompt/model/input lineage across sessions;
+   thesis-scope client request snapshots and stale-response guards are not an
+   enterprise audit store.
 6. Sync uses current mutable metrics instead of observation snapshots.
 7. Meta credentials are not stored in a scalable connection registry.
 8. One broad internal token creates a large trust boundary.

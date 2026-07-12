@@ -18,6 +18,15 @@ const PREDICTION_MATCH_STATUSES = new Set([
   "unique_verified_caption",
   "ambiguous_duplicate_caption",
 ]);
+const COMPARISON_UNAVAILABLE_MESSAGES: Record<string, string> = {
+  not_synced: "This post has no verified synchronized engagement rate yet.",
+  immature: "This post is younger than the required seven-day maturity window.",
+  unmodeled_format: "This post's media format is not supported by the prediction model.",
+  incomplete_features: "This synchronized post is missing features required for a like-for-like model comparison.",
+  lookup_unavailable: "Comparison eligibility could not be verified from synchronized history.",
+};
+const NO_BASELINE_MESSAGE = "No other mature, model-eligible posts are available for a brand-history baseline.";
+const RECENT_PERFORMANCE_REASON = "Recent performance trend is unavailable because cumulative engagement rates were not captured at an equal post-age horizon. Fixed-horizon metric snapshots are required before recent and older posts can be compared fairly.";
 
 function finiteNumber(value: unknown, maximum = Number.POSITIVE_INFINITY): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= maximum
@@ -143,6 +152,19 @@ export async function POST(request: Request) {
         ? "verified_graph_caption"
         : null,
     } : null;
+    const rawHistorical = data?.historical && typeof data.historical === "object"
+      ? data.historical as Record<string, unknown>
+      : {};
+    const comparisonEligible = rawHistorical.comparison_eligible === true;
+    const rawComparisonCode = typeof rawHistorical.comparison_unavailable_code === "string"
+      ? rawHistorical.comparison_unavailable_code
+      : null;
+    const comparisonCode = comparisonEligible
+      ? null
+      : rawComparisonCode && COMPARISON_UNAVAILABLE_MESSAGES[rawComparisonCode]
+        ? rawComparisonCode
+        : "lookup_unavailable";
+    const baselinePosts = finiteNumber(rawHistorical.brand_baseline_posts, 1_000_000);
 
     const result = NextResponse.json({
       status: "success",
@@ -153,8 +175,22 @@ export async function POST(request: Request) {
         new Set(["profile_visits", "follows"])
       ),
       historical: {
-        brand_median_er: finiteNumber(data?.historical?.brand_median_er),
-        recent_median_er: finiteNumber(data?.historical?.recent_median_er),
+        brand_median_er: finiteNumber(rawHistorical.brand_median_er),
+        brand_baseline_posts: baselinePosts === null ? 0 : Math.floor(baselinePosts),
+        brand_baseline_unavailable_reason:
+          rawHistorical.brand_baseline_unavailable_reason === NO_BASELINE_MESSAGE
+            ? NO_BASELINE_MESSAGE
+            : null,
+        comparison_eligible: comparisonEligible,
+        comparison_unavailable_code: comparisonCode,
+        comparison_unavailable_reason: comparisonCode
+          ? COMPARISON_UNAVAILABLE_MESSAGES[comparisonCode]
+          : null,
+        recent_performance: {
+          available: false,
+          reason_code: "fixed_horizon_snapshots_unavailable",
+          reason: RECENT_PERFORMANCE_REASON,
+        },
       },
       prediction,
       prediction_match_status: typeof data?.prediction_match_status === "string" && PREDICTION_MATCH_STATUSES.has(data.prediction_match_status)

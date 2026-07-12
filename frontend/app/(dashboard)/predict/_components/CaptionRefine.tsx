@@ -1,85 +1,119 @@
 "use client";
 
-import { useState } from "react";
-import { PenTool, Loader2, FileText, AlertTriangle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, FileText, Loader2, PenTool } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
 type AiState = "idle" | "loading" | "enriched" | "unavailable";
 
-/**
- * Optional Gemini caption rewrite. Reports itself unavailable honestly when
- * the server has no LLM configured. Never changes the score by itself — the
- * user chooses whether to replace their draft.
- */
+/** Optional Gemini caption rewrite. The user must explicitly apply it. */
 export function CaptionRefine({
   caption,
   visualConcept,
-  brandName,
+  brandId,
   format,
   onReplaceCaption,
 }: {
   caption: string;
   visualConcept: string;
-  brandName?: string;
+  brandId: string | null;
   format: string;
   onReplaceCaption: (text: string) => void;
 }) {
   const [aiState, setAiState] = useState<AiState>("idle");
   const [aiMessage, setAiMessage] = useState("");
   const [suggestedCaption, setSuggestedCaption] = useState("");
+  const [isStale, setIsStale] = useState(false);
+  const [historicalContextUsed, setHistoricalContextUsed] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const completedSignatureRef = useRef<string | null>(null);
+  const inputSignature = JSON.stringify([caption, visualConcept, brandId, format]);
+  const latestInputSignatureRef = useRef(inputSignature);
+
+  useEffect(() => {
+    latestInputSignatureRef.current = inputSignature;
+    if (completedSignatureRef.current && completedSignatureRef.current !== inputSignature) {
+      setIsStale(true);
+    }
+    if (requestRef.current) {
+      requestRef.current.abort();
+      requestRef.current = null;
+      setAiState((state) => (state === "loading" ? "idle" : state));
+    }
+  }, [inputSignature]);
+
+  useEffect(() => () => requestRef.current?.abort(), []);
 
   const enrichWithAI = async () => {
+    if (!brandId) return;
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const requestSignature = inputSignature;
     setAiState("loading");
     setSuggestedCaption("");
+    setAiMessage("");
+    setIsStale(false);
     try {
       const res = await fetch("/api/refine-caption", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          brand_id: brandId,
           visual_concept: visualConcept,
           caption,
-          brand: brandName,
           format,
         }),
+        signal: controller.signal,
       });
       const data = await res.json().catch(() => null);
+      if (requestRef.current !== controller || latestInputSignatureRef.current !== requestSignature) return;
       if (res.ok && data?.status === "success" && data.suggestions) {
+        completedSignatureRef.current = requestSignature;
         setAiState("enriched");
         setSuggestedCaption(data.suggestions);
+        setHistoricalContextUsed(data.analysis_context?.historical_patterns_used === true);
         return;
       }
       setAiState("unavailable");
       setAiMessage(data?.message || "AI caption refinement is unavailable.");
-    } catch {
+    } catch (caught: unknown) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      if (requestRef.current !== controller) return;
       setAiState("unavailable");
       setAiMessage("AI caption refinement is unavailable.");
+    } finally {
+      if (requestRef.current === controller) requestRef.current = null;
     }
   };
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-end">
+      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Refine the current caption using the brief and safe historical context. Applying it changes a model input, so run a new prediction.
+        </p>
         <button
           type="button"
           onClick={enrichWithAI}
-          disabled={aiState === "loading" || caption.trim() === ""}
+          disabled={aiState === "loading" || caption.trim() === "" || !brandId}
           title={
-            caption.trim() === ""
-              ? "Write a caption first. AI refinement rewrites your draft instead of starting from scratch."
-              : undefined
+            !brandId
+              ? "Select a brand first"
+              : caption.trim() === ""
+                ? "Write a caption first. AI refinement rewrites your draft instead of starting from scratch."
+                : undefined
           }
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground transition-colors duration-200 hover:bg-primary/95 disabled:opacity-50 active:scale-[0.98] shadow-sm shrink-0"
+          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground shadow-sm transition-colors duration-200 hover:bg-primary/95 disabled:opacity-50 active:scale-[0.98]"
           aria-busy={aiState === "loading"}
         >
           {aiState === "loading" ? (
             <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Refining…
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Refining…
             </>
           ) : (
             <>
-              <PenTool className="h-3.5 w-3.5" />
-              AI Refine Caption
+              <PenTool className="h-3.5 w-3.5" /> AI Refine Caption
             </>
           )}
         </button>
@@ -94,28 +128,42 @@ export function CaptionRefine({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
             role="status"
-            className="rounded-2xl border border-border bg-surface-2/60 p-5 space-y-4 shadow-sm relative overflow-hidden text-left"
+            className="relative space-y-4 overflow-hidden rounded-2xl border border-border bg-surface-2/60 p-5 text-left shadow-sm"
           >
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-bold text-primary uppercase tracking-wider">
-                  AI Suggested Caption
-                </span>
+                <span className="text-xs font-bold uppercase tracking-wider text-primary">AI Suggested Caption</span>
               </div>
-              {suggestedCaption && (
-                <button
-                  type="button"
-                  onClick={() => onReplaceCaption(suggestedCaption)}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 border border-primary/20 px-2.5 py-1.5 text-xs font-bold text-primary transition-colors duration-200 hover:bg-primary hover:text-primary-foreground"
-                >
-                  Replace Draft Caption
-                </button>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-bold text-muted-foreground">
+                  {historicalContextUsed ? "Brand-history context used" : "Brief-only context"}
+                </span>
+                {suggestedCaption && (
+                  <button
+                    type="button"
+                    onClick={() => onReplaceCaption(suggestedCaption)}
+                    disabled={isStale}
+                    title={isStale ? "Inputs changed; refine again before replacing the draft" : undefined}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-primary/20 bg-primary/10 px-2.5 py-1.5 text-xs font-bold text-primary transition-colors duration-200 hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    Replace Draft Caption
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="p-4 rounded-xl border border-border bg-surface text-sm font-medium leading-relaxed text-foreground/90 min-h-[60px] shadow-inner whitespace-pre-wrap">
+            {isStale && (
+              <div className="flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/[0.04] px-3 py-2 text-xs text-warning">
+                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                Inputs changed. Refine again before applying this suggestion.
+              </div>
+            )}
+            <div className="min-h-[60px] whitespace-pre-wrap rounded-xl border border-border bg-surface p-4 text-sm font-medium leading-relaxed text-foreground/90 shadow-inner">
               {suggestedCaption}
             </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              This is AI writing guidance, not a predicted audience preference or a live trend recommendation.
+            </p>
           </motion.div>
         )}
 
@@ -127,10 +175,10 @@ export function CaptionRefine({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
             role="alert"
-            className="rounded-xl border border-warning/30 bg-warning/[0.02] p-4 flex items-start gap-3 text-left"
+            className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/[0.02] p-4 text-left"
           >
-            <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
-            <p className="text-xs text-muted-foreground leading-relaxed">{aiMessage}</p>
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <p className="text-xs leading-relaxed text-muted-foreground">{aiMessage}</p>
           </motion.div>
         )}
       </AnimatePresence>

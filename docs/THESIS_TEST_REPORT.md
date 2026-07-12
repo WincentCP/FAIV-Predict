@@ -2,7 +2,7 @@
 
 Template revision date: 2026-07-12  
 Final verification date: _Pending final-revision rehearsal_  
-Scope: academic ML evidence, API behavior, secure automation template, documentation consistency, and repeatable local demonstration.
+Scope: academic ML evidence, brand-scoped descriptive planning evidence, API behavior, secure automation template, documentation consistency, and repeatable local demonstration.
 
 ## Current verdict
 
@@ -19,8 +19,9 @@ Enterprise-scale queues, global high availability, public Instagram publishing, 
 
 | Gate | Command | Result on 2026-07-12 | Evidence covered |
 | --- | --- | --- | --- |
-| ML/API suite | `python -m pytest -q` in `ml-service` | PASS — 57 tests; one dependency deprecation warning | Authentication, validation, honest unavailable states, optional time, API successor request contract, maturity/provenance, sync identity, cursor-safe bounded historical pagination, fail-fast configuration and token-log redaction, feature parity, three-class and promotion gates, richer metrics/comparators, bounded rejection diagnostics, evaluation artifact and effective-model-scoped safe exporter. Real Supabase trigger/RLS behavior remains in A03/A06. |
+| ML/API suite | `python -m pytest -q` in `ml-service` | PASS — 69 tests; one dependency deprecation warning | Authentication, validation, honest unavailable states, optional time, API successor request contract, maturity/provenance, Meta product-type mapping, brand-pattern aggregation/privacy, comparison-eligibility and fixed-horizon trend guards, sync identity, cursor-safe bounded historical pagination, fail-fast configuration and token-log redaction, feature parity, three-class and promotion gates, richer metrics/comparators, bounded rejection diagnostics, evaluation artifact and effective-model-scoped safe exporter. Real Supabase trigger/RLS behavior remains in A03/A06. |
 | Repository contract | `python scripts/verify_thesis_readiness.py` | PASS on current revision | Secure n8n template, blocked `$env`, documentation alignment and required thesis artifacts |
+| Thesis-machine preflight | `powershell -ExecutionPolicy Bypass -File .\scripts\thesis_preflight.ps1` | Required after final sync/retrain | Container health, endpoint readiness, n8n isolation, applied Meta product-type migration, complete model evidence, and exact match between each model's recorded training-code SHA-256 and the currently running preprocessing/training source |
 | Workflow JSON | `python -m json.tool n8n/workflow_sync_retrain.json` | PASS | JSON syntax only; Docker n8n import/node/runtime compatibility remains part of A09–A10 rehearsal |
 | Frontend compile gates | GitHub Actions: lint, TypeScript, production build | Required on every `main` push | Full repository frontend compilation |
 | Dependency gates | `npm audit --audit-level=moderate` in GitHub Actions | Required on every `main` push | Known moderate-or-higher npm advisories |
@@ -58,6 +59,30 @@ Every newly trained model now persists:
 - versioned `faiv-thesis-v2` evaluation contract.
 
 Raw captions, connection strings, Instagram tokens, and service secrets are excluded from evaluation evidence.
+
+## Brand Performance Snapshot evidence contract
+
+The pre-prediction snapshot is tested and demonstrated separately from ML
+validity. It uses only mature, verified Instagram Graph rows for the selected
+brand and returns aggregate sample counts, median cumulative ER, first/third
+quartiles, evidence level, freshness, recent publishing mix, and transparent
+counts of unmodeled formats excluded from comparisons. Historical captions and
+media IDs are not returned by this endpoint.
+
+Interpret its evidence levels only as UX guards:
+
+- fewer than 5 observations: limited and not highlighted;
+- 5–14: exploratory;
+- 15 or more: directional;
+- at least 20 total eligible posts and two eligible groups before naming a
+  highest-observed group.
+
+These values are not statistical-significance thresholds and do not establish
+causality or audience preference. The test/demo must also show that demographics,
+content pillars, visual/video style, hooks/storytelling, seasonality, and
+external trends remain explicitly not measured. Recent publishing mix must not
+be described as a recent performance trend because cumulative ER is confounded
+by post age.
 
 After rebuilding and running the final retraining, export the actual private-data results for the thesis appendix:
 
@@ -126,7 +151,7 @@ strings, credential values, or `.env` contents.
 | A05 | Prediction without time | result is saved and visibly labelled provisional | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A06 | Input change | old result becomes stale/superseded; successor preserves history | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A07 | Prediction failure | unavailable model/backend produces an honest error and no fabricated score | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
-| A08 | Instagram insights | verified media IDs and stored engagement evidence render | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
+| A08 | Brand snapshot and Instagram insights | owned-brand aggregate patterns render with median/IQR/`n`, limitations, freshness, correct Reels/Feed-video classification, and verified media evidence; sparse/unavailable patterns do not block Predict | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A09 | n8n health branch | every configured brand binding reports connected | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A10 | n8n sync/retrain | execution succeeds and produces current evaluation-contract evidence | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A11 | Restart persistence | stop/start preserves Supabase data, workflow, and encrypted credentials | _Pending_ | _Pending_ | _Pending_ | _Pending_ |

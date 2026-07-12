@@ -38,12 +38,14 @@ CREATE TABLE IF NOT EXISTS posts (
     hashtag_count INTEGER NOT NULL,
     has_cta BOOLEAN DEFAULT false NOT NULL,
     instagram_media_id VARCHAR(255),
+    media_product_type VARCHAR(50),
     source VARCHAR(50),
     synced_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS instagram_media_id VARCHAR(255);
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS media_product_type VARCHAR(50);
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS source VARCHAR(50);
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP WITH TIME ZONE;
 
@@ -242,6 +244,12 @@ CREATE INDEX IF NOT EXISTS idx_posts_brand_id ON posts(brand_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_instagram_media
   ON posts(brand_id, instagram_media_id)
   WHERE instagram_media_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_posts_brand_verified_history
+  ON posts(brand_id, created_at DESC)
+  WHERE source = 'instagram_graph'
+    AND instagram_media_id IS NOT NULL
+    AND er IS NOT NULL
+    AND post_hour IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_predictions_brand_id ON predictions(brand_id);
 CREATE INDEX IF NOT EXISTS idx_predictions_created_by ON predictions(created_by);
 CREATE INDEX IF NOT EXISTS idx_predictions_status ON predictions(created_by, prediction_status, created_at DESC);
@@ -271,6 +279,17 @@ BEGIN
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
+    WHERE conname = 'posts_media_product_type_check' AND conrelid = 'public.posts'::regclass
+  ) THEN
+    ALTER TABLE public.posts
+      ADD CONSTRAINT posts_media_product_type_check
+      CHECK (
+        media_product_type IS NULL
+        OR media_product_type IN ('FEED', 'REELS', 'STORY', 'AD', 'UNKNOWN')
+      ) NOT VALID;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
     WHERE conname = 'predictions_actual_source_check' AND conrelid = 'public.predictions'::regclass
   ) THEN
     ALTER TABLE public.predictions
@@ -278,6 +297,9 @@ BEGIN
       CHECK (actual_source IS NULL OR actual_source = 'instagram_media_id') NOT VALID;
   END IF;
 END $$;
+
+COMMENT ON COLUMN public.posts.media_product_type IS
+  'Normalized Meta media_product_type. VIDEO is modeled as Reels only when this value is REELS.';
 
 -- Row-Level Security
 -- RLS is enabled on every table. The ML service connects as the table owner

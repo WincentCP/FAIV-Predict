@@ -1431,7 +1431,10 @@ function csvEscape(value: string): string {
 
 function normalizeFormat(value: unknown): CalendarEntry["format"] {
   const normalized = String(value || "").trim().toLowerCase();
-  if (normalized.includes("reel") || normalized === "video") return "Reels";
+  // Generic "video" does not establish Meta's product type. Only an explicit
+  // Reel label may select the Reels feature; unknown video imports follow the
+  // existing Unspecified + review-warning path.
+  if (normalized.includes("reel")) return "Reels";
   if (normalized.includes("carousel") || normalized.includes("slide")) return "Carousel";
   if (normalized.includes("single") || normalized.includes("image") || normalized.includes("photo")) return "Single Image";
   return "Unspecified";

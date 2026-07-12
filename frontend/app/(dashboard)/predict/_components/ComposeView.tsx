@@ -15,6 +15,7 @@ import { type ContentFormat, type Brand } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Panel, Label } from "./Panel";
 import { AiToolsAccordion } from "./AiToolsAccordion";
+import { BrandPatterns } from "./BrandPatterns";
 
 const FORMATS: { id: ContentFormat; icon: typeof Film }[] = [
   { id: "Reels", icon: Film },
@@ -190,6 +191,12 @@ export function ComposeView(props: {
         </div>
       </Panel>
 
+      <BrandPatterns
+        brandId={accountId}
+        brandName={account?.name}
+        activeModelScope={account?.active_model_scope}
+      />
+
       {/* Caption: the hero input */}
       <Panel title="Caption">
         <div className="mb-2 flex items-center justify-between">
@@ -217,7 +224,7 @@ export function ComposeView(props: {
         visualConcept={visualConcept}
         setVisualConcept={setVisualConcept}
         caption={caption}
-        brandName={account?.name}
+        brandId={accountId}
         format={contentFormat}
         onReplaceCaption={setCaption}
       />

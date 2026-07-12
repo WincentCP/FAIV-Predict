@@ -19,6 +19,10 @@ Training uses only records that satisfy all of the following:
 - source is `instagram_graph`;
 - immutable `instagram_media_id` exists;
 - engagement rate, posting hour, and timestamp are present;
+- the media format is supported by the feature contract; a Graph `VIDEO` row is
+  treated as Reels only when Meta reports `media_product_type = REELS`, while
+  Feed video, Story, Ad, unknown, and unverified video rows remain stored but
+  are excluded from model training;
 - the post is at least seven complete days old, so an obviously immature
   cumulative engagement label is never used;
 - the record belongs to the selected account or confirmed niche cohort;
@@ -89,7 +93,66 @@ The version-2 feature contract contains:
 
 The Instagram synchronization path, training path, and inference path use the same Python `DataPreprocessor`. A golden automated test verifies that one representative post produces an identical ordered feature vector through training and inference.
 
-Visual Concept is not an ML feature. Gemini analysis may help rewrite a caption, but only the resulting caption and supported metadata affect a new prediction.
+Creative Brief/Visual Concept is not an ML feature. It is optional planning
+context for Gemini analysis and caption refinement. Only the resulting caption
+and supported metadata affect a new Random Forest prediction, so applying a
+rewrite requires recalculation while changing the brief alone does not change
+the ML score.
+
+## Descriptive Brand Performance Snapshot
+
+Before prediction, the product may summarize **observed brand patterns** from
+the same eligible, mature, verified history. This is a descriptive planning
+layer, not a feature of Random Forest and not a substitute for its out-of-time
+evaluation. It is always scoped to the selected brand even when prediction
+falls back to a pooled niche model; the UI must disclose that difference.
+
+For each observable group, such as format, WIB posting window, weekday/weekend,
+CTA presence, question presence, emoji presence, caption-length band, and
+hashtag-count band, the snapshot reports:
+
+- the number of eligible observations (`n`);
+- median cumulative engagement rate;
+- first and third quartiles (IQR boundaries);
+- the difference between the group median and the brand median in engagement-
+  rate percentage points; and
+- an evidence-level label.
+
+Medians and IQRs are preferred to means because cumulative engagement contains
+viral and campaign outliers. The evidence labels are intentionally simple UX
+guards: `n < 5` is `limited` and is not eligible for a highlight, `n = 5–14` is
+`exploratory`, and `n >= 15` is `directional`. At least 20 total eligible brand
+posts and two eligible groups are required before the interface names a
+highest-observed group. These thresholds are **not** hypothesis-test
+significance thresholds, confidence intervals, causal criteria, or proof that
+an audience prefers one treatment. The UI therefore says “highest observed
+median ER,” never “best” or “will improve performance.”
+
+The available history cannot support brand-specific demographic, semantic, or
+multimodal conclusions. Audience age, gender, and location are not collected;
+posts do not have a reviewed content-pillar taxonomy; images, video editing,
+audio, visual style, hooks, and storytelling are not consistently annotated or
+analyzed. These dimensions and external trends are displayed as **Not
+measured**, rather than filled with Gemini guesses.
+
+### Freshness and trends
+
+Current relevance comes from synchronized Graph observations, weekly
+retraining, and a visible freshness status. A recent 90-day publishing mix may
+describe what formats and posting windows the brand has used, but it must not
+claim that recent content performs better or worse than prior content. The
+stored outcome is cumulative ER at the latest sync, so differently aged posts
+have unequal exposure time; a recent-versus-prior comparison would be age-
+confounded.
+
+No external platform-trend feed, seasonal-event feature, demographic shift, or
+recency weight is included in the current classifier. This avoids an arbitrary
+history/trend blend and keeps the thesis claim reproducible. A future study
+should first store append-only metric snapshots and compare posts at the same
+age (for example, seven-day ER). External trend signals should then have a
+sourced region/niche, retrieval timestamp, expiry, version, and feature
+availability at prediction time. Any blend or recency weight must be selected
+using temporal validation rather than a fixed product-design percentage.
 
 ## Validation design
 
@@ -196,6 +259,13 @@ language, season, and observation window.
 
 The dataset fingerprint hashes immutable media identity, brand identity, timestamp, engagement rate, and derived feature vector in canonical order. Raw captions are excluded from exported evidence. The source fingerprint hashes `preprocessing.py` and `train_pipeline.py`; runtime evidence records core library versions and the production requirements hash. Together with parameters, thresholds, feature order, collision-resistant model version, and random seed, these values make the experiment state traceable without publishing tokens or captions. A hash proves identity, not availability: an exact independent rerun still requires a retained private data snapshot or unchanged source database.
 
+The thesis-machine preflight computes that source fingerprint inside the
+currently running ML container and compares it with every exported model's
+recorded `training_code_sha256`. A mismatch fails preflight and requires a new
+sync/retrain. This prevents an older artifact from being presented after a
+training-query or feature-semantics revision, including the Feed-video versus
+Reels correction.
+
 ## Optional posting time
 
 When posting time is unknown, inference frequency-weights predictions over only
@@ -210,6 +280,12 @@ recalculate; the prior result remains immutable history.
 - Sensitivity scenarios are non-causal model simulations.
 - Performance may not generalize beyond the represented accounts, niches, language patterns, season, or time window.
 - Organic Instagram engagement can be affected by paid promotion, giveaways, algorithm changes, creative quality, audio, and external events not represented by the features.
+- Brand Performance Snapshot is descriptive brand history, not causal evidence
+  of audience preference, and it does not make an exploratory model validated.
+- Recent publishing mix is not a recent performance trend. The current outcome
+  cannot fairly compare differently aged posts.
+- Audience demographics, content pillars, visual/video style,
+  hooks/storytelling, seasonality, and external platform trends are not measured.
 - Cumulative engagement is gated to posts at least seven days old but is not a
   fixed-horizon label; older posts have had more time to accumulate engagement.
 - Initial imports of older posts use follower count at first observation as a

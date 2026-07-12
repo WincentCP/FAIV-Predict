@@ -1,6 +1,6 @@
 # FAIV Predict thesis demonstration runbook
 
-This runbook is for the bachelor-thesis prototype on the Windows thesis machine. It assumes the Supabase migrations, two brand bindings, n8n Header Auth credential, and SMTP credential have already been configured.
+This runbook is for the bachelor-thesis prototype on the Windows thesis machine. It assumes all three Supabase migrations, two brand bindings, n8n Header Auth credential, and SMTP credential have already been configured.
 
 ## Scope statement for the examiner
 
@@ -33,6 +33,9 @@ not a fixed-horizon metric snapshot.
 5. Open `http://localhost:3000` and `http://localhost:5678`.
 6. Execute both n8n branches manually. Do not re-import the workflow when the existing one already works in the persistent volume.
 7. Ensure the final sync/retrain creates models using evaluation contract `faiv-thesis-v2`.
+   Confirm migration `202607120003_brand_patterns_and_media_product.sql` was
+   applied before that sync so Graph `media_product_type` distinguishes Reels
+   from Feed video.
 8. Export final model evidence:
 
    ```powershell
@@ -44,6 +47,11 @@ not a fixed-horizon metric snapshot.
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\thesis_preflight.ps1
    ```
+
+   The preflight must report each model complete and must not report a
+   training-code fingerprint mismatch. It derives the current hash with the
+   same `training_code_sha256()` function used at training time, so a model
+   from before the Feed-video/Reels semantics change is not accepted.
 
 10. Complete A01–A12 in `docs/THESIS_TEST_REPORT.md`. Record date/time, exact
     screenshot/log/query reference, and n8n execution IDs; retain unredacted
@@ -113,15 +121,32 @@ Open Brands/Niches and show:
 - real verified post counts;
 - no fabricated sample data.
 
+Select each brand on Predict and show that Brand Performance Snapshot is
+brand-scoped. If the active prediction model is a niche model, point out the
+separate labels: the snapshot describes only that brand's history while the
+classifier uses the named cohort.
+
 ### 3. Normal prediction
 
 1. Select a brand.
-2. Select a supported format.
-3. Enter a real date, posting time, and caption.
-4. Analyze.
-5. Explain tier, raw class score, model scope/version, validation evidence, OOD warning, and non-causal sensitivity scenarios.
-6. State that the model uses format, timing, and structural caption features; it
+2. Review Brand Performance Snapshot before editing the draft. Show median ER,
+   IQR, `n`, and evidence level for an observed format or posting-window group.
+   Say “historical association,” not “the audience prefers this.”
+3. Open Creative Brief/Visual Concept and state that it is optional planning
+   context for Gemini, not a Random Forest feature. Show the explicitly not-
+   measured audience demographics, visual/video style, content pillars,
+   hooks/storytelling, and external trends.
+4. Select a supported format.
+5. Enter a real date, posting time, and caption.
+6. Analyze.
+7. Explain tier, raw class score, model scope/version, validation evidence, OOD warning, and non-causal sensitivity scenarios.
+8. State that the model uses format, timing, and structural caption features; it
    does not inspect the image/video or semantically understand creative quality.
+
+Explain the trend boundary: Graph data is synchronized and retrained weekly,
+the snapshot exposes freshness and recent publishing mix, but it does not claim
+a recent performance trend. Stored ER is cumulative at latest sync, so older
+and newer posts cannot be compared fairly without fixed-horizon snapshots.
 
 Do not call the raw Random Forest score a calibrated probability.
 
@@ -146,7 +171,10 @@ Change caption, format, weekend status, or posting hour and recalculate. Show:
 
 ### 6. Instagram and automation
 
-Show verified Instagram insights, then open the latest successful n8n execution. Explain that immutable Instagram media ID is the post identity and synchronization never maps outcomes using caption similarity alone.
+Show verified Instagram insights, including correct Reels versus Feed-video
+product classification, then open the latest successful n8n execution. Explain
+that immutable Instagram media ID is the post identity and synchronization
+never maps outcomes using caption similarity alone.
 
 ### 7. Academic evaluation
 
@@ -183,6 +211,8 @@ Only perform controlled, reversible demonstrations:
 
 - invalid caption/date/hour → typed validation message;
 - no trained model for a new brand → honest unavailable state;
+- unavailable or sparse Brand Performance Snapshot → honest empty/error state
+  that does not block core prediction;
 - temporarily stop only `ml-service`, refresh prediction, show service error, then restore it:
 
   ```powershell

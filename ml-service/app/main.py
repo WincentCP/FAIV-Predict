@@ -20,6 +20,7 @@ import psycopg2
 import psycopg2.extras
 
 from app.preprocessing import DataPreprocessor, HASHTAG_PATTERN, CTA_PATTERN, FEATURE_ORDER_V1
+from app.brand_patterns import build_brand_patterns
 from app.model_loader import ModelLoader, ModelUnavailableError
 from app.train_pipeline import (
     MIN_ACCOUNT_TRAINING_SAMPLES,
@@ -29,6 +30,19 @@ from app.train_pipeline import (
 
 MAX_INSTAGRAM_HEALTH_BRANDS = 100
 SUPPORTED_INSTAGRAM_MEDIA_TYPES = {"IMAGE", "CAROUSEL_ALBUM", "VIDEO"}
+KNOWN_INSTAGRAM_PRODUCT_TYPES = {"FEED", "REELS", "STORY", "AD"}
+POST_COMPARISON_UNAVAILABLE_REASONS = {
+    "not_synced": "This post has no verified synchronized engagement rate yet.",
+    "immature": "This post is younger than the required seven-day maturity window.",
+    "unmodeled_format": "This post's media format is not supported by the prediction model.",
+    "incomplete_features": "This synchronized post is missing features required for a like-for-like model comparison.",
+    "lookup_unavailable": "Comparison eligibility could not be verified from synchronized history.",
+}
+RECENT_PERFORMANCE_UNAVAILABLE_REASON = (
+    "Recent performance trend is unavailable because cumulative engagement rates "
+    "were not captured at an equal post-age horizon. Fixed-horizon metric snapshots "
+    "are required before recent and older posts can be compared fairly."
+)
 DEFAULT_INSTAGRAM_SYNC_POST_LIMIT = 500
 MAX_INSTAGRAM_SYNC_POST_LIMIT = 1000
 INSTAGRAM_GRAPH_PAGE_SIZE = 100
@@ -858,7 +872,7 @@ def _fetch_ig_posts(
     )
     url = f"https://graph.facebook.com/v25.0/{ig_id}/media"
     base_params = {
-        "fields": "caption,like_count,comments_count,media_type,timestamp",
+        "fields": "caption,like_count,comments_count,media_type,media_product_type,timestamp",
         # Request bounded pages and follow Meta's opaque `next` URL until the
         # configured total is reached. Do not assume Meta accepts the total cap
         # as one page size.
@@ -1110,6 +1124,69 @@ def instagram_health(brand_ids: Optional[str] = None):
     return {"status": "success", "connections": connections}
 
 
+@app.get("/brand/patterns", dependencies=[Depends(verify_internal_token)])
+def brand_patterns(brand_id: str):
+    """Descriptive, brand-only planning evidence from verified mature posts.
+
+    The authenticated Next.js BFF remains responsible for user/brand ownership
+    checks. This internal endpoint additionally refuses unowned brands and
+    returns aggregate evidence only—never captions or Instagram media IDs.
+    """
+    try:
+        normalized_brand_id = str(uuid.UUID(brand_id))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail="brand_id must be a valid UUID.") from exc
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """SELECT id, name, niche
+                   FROM brands
+                   WHERE id = %s AND owner_id IS NOT NULL
+                   LIMIT 1""",
+                (normalized_brand_id,),
+            )
+            brand = cur.fetchone()
+            if not brand:
+                raise HTTPException(status_code=404, detail="Brand was not found.")
+
+            cur.execute(
+                """SELECT caption, er, is_single_image, is_carousel, is_reels,
+                          media_product_type, post_hour, caption_length,
+                          hashtag_count, has_cta, created_at, synced_at
+                   FROM posts
+                   WHERE brand_id = %s
+                     AND source = 'instagram_graph'
+                     AND instagram_media_id IS NOT NULL
+                     AND er IS NOT NULL
+                     AND post_hour IS NOT NULL
+                     AND created_at IS NOT NULL
+                     AND created_at <= now() - (%s * interval '1 day')
+                   ORDER BY created_at ASC, instagram_media_id ASC""",
+                (normalized_brand_id, MIN_POST_AGE_DAYS),
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+        return build_brand_patterns(
+            rows,
+            brand_id=normalized_brand_id,
+            brand_name=str(brand["name"]),
+            niche=str(brand["niche"]),
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Brand pattern lookup failed for brand %s", normalized_brand_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Brand performance patterns are temporarily unavailable.",
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
 @app.get("/instagram/posts", dependencies=[Depends(verify_internal_token)])
 def instagram_posts(brand_id: str, limit: int = 24):
     """
@@ -1125,7 +1202,7 @@ def instagram_posts(brand_id: str, limit: int = 24):
     try:
         followers = _fetch_ig_profile(ig_id, token)
         params = {
-            "fields": "caption,like_count,comments_count,media_type,media_url,thumbnail_url,permalink,timestamp",
+            "fields": "caption,like_count,comments_count,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp",
             "limit": min(max(limit, 1), 50),
             "access_token": token,
         }
@@ -1151,17 +1228,43 @@ def instagram_posts(brand_id: str, limit: int = 24):
             conn = psycopg2.connect(db_url)
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT p.instagram_media_id, p.er, p.synced_at
+                    """SELECT p.instagram_media_id, p.er, p.synced_at,
+                              (
+                                p.created_at IS NOT NULL
+                                AND p.created_at <= now() - (%s * interval '1 day')
+                              ) AS is_mature,
+                              (
+                                p.is_single_image
+                                OR p.is_carousel
+                                OR (p.is_reels AND p.media_product_type = 'REELS')
+                              ) AS is_modeled_format,
+                              (p.post_hour IS NOT NULL) AS has_complete_features
                        FROM posts p
                        WHERE p.brand_id = %s
                          AND p.source = 'instagram_graph'
                          AND p.instagram_media_id IS NOT NULL""",
-                    (brand_id,),
+                    (MIN_POST_AGE_DAYS, brand_id),
                 )
-                for media_id, er, synced_at in cur.fetchall():
+                for (
+                    media_id,
+                    er,
+                    synced_at,
+                    is_mature,
+                    is_modeled_format,
+                    has_complete_features,
+                ) in cur.fetchall():
+                    numeric_er = float(er) if er is not None else None
+                    comparison = _post_comparison_status(
+                        has_sync=True,
+                        er=numeric_er,
+                        is_mature=bool(is_mature),
+                        is_modeled_format=bool(is_modeled_format),
+                        has_complete_features=bool(has_complete_features),
+                    )
                     synced_by_media[str(media_id)] = {
-                        "er": float(er) if er is not None else None,
+                        "er": numeric_er,
                         "synced_at": synced_at.isoformat() if synced_at else None,
+                        "comparison": comparison,
                     }
                 cur.execute(
                     """SELECT percentile_cont(0.33) WITHIN GROUP (ORDER BY p.er),
@@ -1169,8 +1272,17 @@ def instagram_posts(brand_id: str, limit: int = 24):
                        FROM posts p
                        WHERE p.brand_id = %s
                          AND p.source = 'instagram_graph'
-                         AND p.instagram_media_id IS NOT NULL""",
-                    (brand_id,),
+                         AND p.instagram_media_id IS NOT NULL
+                         AND p.er IS NOT NULL
+                         AND p.post_hour IS NOT NULL
+                         AND p.created_at IS NOT NULL
+                         AND p.created_at <= now() - (%s * interval '1 day')
+                         AND (
+                           p.is_single_image
+                           OR p.is_carousel
+                           OR (p.is_reels AND p.media_product_type = 'REELS')
+                         )""",
+                    (brand_id, MIN_POST_AGE_DAYS),
                 )
                 row = cur.fetchone()
                 if row and row[0] is not None:
@@ -1190,13 +1302,25 @@ def instagram_posts(brand_id: str, limit: int = 24):
         # Instagram sync; media that has not been synced remains unavailable.
         synced = synced_by_media.get(str(m.get("id")))
         er = synced.get("er") if synced else None
+        comparison = (
+            synced.get("comparison")
+            if synced
+            else _post_comparison_status(
+                has_sync=False,
+                er=None,
+                is_mature=False,
+                is_modeled_format=False,
+                has_complete_features=False,
+            )
+        )
         tier = None
-        if p33 is not None and er is not None:
+        if p33 is not None and er is not None and comparison["eligible"]:
             tier = "Low" if er < p33 else ("Average" if er <= p67 else "High")
         posts.append({
             "id": m.get("id"),
             "caption": m.get("caption", ""),
             "media_type": m.get("media_type"),
+            "media_product_type": m.get("media_product_type"),
             "media_url": m.get("media_url"),
             "thumbnail_url": m.get("thumbnail_url"),
             "permalink": m.get("permalink"),
@@ -1205,6 +1329,9 @@ def instagram_posts(brand_id: str, limit: int = 24):
             "comments": comments,
             "er": er,
             "tier": tier,
+            "comparison_eligible": comparison["eligible"],
+            "comparison_unavailable_code": comparison["reason_code"],
+            "comparison_unavailable_reason": comparison["reason"],
             "synced_at": synced.get("synced_at") if synced else None,
         })
     return {
@@ -1247,6 +1374,35 @@ def _media_insight_values(payload: Dict[str, Any]) -> Dict[str, float]:
         if value is not None:
             result[name] = value
     return result
+
+
+def _post_comparison_status(
+    *,
+    has_sync: bool,
+    er: Optional[float],
+    is_mature: bool,
+    is_modeled_format: bool,
+    has_complete_features: bool,
+) -> Dict[str, Any]:
+    """Return a stable eligibility flag and an honest unavailable reason."""
+    reason_code = None
+    if not has_sync or er is None:
+        reason_code = "not_synced"
+    elif not is_mature:
+        reason_code = "immature"
+    elif not is_modeled_format:
+        reason_code = "unmodeled_format"
+    elif not has_complete_features:
+        reason_code = "incomplete_features"
+    return {
+        "eligible": reason_code is None,
+        "reason_code": reason_code,
+        "reason": (
+            POST_COMPARISON_UNAVAILABLE_REASONS[reason_code]
+            if reason_code is not None
+            else None
+        ),
+    }
 
 
 @app.post("/instagram/post-insights", dependencies=[Depends(verify_internal_token)])
@@ -1310,9 +1466,18 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
             except Exception:
                 unavailable.append(metric)
 
-    historical: Dict[str, Optional[float]] = {
+    historical: Dict[str, Any] = {
         "brand_median_er": None,
-        "recent_median_er": None,
+        "brand_baseline_posts": 0,
+        "brand_baseline_unavailable_reason": None,
+        "comparison_eligible": False,
+        "comparison_unavailable_code": "not_synced",
+        "comparison_unavailable_reason": POST_COMPARISON_UNAVAILABLE_REASONS["not_synced"],
+        "recent_performance": {
+            "available": False,
+            "reason_code": "fixed_horizon_snapshots_unavailable",
+            "reason": RECENT_PERFORMANCE_UNAVAILABLE_REASON,
+        },
     }
     prediction = None
     prediction_match_status = "not_found"
@@ -1323,30 +1488,76 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
             conn = psycopg2.connect(db_url)
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
-                    """SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY p.er) AS brand_median_er
+                    """SELECT p.er,
+                              (
+                                p.created_at IS NOT NULL
+                                AND p.created_at <= now() - (%s * interval '1 day')
+                              ) AS is_mature,
+                              (
+                                p.is_single_image
+                                OR p.is_carousel
+                                OR (p.is_reels AND p.media_product_type = 'REELS')
+                              ) AS is_modeled_format,
+                              (p.post_hour IS NOT NULL) AS has_complete_features
                        FROM posts p
                        WHERE p.brand_id = %s
                          AND p.source = 'instagram_graph'
-                         AND p.instagram_media_id IS NOT NULL""",
-                    (req.brand_id,),
+                         AND p.instagram_media_id = %s
+                       LIMIT 1""",
+                    (MIN_POST_AGE_DAYS, req.brand_id, req.media_id),
                 )
-                row = cur.fetchone()
-                if row and row.get("brand_median_er") is not None:
-                    historical["brand_median_er"] = float(row["brand_median_er"])
-                cur.execute(
-                    """SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY recent.er) AS recent_median_er
-                       FROM (
-                         SELECT p.er FROM posts p
-                         WHERE p.brand_id = %s
-                           AND p.source = 'instagram_graph'
-                           AND p.instagram_media_id IS NOT NULL
-                         ORDER BY p.created_at DESC LIMIT 10
-                       ) recent""",
-                    (req.brand_id,),
-                )
-                row = cur.fetchone()
-                if row and row.get("recent_median_er") is not None:
-                    historical["recent_median_er"] = float(row["recent_median_er"])
+                selected_row = cur.fetchone()
+                if selected_row:
+                    selected_er = (
+                        float(selected_row["er"])
+                        if selected_row.get("er") is not None
+                        else None
+                    )
+                    comparison = _post_comparison_status(
+                        has_sync=True,
+                        er=selected_er,
+                        is_mature=bool(selected_row.get("is_mature")),
+                        is_modeled_format=bool(selected_row.get("is_modeled_format")),
+                        has_complete_features=bool(selected_row.get("has_complete_features")),
+                    )
+                    historical["comparison_eligible"] = comparison["eligible"]
+                    historical["comparison_unavailable_code"] = comparison["reason_code"]
+                    historical["comparison_unavailable_reason"] = comparison["reason"]
+
+                    if comparison["eligible"]:
+                        cur.execute(
+                            """SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY p.er) AS brand_median_er,
+                                      count(*) AS brand_baseline_posts
+                               FROM posts p
+                               WHERE p.brand_id = %s
+                                 AND p.source = 'instagram_graph'
+                                 AND p.instagram_media_id IS NOT NULL
+                                 AND p.instagram_media_id <> %s
+                                 AND p.er IS NOT NULL
+                                 AND p.post_hour IS NOT NULL
+                                 AND p.created_at IS NOT NULL
+                                 AND p.created_at <= now() - (%s * interval '1 day')
+                                 AND (
+                                   p.is_single_image
+                                   OR p.is_carousel
+                                   OR (p.is_reels AND p.media_product_type = 'REELS')
+                                 )""",
+                            (req.brand_id, req.media_id, MIN_POST_AGE_DAYS),
+                        )
+                        baseline_row = cur.fetchone()
+                        if baseline_row:
+                            historical["brand_baseline_posts"] = int(
+                                baseline_row.get("brand_baseline_posts") or 0
+                            )
+                            if baseline_row.get("brand_median_er") is not None:
+                                historical["brand_median_er"] = float(
+                                    baseline_row["brand_median_er"]
+                                )
+                            else:
+                                historical["brand_baseline_unavailable_reason"] = (
+                                    "No other mature, model-eligible posts are available "
+                                    "for a brand-history baseline."
+                                )
 
                 if isinstance(verified_caption, str) and verified_caption.strip():
                     normalized = re.sub(r"\s+", " ", verified_caption.strip().lower())
@@ -1378,6 +1589,11 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
                         prediction_match_status = "ambiguous_duplicate_caption"
         except Exception as exc:
             logger.warning(f"Post detail comparison lookup failed: {exc}")
+            historical["comparison_eligible"] = False
+            historical["comparison_unavailable_code"] = "lookup_unavailable"
+            historical["comparison_unavailable_reason"] = (
+                POST_COMPARISON_UNAVAILABLE_REASONS["lookup_unavailable"]
+            )
         finally:
             if conn:
                 conn.close()
@@ -1401,6 +1617,31 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
     }
 
 
+def _normalized_media_product_type(post: Dict[str, Any]) -> str:
+    """Return a constrained Meta product type without guessing future values."""
+    value = str(post.get("media_product_type") or "").strip().upper()
+    return value if value in KNOWN_INSTAGRAM_PRODUCT_TYPES else "UNKNOWN"
+
+
+def _model_format_for_media(media_type: str, product_type: str) -> Optional[str]:
+    """Map Graph media to the three formats supported by the trained model.
+
+    ``media_type=VIDEO`` is not enough to identify a Reel: Meta also reports
+    feed video as VIDEO. Only the explicit REELS product classification may set
+    the Reels feature. Stories, ads, feed videos, and unknown videos are stored
+    for descriptive history but excluded from model training.
+    """
+    if product_type in {"STORY", "AD"}:
+        return None
+    if media_type == "IMAGE":
+        return "Single Image"
+    if media_type == "CAROUSEL_ALBUM":
+        return "Carousel"
+    if media_type == "VIDEO" and product_type == "REELS":
+        return "Reels"
+    return None
+
+
 def _upsert_instagram_media(cur, brand_id: str, post: Dict[str, Any], current_followers: int) -> str:
     """Insert or refresh one Graph API media row without deleting history.
 
@@ -1418,21 +1659,18 @@ def _upsert_instagram_media(cur, brand_id: str, post: Dict[str, Any], current_fo
     media_type = post.get("media_type", "IMAGE")
     if media_type not in SUPPORTED_INSTAGRAM_MEDIA_TYPES:
         raise ValueError(f"Unsupported Instagram media type: {media_type!r}")
+    media_product_type = _normalized_media_product_type(post)
     ts_clean = timestamp.replace("Z", "+00:00").replace("+0000", "+00:00")
     dt_utc = datetime.datetime.fromisoformat(ts_clean)
     dt_wib = dt_utc + datetime.timedelta(hours=7)
     post_hour = dt_wib.hour
-    format_type = {
-        "IMAGE": "Single Image",
-        "CAROUSEL_ALBUM": "Carousel",
-        "VIDEO": "Reels",
-    }.get(media_type, "Single Image")
+    format_type = _model_format_for_media(media_type, media_product_type)
     # The synchronization path and prediction path share the same authoritative
     # extractor. This prevents a model from being trained on feature semantics
     # that differ from the values used during inference.
     extracted = DataPreprocessor.extract_features(
         caption=caption,
-        format_type=format_type,
+        format_type=format_type or "Unsupported",
         post_hour=post_hour,
         is_weekend=dt_wib.weekday() >= 5,
     )
@@ -1466,7 +1704,7 @@ def _upsert_instagram_media(cur, brand_id: str, post: Dict[str, Any], current_fo
     )
     er = round(((likes + comments) / denominator) * 100, 4)
     values = (
-        media_id, caption, er, denominator,
+        media_id, media_product_type, caption, er, denominator,
         bool(extracted["is_single_image"]),
         bool(extracted["is_carousel"]),
         bool(extracted["is_reels"]),
@@ -1481,7 +1719,7 @@ def _upsert_instagram_media(cur, brand_id: str, post: Dict[str, Any], current_fo
         cur.execute(
             """UPDATE posts SET
                  instagram_media_id = %s, source = 'instagram_graph',
-                 caption = %s, er = %s, is_synced = true,
+                 media_product_type = %s, caption = %s, er = %s, is_synced = true,
                  follower_count_at_post = %s,
                  is_single_image = %s, is_carousel = %s, is_reels = %s,
                  post_hour = %s, caption_length = %s, hashtag_count = %s,
@@ -1493,11 +1731,11 @@ def _upsert_instagram_media(cur, brand_id: str, post: Dict[str, Any], current_fo
     else:
         cur.execute(
             """INSERT INTO posts (
-                 brand_id, instagram_media_id, source, caption, er, is_synced,
+                 brand_id, instagram_media_id, media_product_type, source, caption, er, is_synced,
                  follower_count_at_post, is_single_image, is_carousel, is_reels,
                  post_hour, caption_length, hashtag_count, has_cta, created_at, synced_at
                ) VALUES (
-                 %s, %s, 'instagram_graph', %s, %s, true,
+                 %s, %s, %s, 'instagram_graph', %s, %s, true,
                  %s, %s, %s, %s, %s, %s, %s, %s, %s,
                  timezone('utc'::text, now())
                )""",
@@ -1594,14 +1832,27 @@ def _sync_and_retrain_pipeline():
                                   AND post_hour IS NOT NULL
                                   AND created_at IS NOT NULL
                                   AND created_at <= now() - (%s * interval '1 day')
+                              ),
+                              COUNT(*) FILTER (
+                                WHERE er IS NOT NULL
+                                  AND post_hour IS NOT NULL
+                                  AND created_at IS NOT NULL
+                                  AND created_at <= now() - (%s * interval '1 day')
+                                  AND (
+                                    is_single_image
+                                    OR is_carousel
+                                    OR (is_reels AND media_product_type = 'REELS')
+                                  )
                               )
                        FROM posts
                        WHERE brand_id = %s
                          AND source = 'instagram_graph'
                          AND instagram_media_id IS NOT NULL""",
-                    (MIN_POST_AGE_DAYS, brand_id),
+                    (MIN_POST_AGE_DAYS, MIN_POST_AGE_DAYS, brand_id),
                 )
-                stored_count, mature_count = (int(value) for value in cur.fetchone())
+                stored_count, mature_history_count, mature_count = (
+                    int(value) for value in cur.fetchone()
+                )
             conn.commit()
             conn.close()
             conn = None
@@ -1615,7 +1866,11 @@ def _sync_and_retrain_pipeline():
             brand_result["sync"]["posts_updated"] = sync_counts["updated"]
             brand_result["sync"]["legacy_rows_claimed"] = sync_counts["claimed"]
             brand_result["sync"]["stored_verified_posts"] = stored_count
+            brand_result["sync"]["mature_history_posts"] = mature_history_count
             brand_result["sync"]["mature_training_posts"] = mature_count
+            brand_result["sync"]["excluded_unmodeled_mature_posts"] = (
+                mature_history_count - mature_count
+            )
             brand_result["sync"]["status"] = "success"
             logger.info(
                 f"[n8n Sync] {name}: {len(valid_posts)}/{len(posts)} posts synced "

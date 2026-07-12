@@ -6,55 +6,91 @@ import { NICHES } from "@/lib/niches";
 
 export const dynamic = "force-dynamic";
 
+interface BrandRow {
+  id: string;
+  name: string;
+  niche: string;
+  followers: number | null;
+  model_type: string;
+  created_at: string;
+}
+
+interface TrainingPostRow {
+  brand_id: string;
+  is_single_image: boolean | null;
+  is_carousel: boolean | null;
+  is_reels: boolean | null;
+  media_product_type: string | null;
+}
+
+interface VerifiedModelRow {
+  brand_id: string | null;
+  niche: string | null;
+  model_type: string;
+}
+
 export async function GET() {
   try {
     const supabase = await createClient();
     const user = await getRequestUser(supabase);
     if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
-    const { data: brands, error } = await supabase
+    const { data: brandData, error } = await supabase
       .from("brands")
       .select("id, name, niche, followers, model_type, created_at")
       .eq("owner_id", user.id)
       .order("name", { ascending: true });
+    if (error) throw error;
 
-    if (error) {
-      throw error;
+    const brands = (brandData || []) as BrandRow[];
+    const brandIds = brands.map((brand) => brand.id);
+    const maturityCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    // One tenant-scoped query counts only verified, mature posts with the exact
+    // format predicate used by training. Feed videos and unresolved legacy
+    // videos remain in history but cannot inflate ModelMaturity.
+    const { data: postData, error: postsError } = brandIds.length > 0
+      ? await supabase
+          .from("posts")
+          .select("brand_id, is_single_image, is_carousel, is_reels, media_product_type")
+          .in("brand_id", brandIds)
+          .eq("source", "instagram_graph")
+          .not("instagram_media_id", "is", null)
+          .lte("created_at", maturityCutoff)
+      : { data: [], error: null };
+    if (postsError) throw postsError;
+
+    const countsByBrand = new Map<string, number>();
+    for (const post of (postData || []) as TrainingPostRow[]) {
+      const modelEligible =
+        post.is_single_image === true ||
+        post.is_carousel === true ||
+        (post.is_reels === true && post.media_product_type === "REELS");
+      if (modelEligible) {
+        countsByBrand.set(post.brand_id, (countsByBrand.get(post.brand_id) || 0) + 1);
+      }
     }
 
-    // Count only posts carrying immutable Instagram media provenance. Legacy
-    // rows of unknown origin remain available to administrators but never
-    // inflate model-maturity claims in the product.
-    const counts = await Promise.all((brands || []).map(async (brand: any) => {
-      const { count, error: countError } = await supabase
-        .from("posts")
-        .select("id", { count: "exact", head: true })
-        .eq("brand_id", brand.id)
-        .eq("source", "instagram_graph")
-        .not("instagram_media_id", "is", null);
-      if (countError) throw countError;
-      return count || 0;
-    }));
-    const brandIds = (brands || []).map((brand: any) => brand.id);
-    const { data: verifiedModels, error: modelError } = brandIds.length > 0
+    const { data: modelData, error: modelError } = brandIds.length > 0
       ? await supabase
           .from("models")
           .select("brand_id, niche, model_type")
           .contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" })
       : { data: [], error: null };
     if (modelError) throw modelError;
+    const verifiedModels = (modelData || []) as VerifiedModelRow[];
     const personalBrandIds = new Set(
-      (verifiedModels || [])
-        .filter((model: any) => model.model_type === "account" && model.brand_id)
-        .map((model: any) => model.brand_id)
+      verifiedModels
+        .filter((model) => model.model_type === "account" && model.brand_id)
+        .map((model) => model.brand_id as string)
     );
     const cohortNiches = new Set(
-      (verifiedModels || [])
-        .filter((model: any) => model.model_type === "niche" && !model.brand_id && model.niche)
-        .map((model: any) => model.niche)
+      verifiedModels
+        .filter((model) => model.model_type === "niche" && !model.brand_id && model.niche)
+        .map((model) => model.niche as string)
     );
-    const mapped = (brands || []).map((brand: any, index: number) => ({
+    const mapped = brands.map((brand) => ({
       ...brand,
-      samples: counts[index],
+      samples: countsByBrand.get(brand.id) || 0,
       model_type: personalBrandIds.has(brand.id) ? "personal" : "niche",
       active_model_scope: personalBrandIds.has(brand.id)
         ? "personal"
@@ -63,8 +99,10 @@ export async function GET() {
           : "none",
     }));
 
-    return NextResponse.json(mapped);
-  } catch (error) {
+    const response = NextResponse.json(mapped);
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
+  } catch (error: unknown) {
     console.error("[BFF Brands] Failed to fetch brands:", error);
     return publicErrorResponse(error, "Brand workspaces are temporarily unavailable.", 503);
   }
@@ -112,24 +150,16 @@ export async function POST(request: Request) {
     }
     const { data: newBrand, error } = await supabase
       .from("brands")
-      .insert([
-        {
-          name: name.trim(),
-          owner_id: user.id,
-          niche: niche.trim(),
-          // followers and model_type deliberately use database defaults.
-          // Only the sync/training service may change those system fields.
-        },
-      ])
+      .insert([{ name: name.trim(), owner_id: user.id, niche: niche.trim() }])
       .select()
       .single();
+    if (error) throw error;
 
-    if (error) {
-      throw error;
-    }
-
-    return NextResponse.json({ status: "success", brand: { ...newBrand, samples: 0, active_model_scope: "none" } });
-  } catch (error) {
+    return NextResponse.json({
+      status: "success",
+      brand: { ...newBrand, samples: 0, active_model_scope: "none" },
+    });
+  } catch (error: unknown) {
     console.error("[BFF Brands] Failed to create brand:", error);
     if (
       error &&

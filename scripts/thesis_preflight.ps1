@@ -91,8 +91,26 @@ try {
     Write-Fail "n8n security contract failed: $($_.Exception.Message)"
 }
 
+try {
+    $SchemaOutput = & docker compose exec -T ml-service python -c 'import os,psycopg2; connection=psycopg2.connect(os.environ["DATABASE_URL"]); cursor=connection.cursor(); cursor.execute("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s)", ("public", "posts", "media_product_type")); print(str(cursor.fetchone()[0]).lower()); connection.close()'
+    if ($LASTEXITCODE -ne 0) { throw "database schema command failed" }
+    $MediaProductTypeReady = ([string]($SchemaOutput | Select-Object -Last 1)).Trim().ToLowerInvariant()
+    if ($MediaProductTypeReady -ne "true") {
+        throw "posts.media_product_type is missing; apply migration 202607120003 before rebuilding/retraining"
+    }
+    Write-Pass "Meta media-product migration is applied"
+} catch {
+    Write-Fail "Database migration contract failed: $($_.Exception.Message)"
+}
+
 if (-not $SkipModelEvidence) {
     try {
+        $TrainingHashOutput = & docker compose exec -T ml-service python -c "from app.train_pipeline import training_code_sha256; print(training_code_sha256())"
+        if ($LASTEXITCODE -ne 0) { throw "current training-code fingerprint command failed" }
+        $CurrentTrainingCodeHash = ([string]($TrainingHashOutput | Select-Object -Last 1)).Trim().ToLowerInvariant()
+        if ($CurrentTrainingCodeHash -notmatch '^[0-9a-f]{64}$') {
+            throw "current training-code fingerprint is invalid"
+        }
         $EvidenceOutput = & docker compose exec -T ml-service python -m app.thesis_evidence --format json
         if ($LASTEXITCODE -ne 0) { throw "model evidence exporter failed" }
         $EvidenceJson = $EvidenceOutput -join [Environment]::NewLine
@@ -110,6 +128,10 @@ if (-not $SkipModelEvidence) {
             $Scope = if ($Model.brand_name) { $Model.brand_name } elseif ($Model.niche) { $Model.niche } else { $Model.brand_id }
             if ($Metrics.evaluation_contract -ne "faiv-thesis-v2") {
                 throw "model $Scope was trained before faiv-thesis-v2; execute sync/retrain again"
+            }
+            $RecordedTrainingCodeHash = ([string]$Metrics.training_code_sha256).Trim().ToLowerInvariant()
+            if ($RecordedTrainingCodeHash -ne $CurrentTrainingCodeHash) {
+                throw "model $Scope was trained with different training/preprocessing source; execute sync/retrain again"
             }
             if (
                 -not $Metrics.dataset.dataset_sha256 -or

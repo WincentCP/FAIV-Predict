@@ -37,6 +37,7 @@ type IgPost = {
   id: string;
   caption: string;
   media_type: "IMAGE" | "CAROUSEL_ALBUM" | "VIDEO";
+  media_product_type: "FEED" | "REELS" | "STORY" | "AD" | "UNKNOWN" | null;
   media_url: string | null;
   thumbnail_url: string | null;
   permalink: string | null;
@@ -46,6 +47,9 @@ type IgPost = {
   /** ER captured by a verified Instagram sync, never rebased to today's followers. */
   er: number | null;
   tier: Tier | null;
+  comparison_eligible: boolean;
+  comparison_unavailable_code: "not_synced" | "immature" | "unmodeled_format" | "incomplete_features" | "lookup_unavailable" | null;
+  comparison_unavailable_reason: string | null;
   synced_at: string | null;
 };
 
@@ -62,7 +66,19 @@ type PostDetail = {
   metrics: Record<string, number>;
   unavailable_metrics: string[];
   not_attributable_metrics: string[];
-  historical: { brand_median_er: number | null; recent_median_er: number | null };
+  historical: {
+    brand_median_er: number | null;
+    brand_baseline_posts: number;
+    brand_baseline_unavailable_reason: string | null;
+    comparison_eligible: boolean;
+    comparison_unavailable_code: IgPost["comparison_unavailable_code"];
+    comparison_unavailable_reason: string | null;
+    recent_performance: {
+      available: false;
+      reason_code: "fixed_horizon_snapshots_unavailable";
+      reason: string;
+    };
+  };
   prediction: {
     tier: Tier;
     actual_tier: Tier | null;
@@ -74,11 +90,27 @@ type PostDetail = {
   provenance: Provenance;
 };
 
-const MEDIA_BADGE: Record<IgPost["media_type"], { label: string; icon: typeof Film }> = {
-  VIDEO: { label: "Reels", icon: Film },
-  CAROUSEL_ALBUM: { label: "Carousel", icon: LayoutGrid },
-  IMAGE: { label: "Image", icon: ImageIcon },
-};
+function mediaBadge(post: IgPost): { label: string; icon: typeof Film; modeled: boolean } {
+  if (post.media_product_type === "STORY") {
+    return { label: "Story media (not modeled)", icon: Film, modeled: false };
+  }
+  if (post.media_product_type === "AD") {
+    return { label: "Ad media (not modeled)", icon: Film, modeled: false };
+  }
+  if (post.media_type === "IMAGE") {
+    return { label: "Image", icon: ImageIcon, modeled: true };
+  }
+  if (post.media_type === "CAROUSEL_ALBUM") {
+    return { label: "Carousel", icon: LayoutGrid, modeled: true };
+  }
+  if (post.media_product_type === "REELS") {
+    return { label: "Reels", icon: Film, modeled: true };
+  }
+  if (post.media_product_type === "FEED") {
+    return { label: "Feed Video (not modeled)", icon: Film, modeled: false };
+  }
+  return { label: "Video (type unverified)", icon: Film, modeled: false };
+}
 
 const METRICS = [
   { key: "reach", label: "Reach", icon: Users },
@@ -269,7 +301,7 @@ export default function InsightsPage() {
           {summary && (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Loaded post summary">
               <SummaryMetric label="Latest posts loaded" value={summary.count.toLocaleString()} helper={`${summary.syncedCount} with verified ER`} />
-              <SummaryMetric label="Synced median ER" value={formatPercent(summary.medianEr)} helper="Follower snapshot preserved" />
+              <SummaryMetric label="Loaded-post median synced ER" value={formatPercent(summary.medianEr)} helper="Descriptive only · mixed post ages" />
               <SummaryMetric label="Live average likes" value={formatRounded(summary.avgLikes)} helper="Instagram Graph API" />
               <SummaryMetric label="Live average comments" value={formatRounded(summary.avgComments)} helper="Instagram Graph API" />
             </div>
@@ -339,7 +371,7 @@ export default function InsightsPage() {
 }
 
 function PostListItem({ post, active, onSelect }: { post: IgPost; active: boolean; onSelect: () => void }) {
-  const media = MEDIA_BADGE[post.media_type];
+  const media = mediaBadge(post);
   const preview = post.media_type === "VIDEO" ? post.thumbnail_url || post.media_url : post.media_url;
   const dateLabel = formatDate(post.timestamp);
   return (
@@ -361,7 +393,16 @@ function PostListItem({ post, active, onSelect }: { post: IgPost; active: boolea
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
             <media.icon aria-hidden="true" className="h-3.5 w-3.5" />{media.label}
           </span>
-          {post.tier && <TierBadge tier={post.tier} className="origin-right scale-95" />}
+          {post.tier ? (
+            <TierBadge tier={post.tier} className="origin-right scale-95" />
+          ) : !post.comparison_eligible && post.er !== null ? (
+            <span
+              title={post.comparison_unavailable_reason || undefined}
+              className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-muted-foreground"
+            >
+              Not comparable
+            </span>
+          ) : null}
         </div>
         <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-foreground">{post.caption || "Post without caption"}</p>
         <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -386,10 +427,9 @@ function PostAnalysis({
   error: string | null;
   onRetry?: () => void;
 }) {
-  const media = MEDIA_BADGE[post.media_type];
+  const media = mediaBadge(post);
   const preview = post.media_type === "VIDEO" ? post.thumbnail_url || post.media_url : post.media_url;
   const brandMedian = detail?.historical?.brand_median_er;
-  const recentMedian = detail?.historical?.recent_median_er;
   const availableMetrics = METRICS.filter((metric) => detail?.metrics?.[metric.key] !== undefined);
   const unavailableLabels = detail?.unavailable_metrics
     .map((metric) => METRIC_LABELS[metric])
@@ -477,20 +517,39 @@ function PostAnalysis({
 
             <InteractionBreakdown post={post} detail={detail} />
 
-            {post.er !== null ? (
-              <section aria-labelledby="comparison-heading">
-                <h3 id="comparison-heading" className="text-sm font-semibold">Historical comparison</h3>
-                <p className="mt-1 text-xs text-muted-foreground">Like-for-like synced ER using preserved follower snapshots.</p>
-                <div className="mt-3 grid gap-4 md:grid-cols-2">
-                  <ComparisonCard label="Brand history" current={post.er} baseline={brandMedian} />
-                  <ComparisonCard label="Recent 10-post median" current={post.er} baseline={recentMedian} />
-                </div>
-              </section>
-            ) : (
-              <p className="rounded-xl border border-border p-4 text-sm text-muted-foreground">
-                Historical comparisons are unavailable until this media ID is captured by a verified Instagram sync.
+            <section aria-labelledby="comparison-heading">
+              <h3 id="comparison-heading" className="text-sm font-semibold">Historical comparison</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                The baseline uses other mature, model-supported, verified brand posts and preserved follower snapshots.
               </p>
-            )}
+              {detail.historical.comparison_eligible && post.er !== null ? (
+                <div className="mt-3 max-w-xl">
+                  <ComparisonCard
+                    label={`Eligible brand history · n=${detail.historical.brand_baseline_posts}`}
+                    current={post.er}
+                    baseline={brandMedian}
+                    unavailableMessage={
+                      detail.historical.brand_baseline_unavailable_reason ||
+                      "No eligible brand-history baseline is available."
+                    }
+                  />
+                </div>
+              ) : (
+                <div className="mt-3 flex items-start gap-2 rounded-xl border border-border bg-surface-2/30 p-4 text-sm text-muted-foreground">
+                  <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>
+                    Brand-history comparison unavailable. {detail.historical.comparison_unavailable_reason || post.comparison_unavailable_reason || "Eligibility could not be verified."}
+                  </p>
+                </div>
+              )}
+              <div className="mt-3 flex items-start gap-2 rounded-xl border border-warning/25 bg-warning/[0.03] p-4 text-xs leading-relaxed text-muted-foreground">
+                <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                <p>
+                  <strong className="text-foreground">Recent performance trend unavailable.</strong>{" "}
+                  {detail.historical.recent_performance.reason}
+                </p>
+              </div>
+            </section>
 
             <EvidenceSection post={post} detail={detail} />
 
@@ -522,7 +581,7 @@ function PostAnalysis({
 }
 
 function MediaPreview({ post, src, compact = false }: { post: IgPost; src: string | null; compact?: boolean }) {
-  const media = MEDIA_BADGE[post.media_type];
+  const media = mediaBadge(post);
   const Icon = media.icon;
   return (
     <div className={cn("relative h-full w-full overflow-hidden bg-surface-2", compact && "h-16 w-16 shrink-0 rounded-lg")}>
@@ -540,7 +599,7 @@ function MediaPreview({ post, src, compact = false }: { post: IgPost; src: strin
 }
 
 function MediaTypeChip({ post }: { post: IgPost }) {
-  const media = MEDIA_BADGE[post.media_type];
+  const media = mediaBadge(post);
   const Icon = media.icon;
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1 text-xs font-semibold">
@@ -585,11 +644,18 @@ function InteractionBreakdown({ post, detail }: { post: IgPost; detail: PostDeta
 
 function EvidenceSection({ post, detail }: { post: IgPost; detail: PostDetail }) {
   const observations: string[] = [];
-  if (post.er !== null && detail.historical.brand_median_er !== null) {
-    observations.push(comparisonSentence(post.er, detail.historical.brand_median_er, "the brand median"));
-  }
-  if (post.er !== null && detail.historical.recent_median_er !== null) {
-    observations.push(comparisonSentence(post.er, detail.historical.recent_median_er, "the recent 10-post median"));
+  if (
+    detail.historical.comparison_eligible &&
+    post.er !== null &&
+    detail.historical.brand_median_er !== null
+  ) {
+    observations.push(
+      comparisonSentence(
+        post.er,
+        detail.historical.brand_median_er,
+        "the mature, model-eligible brand median (excluding this post)"
+      )
+    );
   }
   if (typeof detail.metrics.saved === "number" && typeof detail.metrics.reach === "number" && detail.metrics.reach > 0) {
     observations.push(`Saves equal ${((detail.metrics.saved / detail.metrics.reach) * 100).toFixed(2)} per 100 reached accounts.`);
@@ -620,7 +686,7 @@ function ProvenanceNotice({ followers, provenance, latestSync: sync }: { followe
       <Database aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
       <div className="min-w-0 flex-1 leading-relaxed">
         <p><strong className="text-foreground">Data origin:</strong> previews, captions, likes, comments, and the current account follower count were fetched live from Instagram Graph at {fetched}.</p>
-        <p className="mt-1">ER is synced likes plus comments divided by the follower snapshot preserved when that media was first verified. Tiers and comparisons use those same sync records{sync ? ` updated as recently as ${formatDateTime(sync)}` : " and remain unavailable until a sync completes"}.</p>
+        <p className="mt-1">ER is synced likes plus comments divided by the follower snapshot preserved when that media was first verified. Tiers and brand-history comparisons require mature, model-supported posts{sync ? ` from sync records updated as recently as ${formatDateTime(sync)}` : " and remain unavailable until a sync completes"}. Recent performance is not inferred from unequal-age cumulative ER.</p>
         {provenance?.post_limit && <p className="mt-1">This view requests up to {provenance.post_limit} of the account&apos;s latest posts.</p>}
       </div>
       <span className="shrink-0 font-mono text-foreground">{followers === null ? "Followers unavailable" : `${followers.toLocaleString()} current followers`}</span>
@@ -669,9 +735,19 @@ function UnavailableMetric({ label, message }: { label: string; message: string 
   );
 }
 
-function ComparisonCard({ label, current, baseline }: { label: string; current: number; baseline: number | null | undefined }) {
+function ComparisonCard({
+  label,
+  current,
+  baseline,
+  unavailableMessage,
+}: {
+  label: string;
+  current: number;
+  baseline: number | null | undefined;
+  unavailableMessage?: string;
+}) {
   if (baseline === null || baseline === undefined) {
-    return <div className="rounded-xl border border-border p-4 text-sm text-muted-foreground">{label} is unavailable.</div>;
+    return <div className="rounded-xl border border-border p-4 text-sm text-muted-foreground">{unavailableMessage || `${label} is unavailable.`}</div>;
   }
   const delta = current - baseline;
   const positive = delta >= 0;

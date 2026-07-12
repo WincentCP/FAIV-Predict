@@ -11,7 +11,15 @@ const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MEDIA_ID_PATTERN = /^[0-9]{1,64}$/;
 const MEDIA_TYPES = new Set(["IMAGE", "CAROUSEL_ALBUM", "VIDEO"]);
+const MEDIA_PRODUCT_TYPES = new Set(["FEED", "REELS", "STORY", "AD", "UNKNOWN"]);
 const TIERS = new Set(["High", "Average", "Low"]);
+const COMPARISON_UNAVAILABLE_MESSAGES: Record<string, string> = {
+  not_synced: "This post has no verified synchronized engagement rate yet.",
+  immature: "This post is younger than the required seven-day maturity window.",
+  unmodeled_format: "This post's media format is not supported by the prediction model.",
+  incomplete_features: "This synchronized post is missing features required for a like-for-like model comparison.",
+  lookup_unavailable: "Comparison eligibility could not be verified from synchronized history.",
+};
 
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
@@ -120,10 +128,22 @@ export async function GET(request: Request) {
         !timestamp || Number.isNaN(Date.parse(timestamp))
       ) return [];
       const tier = stringOrNull(record.tier);
+      const rawProductType = stringOrNull(record.media_product_type)?.toUpperCase() || null;
+      const mediaProductType = rawProductType && MEDIA_PRODUCT_TYPES.has(rawProductType)
+        ? rawProductType
+        : null;
+      const comparisonEligible = record.comparison_eligible === true;
+      const rawComparisonCode = stringOrNull(record.comparison_unavailable_code);
+      const comparisonCode = comparisonEligible
+        ? null
+        : rawComparisonCode && COMPARISON_UNAVAILABLE_MESSAGES[rawComparisonCode]
+          ? rawComparisonCode
+          : "lookup_unavailable";
       return [{
         id,
         caption: typeof record.caption === "string" ? record.caption : "",
         media_type: mediaType,
+        media_product_type: mediaProductType,
         media_url: httpsUrlOrNull(record.media_url),
         thumbnail_url: httpsUrlOrNull(record.thumbnail_url),
         permalink: httpsUrlOrNull(record.permalink, true),
@@ -132,6 +152,11 @@ export async function GET(request: Request) {
         comments: finiteNumber(record.comments),
         er: finiteNumber(record.er),
         tier: tier && TIERS.has(tier) ? tier : null,
+        comparison_eligible: comparisonEligible,
+        comparison_unavailable_code: comparisonCode,
+        comparison_unavailable_reason: comparisonCode
+          ? COMPARISON_UNAVAILABLE_MESSAGES[comparisonCode]
+          : null,
         synced_at: stringOrNull(record.synced_at),
       }];
     });
@@ -146,7 +171,9 @@ export async function GET(request: Request) {
         live_source: data.provenance?.live_source === "instagram_graph_api"
           ? "instagram_graph_api"
           : null,
-        synced_source: data.provenance?.synced_source === "production_database_instagram_graph_sync"
+        historical_source:
+          data.provenance?.historical_source === "production_database_instagram_graph_sync" ||
+          data.provenance?.synced_source === "production_database_instagram_graph_sync"
           ? "production_database_instagram_graph_sync"
           : null,
         fetched_at: stringOrNull(data.provenance?.fetched_at),

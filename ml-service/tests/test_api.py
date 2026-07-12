@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.main import app
 from app.model_loader import ModelLoader, ModelUnavailableError
 from app.preprocessing import CTA_PATTERN
+from app.brand_patterns import build_brand_patterns
 
 client = TestClient(app)
 
@@ -146,6 +147,7 @@ def test_train_status_without_db_is_honest(monkeypatch):
 from app.preprocessing import DataPreprocessor, FEATURE_ORDER_V1, FEATURE_ORDER_V2
 from app.train_pipeline import (
     InsufficientDataError,
+    MIN_POST_AGE_DAYS,
     ModelQualityError,
     ModelTrainer,
     build_expanding_window_evidence,
@@ -961,6 +963,36 @@ def test_meta_insight_payload_parsing_preserves_zero_and_multiple_metrics():
     assert _media_insight_values(payload) == {"reach": 125.0, "saved": 0.0}
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected_code"),
+    [
+        ({"has_sync": False}, "not_synced"),
+        ({"er": None}, "not_synced"),
+        ({"is_mature": False}, "immature"),
+        ({"is_modeled_format": False}, "unmodeled_format"),
+        ({"has_complete_features": False}, "incomplete_features"),
+        ({}, None),
+    ],
+)
+def test_post_comparison_status_is_explicit(overrides, expected_code):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+    values = {
+        "has_sync": True,
+        "er": 3.5,
+        "is_mature": True,
+        "is_modeled_format": True,
+        "has_complete_features": True,
+    }
+    values.update(overrides)
+    status = main_module._post_comparison_status(**values)
+
+    assert status["eligible"] is (expected_code is None)
+    assert status["reason_code"] == expected_code
+    assert (status["reason"] is None) is (expected_code is None)
+
+
 def test_instagram_posts_uses_verified_sync_er_instead_of_current_followers(monkeypatch):
     """Live post cards must not rebase historical ER onto today's audience."""
     import importlib
@@ -996,7 +1028,7 @@ def test_instagram_posts_uses_verified_sync_er_instead_of_current_followers(monk
         def fetchall(self):
             assert "p.source = 'instagram_graph'" in self.query
             assert "p.instagram_media_id IS NOT NULL" in self.query
-            return [("111", 4.2, synced_at)]
+            return [("111", 4.2, synced_at, True, True, True)]
 
         def fetchone(self):
             assert "p.source = 'instagram_graph'" in self.query
@@ -1029,7 +1061,8 @@ def test_instagram_posts_uses_verified_sync_er_instead_of_current_followers(monk
                     "caption": "Synced post",
                     "like_count": 10,
                     "comments_count": 5,
-                    "media_type": "IMAGE",
+                        "media_type": "IMAGE",
+                        "media_product_type": "FEED",
                     "timestamp": "2026-07-09T12:00:00+0000",
                 },
                 {
@@ -1037,7 +1070,8 @@ def test_instagram_posts_uses_verified_sync_er_instead_of_current_followers(monk
                     "caption": "Not synced yet",
                     "like_count": 900,
                     "comments_count": 100,
-                    "media_type": "VIDEO",
+                        "media_type": "VIDEO",
+                        "media_product_type": "REELS",
                     "timestamp": "2026-07-10T12:00:00+0000",
                 },
             ]}
@@ -1063,12 +1097,18 @@ def test_instagram_posts_uses_verified_sync_er_instead_of_current_followers(monk
     payload = response.json()
     assert payload["posts"][0]["er"] == 4.2  # not live (10 + 5) / 1,000 = 1.5%
     assert payload["posts"][0]["tier"] == "Average"
+    assert payload["posts"][0]["comparison_eligible"] is True
+    assert payload["posts"][0]["comparison_unavailable_reason"] is None
     assert payload["posts"][0]["synced_at"] == synced_at.isoformat()
+    assert payload["posts"][0]["media_product_type"] == "FEED"
     assert payload["posts"][1]["er"] is None
     assert payload["posts"][1]["tier"] is None
+    assert payload["posts"][1]["comparison_eligible"] is False
+    assert payload["posts"][1]["comparison_unavailable_code"] == "not_synced"
     assert payload["provenance"]["live_source"] == "instagram_graph_api"
     assert payload["provenance"]["synced_source"] == "production_database_instagram_graph_sync"
-    assert all(params == (brand_id,) for _, params in executed_queries)
+    assert executed_queries[0][1] == (MIN_POST_AGE_DAYS, brand_id)
+    assert executed_queries[1][1] == (brand_id, MIN_POST_AGE_DAYS)
 
 
 def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
@@ -1080,6 +1120,7 @@ def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
     user_id = "15663b0a-d1fc-4cb9-bac2-bb0251307441"
     media_id = "17900000000000001"
     prediction_params = []
+    historical_queries = []
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
     monkeypatch.setattr(main_module, "_get_instagram_connection", lambda _brand_id: {
@@ -1132,14 +1173,21 @@ def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
 
         def execute(self, query, params):
             self.query = query
+            if "FROM posts p" in query:
+                historical_queries.append((query, params))
             if "FROM predictions" in query:
                 prediction_params.append(params)
 
         def fetchone(self):
+            if "AS is_mature" in self.query:
+                return {
+                    "er": 4.0,
+                    "is_mature": True,
+                    "is_modeled_format": True,
+                    "has_complete_features": True,
+                }
             if "brand_median_er" in self.query:
-                return {"brand_median_er": None}
-            if "recent_median_er" in self.query:
-                return {"recent_median_er": None}
+                return {"brand_median_er": 3.0, "brand_baseline_posts": 12}
             return None
 
         def fetchall(self):
@@ -1181,6 +1229,24 @@ def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
     payload = response.json()
     assert payload["prediction"] is None
     assert payload["prediction_match_status"] == "ambiguous_duplicate_caption"
+    assert payload["historical"]["comparison_eligible"] is True
+    assert payload["historical"]["brand_median_er"] == 3.0
+    assert payload["historical"]["brand_baseline_posts"] == 12
+    assert "recent_median_er" not in payload["historical"]
+    assert payload["historical"]["recent_performance"]["available"] is False
+    assert payload["historical"]["recent_performance"]["reason_code"] == (
+        "fixed_horizon_snapshots_unavailable"
+    )
+    assert len(historical_queries) == 2
+    selected_query, selected_params = historical_queries[0]
+    baseline_query, baseline_params = historical_queries[1]
+    assert "p.instagram_media_id = %s" in selected_query
+    assert selected_params == (MIN_POST_AGE_DAYS, brand_id, media_id)
+    assert "p.created_at <= now()" in baseline_query
+    assert "p.media_product_type = 'REELS'" in baseline_query
+    assert "p.instagram_media_id <> %s" in baseline_query
+    assert baseline_params == (brand_id, media_id, MIN_POST_AGE_DAYS)
+    assert all("recent_median_er" not in query for query, _params in historical_queries)
     assert payload["provenance"]["live_source"] == "instagram_graph_api"
 
 
@@ -1289,6 +1355,7 @@ def test_instagram_media_fetch_paginates_until_configured_total(monkeypatch):
     assert calls[0][1]["access_token"] == "secret"
     assert calls[1][0].endswith("/ig-account/media")
     assert calls[1][1]["fields"] == calls[0][1]["fields"]
+    assert "media_product_type" in calls[0][1]["fields"]
     assert calls[1][1]["access_token"] == "secret"
     assert calls[1][1]["after"] == "cursor-1"
 
@@ -1510,6 +1577,7 @@ def test_instagram_media_sync_updates_by_source_id_without_deleting_history():
         "like_count": 10,
         "comments_count": 5,
         "media_type": "CAROUSEL_ALBUM",
+        "media_product_type": "FEED",
         # Friday 20:00 UTC = Saturday 03:00 WIB.
         "timestamp": "2026-07-03T20:00:00+0000",
     }, current_followers=1000)
@@ -1518,10 +1586,11 @@ def test_instagram_media_sync_updates_by_source_id_without_deleting_history():
     assert all("DELETE FROM posts" not in query for query, _ in cursor.calls)
     update_query, update_params = cursor.calls[-1]
     assert "instagram_media_id" in update_query
-    assert update_params[2] == 15.0  # preserved 100-follower snapshot, not current 1,000
-    assert update_params[3] == 100
+    assert update_params[1] == "FEED"
+    assert update_params[3] == 15.0  # preserved 100-follower snapshot, not current 1,000
+    assert update_params[4] == 100
     expected = DataPreprocessor.extract_features(caption, "Carousel", 3, is_weekend=True)
-    assert update_params[4:11] == (
+    assert update_params[5:12] == (
         bool(expected["is_single_image"]),
         bool(expected["is_carousel"]),
         bool(expected["is_reels"]),
@@ -1530,6 +1599,45 @@ def test_instagram_media_sync_updates_by_source_id_without_deleting_history():
         int(expected["hashtag_count"]),
         bool(expected["has_cta"]),
     )
+
+
+@pytest.mark.parametrize(
+    ("product_type", "expected_flags"),
+    [
+        ("REELS", (False, False, True)),
+        ("FEED", (False, False, False)),
+        (None, (False, False, False)),
+    ],
+)
+def test_video_sync_requires_explicit_reels_product_type(product_type, expected_flags):
+    class Cursor:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, query, params):
+            self.calls.append((query, params))
+
+        @staticmethod
+        def fetchone():
+            return ("post-row", 100)
+
+    cursor = Cursor()
+    post = {
+        "id": "ig-video-1",
+        "caption": "Verified video",
+        "like_count": 10,
+        "comments_count": 5,
+        "media_type": "VIDEO",
+        "timestamp": "2026-07-03T20:00:00+0000",
+    }
+    if product_type is not None:
+        post["media_product_type"] = product_type
+
+    _upsert_instagram_media(cursor, "brand-id", post, current_followers=1000)
+
+    update_params = cursor.calls[-1][1]
+    assert update_params[1] == (product_type or "UNKNOWN")
+    assert update_params[5:8] == expected_flags
 
 
 def test_instagram_media_sync_rejects_unknown_media_type():
@@ -1545,6 +1653,163 @@ def test_instagram_media_sync_rejects_unknown_media_type():
             "media_type": "FUTURE_FORMAT",
             "timestamp": "2026-07-03T20:00:00+0000",
         }, current_followers=100)
+
+
+def test_brand_patterns_use_only_modeled_mature_rows_and_never_return_raw_content():
+    base = datetime.datetime(2026, 5, 1, tzinfo=datetime.timezone.utc)
+    rows = []
+    for index in range(20):
+        carousel = index >= 10
+        rows.append({
+            "instagram_media_id": f"secret-media-{index}",
+            "caption": f"private caption {index} yuk order #promo",
+            "er": 5.0 if carousel else 1.0,
+            "is_single_image": not carousel,
+            "is_carousel": carousel,
+            "is_reels": False,
+            "media_product_type": "FEED",
+            "post_hour": 19 if carousel else 9,
+            "caption_length": 30,
+            "hashtag_count": 1,
+            "has_cta": True,
+            "created_at": base + datetime.timedelta(days=index),
+            "synced_at": datetime.datetime(2026, 7, 12, tzinfo=datetime.timezone.utc),
+        })
+    for index in range(2):
+        rows.append({
+            "instagram_media_id": f"feed-video-{index}",
+            "caption": "private feed video caption",
+            "er": 99.0,
+            "is_single_image": False,
+            "is_carousel": False,
+            # This reproduces the legacy mistake. Missing REELS product proof
+            # must still exclude the row from every median and highlight.
+            "is_reels": True,
+            "media_product_type": "FEED",
+            "post_hour": 20,
+            "created_at": base + datetime.timedelta(days=20 + index),
+        })
+
+    result = build_brand_patterns(
+        rows,
+        brand_id="brand-id",
+        brand_name="Safe brand",
+        niche="Fitness",
+        now=datetime.datetime(2026, 7, 12, tzinfo=datetime.timezone.utc),
+    )
+
+    assert result["status"] == "success"
+    assert result["evidence"]["mature_verified_posts"] == 22
+    assert result["evidence"]["eligible_posts"] == 20
+    assert result["evidence"]["excluded_unmodeled_posts"] == 2
+    assert result["overall"]["median_er"] == 3.0
+    assert all(group["key"] != "feed_video_unmodeled" for group in result["patterns"]["formats"])
+    assert any(
+        item["dimension"] == "format" and item["key"] == "carousel"
+        for item in result["highlights"]
+    )
+    serialized = json.dumps(result)
+    assert "private caption" not in serialized
+    assert "secret-media" not in serialized
+    assert result["freshness"]["external_trends_included"] is False
+    assert result["recent_publishing_mix"]["performance_comparison_available"] is False
+
+
+def test_brand_patterns_endpoint_validates_brand_and_returns_aggregates(monkeypatch):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+    brand_id = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
+    queries = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def execute(self, query, params):
+            queries.append((query, params))
+
+        @staticmethod
+        def fetchone():
+            return {"id": brand_id, "name": "Owned", "niche": "Bakery"}
+
+        @staticmethod
+        def fetchall():
+            return [{
+                "caption": "must not leave service",
+                "er": 2.5,
+                "is_single_image": True,
+                "is_carousel": False,
+                "is_reels": False,
+                "media_product_type": "FEED",
+                "post_hour": 9,
+                "caption_length": 22,
+                "hashtag_count": 0,
+                "has_cta": False,
+                "created_at": datetime.datetime(2026, 6, 1, tzinfo=datetime.timezone.utc),
+                "synced_at": datetime.datetime(2026, 7, 12, tzinfo=datetime.timezone.utc),
+            }]
+
+    class Connection:
+        @staticmethod
+        def cursor(*_args, **_kwargs):
+            return Cursor()
+
+        @staticmethod
+        def close():
+            pass
+
+    monkeypatch.setattr(main_module, "get_db_connection", lambda: Connection())
+
+    response = client.get(f"/brand/patterns?brand_id={brand_id}")
+
+    assert response.status_code == 200
+    assert response.json()["brand"]["id"] == brand_id
+    assert "must not leave service" not in response.text
+    assert "owner_id IS NOT NULL" in queries[0][0]
+    assert "source = 'instagram_graph'" in queries[1][0]
+    assert "interval '1 day'" in queries[1][0]
+    assert queries[1][1] == (brand_id, MIN_POST_AGE_DAYS)
+
+
+def test_training_query_excludes_unverified_and_feed_video_formats(monkeypatch):
+    captured = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def execute(self, query, params):
+            captured.append((query, params))
+
+        @staticmethod
+        def fetchall():
+            return []
+
+    class Connection:
+        @staticmethod
+        def cursor(*_args, **_kwargs):
+            return Cursor()
+
+        @staticmethod
+        def close():
+            pass
+
+    monkeypatch.setattr(ModelTrainer, "_get_db_connection", staticmethod(lambda: Connection()))
+
+    with pytest.raises(InsufficientDataError):
+        ModelTrainer.fetch_historical_data(brand_id="brand-id")
+
+    query = captured[0][0]
+    assert "is_single_image" in query
+    assert "is_carousel" in query
+    assert "is_reels AND media_product_type = 'REELS'" in query
 
 
 def test_model_loader_rejects_artifact_without_verified_post_provenance(monkeypatch):

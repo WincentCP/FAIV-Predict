@@ -577,6 +577,11 @@ class ModelTrainer:
                           AND post_hour IS NOT NULL
                           AND created_at IS NOT NULL
                           AND created_at <= now() - (%s * interval '1 day')
+                          AND (
+                            is_single_image
+                            OR is_carousel
+                            OR (is_reels AND media_product_type = 'REELS')
+                          )
                         ORDER BY created_at ASC, instagram_media_id ASC
                         """,
                         (brand_id, MIN_POST_AGE_DAYS)
@@ -599,6 +604,11 @@ class ModelTrainer:
                           AND p.post_hour IS NOT NULL
                           AND p.created_at IS NOT NULL
                           AND p.created_at <= now() - (%s * interval '1 day')
+                          AND (
+                            p.is_single_image
+                            OR p.is_carousel
+                            OR (p.is_reels AND p.media_product_type = 'REELS')
+                          )
                         ORDER BY p.created_at ASC, p.instagram_media_id ASC
                         """,
                         (niche, MIN_POST_AGE_DAYS)

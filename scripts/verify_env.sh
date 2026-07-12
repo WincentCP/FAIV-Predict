@@ -97,7 +97,7 @@ if [ -n "$SUPABASE_URL" ] && [ -n "$SERVICE_KEY" ]; then
   schema_ok=1
   for endpoint in \
     "brands?select=id,owner_id&limit=1" \
-    "posts?select=id,instagram_media_id,source,synced_at&limit=1" \
+    "posts?select=id,instagram_media_id,source,synced_at,media_product_type&limit=1" \
     "predictions?select=id,created_by,actual_source,prediction_status,time_known,model_id,feature_schema_version,input_hash,deleted_at&limit=1" \
     "calendar_entries?select=id,owner_id,source,prediction_id&limit=1" \
     "content_lifecycle_events?select=id,owner_id,event_type,occurred_at&limit=1"; do
@@ -107,9 +107,9 @@ if [ -n "$SUPABASE_URL" ] && [ -n "$SERVICE_KEY" ]; then
     [ "$code" = "200" ] || schema_ok=0
   done
   if [ "$schema_ok" = "1" ]; then
-    pass "ownership, provenance, prediction lifecycle, and audit schema are exposed by PostgREST"
+    pass "ownership, provenance, Meta product type, prediction lifecycle, and audit schema are exposed by PostgREST"
   else
-    fail "required ownership or prediction-lifecycle migration is missing or not exposed by PostgREST"
+    fail "required ownership, prediction-lifecycle, or Meta product-type migration is missing or not exposed by PostgREST"
   fi
 else
   warn "service key unavailable; skipping PostgREST schema preflight"
@@ -132,6 +132,7 @@ try:
             ("posts", "instagram_media_id"),
             ("posts", "source"),
             ("posts", "synced_at"),
+            ("posts", "media_product_type"),
             ("predictions", "created_by"),
             ("predictions", "actual_source"),
             ("predictions", "prediction_status"),
@@ -147,7 +148,7 @@ try:
             )
             if cur.fetchone() is None:
                 raise RuntimeError(f"missing column: {table}.{column}")
-        print("  PASS ownership, provenance, prediction lifecycle, and audit migrations are present")
+        print("  PASS ownership, provenance, Meta product type, prediction lifecycle, and audit migrations are present")
     conn.close()
 except Exception as exc:
     print(f"  FAIL database/schema check: {exc}")
