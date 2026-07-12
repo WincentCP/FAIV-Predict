@@ -19,7 +19,7 @@ Enterprise-scale queues, global high availability, public Instagram publishing, 
 
 | Gate | Command | Result on 2026-07-12 | Evidence covered |
 | --- | --- | --- | --- |
-| ML/API suite | `python -m pytest -q` in `ml-service` | PASS — 52 tests; one dependency deprecation warning | Authentication, validation, honest unavailable states, optional time, API successor request contract, maturity/provenance, sync identity, feature parity, three-class and promotion gates, richer metrics/comparators, bounded rejection diagnostics, evaluation artifact and effective-model-scoped safe exporter. Real Supabase trigger/RLS behavior remains in A03/A06. |
+| ML/API suite | `python -m pytest -q` in `ml-service` | PASS — 56 tests; one dependency deprecation warning | Authentication, validation, honest unavailable states, optional time, API successor request contract, maturity/provenance, sync identity, bounded historical pagination and fail-fast configuration, feature parity, three-class and promotion gates, richer metrics/comparators, bounded rejection diagnostics, evaluation artifact and effective-model-scoped safe exporter. Real Supabase trigger/RLS behavior remains in A03/A06. |
 | Repository contract | `python scripts/verify_thesis_readiness.py` | PASS on current revision | Secure n8n template, blocked `$env`, documentation alignment and required thesis artifacts |
 | Workflow JSON | `python -m json.tool n8n/workflow_sync_retrain.json` | PASS | JSON syntax only; Docker n8n import/node/runtime compatibility remains part of A09–A10 rehearsal |
 | Frontend compile gates | GitHub Actions: lint, TypeScript, production build | Required on every `main` push | Full repository frontend compilation |

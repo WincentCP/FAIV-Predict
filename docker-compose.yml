@@ -13,6 +13,7 @@ services:
       - FRONTEND_URL=${FRONTEND_URL}
       - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
       - IG_BRANDS_JSON=${IG_BRANDS_JSON}
+      - IG_SYNC_POST_LIMIT=${IG_SYNC_POST_LIMIT:-500}
     healthcheck:
       test:
         - CMD

@@ -159,10 +159,14 @@ from app.thesis_evidence import (
 )
 from app.main import (
     build_counterfactuals,
+    DEFAULT_INSTAGRAM_SYNC_POST_LIMIT,
+    _fetch_ig_posts,
     _get_brands_config,
+    _instagram_sync_post_limit,
     _media_insight_value,
     _media_insight_values,
     _parse_instagram_health_brand_ids,
+    _sync_and_retrain_pipeline,
     _upsert_instagram_media,
 )
 
@@ -1198,6 +1202,135 @@ def test_instagram_config_validates_and_rejects_duplicate_bindings(monkeypatch):
         {"brand_id": brand_id, "instagram_id": "1785", "access_token": "b"},
     ]))
     assert _get_brands_config() == []
+
+
+def test_instagram_sync_post_limit_is_configurable_and_bounded(monkeypatch):
+    monkeypatch.delenv("IG_SYNC_POST_LIMIT", raising=False)
+    assert _instagram_sync_post_limit() == DEFAULT_INSTAGRAM_SYNC_POST_LIMIT
+
+    monkeypatch.setenv("IG_SYNC_POST_LIMIT", "750")
+    assert _instagram_sync_post_limit() == 750
+
+    for boundary in ("1", "1000"):
+        monkeypatch.setenv("IG_SYNC_POST_LIMIT", boundary)
+        assert _instagram_sync_post_limit() == int(boundary)
+
+    for invalid in ("", " ", "not-a-number"):
+        monkeypatch.setenv("IG_SYNC_POST_LIMIT", invalid)
+        with pytest.raises(ValueError, match="must be an integer"):
+            _instagram_sync_post_limit()
+
+    for invalid in ("-1", "0", "1001"):
+        monkeypatch.setenv("IG_SYNC_POST_LIMIT", invalid)
+        with pytest.raises(ValueError, match="between 1 and 1000"):
+            _instagram_sync_post_limit()
+
+
+def test_instagram_media_fetch_paginates_until_configured_total(monkeypatch):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        @staticmethod
+        def raise_for_status():
+            pass
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def get(self, url, params):
+            calls.append((url, dict(params)))
+            if url.endswith("/ig-account/media"):
+                return Response({
+                    "data": [{"id": str(index)} for index in range(100)],
+                    "paging": {"next": "https://graph.invalid/page-2"},
+                })
+            return Response({
+                "data": [{"id": str(index)} for index in range(100, 200)],
+                "paging": {"next": "https://graph.invalid/page-3"},
+            })
+
+    monkeypatch.setattr(main_module.httpx, "Client", Client)
+    monkeypatch.setenv("IG_SYNC_POST_LIMIT", "150")
+
+    posts, truncated = _fetch_ig_posts("ig-account", "secret")
+
+    assert [post["id"] for post in posts] == [str(index) for index in range(150)]
+    assert truncated is True
+    assert len(calls) == 2
+    assert calls[0][1]["limit"] == 100
+    assert calls[0][1]["access_token"] == "secret"
+    assert calls[1][1] == {}
+
+
+def test_instagram_media_fetch_exact_total_without_next_is_not_truncated(monkeypatch):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+
+    class Response:
+        @staticmethod
+        def raise_for_status():
+            pass
+
+        @staticmethod
+        def json():
+            return {"data": [{"id": "1"}, {"id": "2"}], "paging": {}}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        @staticmethod
+        def get(url, params):
+            return Response()
+
+    monkeypatch.setattr(main_module.httpx, "Client", Client)
+
+    posts, truncated = _fetch_ig_posts("ig-account", "secret", limit=2)
+
+    assert [post["id"] for post in posts] == ["1", "2"]
+    assert truncated is False
+
+
+def test_invalid_instagram_sync_limit_fails_before_binding_or_graph_io(monkeypatch):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setenv("IG_SYNC_POST_LIMIT", "0")
+
+    def should_not_bind():
+        raise AssertionError("brand binding must not run for invalid sync config")
+
+    monkeypatch.setattr(main_module, "_bound_instagram_configs", should_not_bind)
+
+    result = _sync_and_retrain_pipeline()
+
+    assert result["status"] == "error"
+    assert result["results"] == []
+    assert "between 1 and 1000" in result["message"]
 
 
 def test_instagram_health_brand_scope_parser_distinguishes_operator_and_empty_scope():

@@ -50,6 +50,11 @@ Before a release, all gates below must pass:
 4. Confirm every production brand has an explicit owner assignment.
 5. Configure `IG_BRANDS_JSON` with existing owned brand UUIDs; never bind a
    token by display-name inference.
+   Set `IG_SYNC_POST_LIMIT` between 1 and 1000 when deeper account history is
+   required; the default is 500 and the sync result records whether additional
+   Graph history was truncated by that cap. The cap applies only to one fetch;
+   training uses all eligible verified rows accumulated in the database, and
+   lowering the cap never deletes older synchronized rows.
 6. Run frontend lint, TypeScript, production build, the ML test suite, and `python scripts/verify_thesis_readiness.py`.
 7. Confirm n8n blocks `$env`, both HTTP nodes use the encrypted Header Auth credential, and the imported workflow remains inactive until both branches pass manually.
 8. Retrain final thesis models with evaluation contract `faiv-thesis-v2` and export the baselines/comparators, temporal evaluation, scientific status, confusion matrix, per-class and ordinal metrics, data window, and fingerprints.

@@ -51,6 +51,14 @@ n8n is pinned to `2.29.10` and persists its encrypted database in the named `n8n
 
 6. Save, execute both branches manually, inspect the output, then activate the workflow. A successful import alone does not prove Meta, Supabase, SMTP, or ML credentials work. Warning/failure emails lead into **Stop And Error** nodes so an unhealthy or partial business result is visibly failed in n8n execution history.
 
+   For the sync branch, inspect `configured_post_limit`,
+   `history_truncated_by_limit`, `stored_verified_posts`, and
+   `mature_training_posts` for every brand. If
+   `history_truncated_by_limit` is true, raise `IG_SYNC_POST_LIMIT` carefully
+   (maximum 1000), rebuild only `ml-service`, and rerun; never create historical
+   rows manually. The recommended one-time thesis backfill is 500. Larger
+   multi-brand runs may exceed the synchronous workflow timeout.
+
 ## Security verification
 
 The following safe check prints only booleans, never secret values:

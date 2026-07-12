@@ -29,6 +29,7 @@ LLM_KEY="$(getvar "$FRONTEND_ENV" LLM_API_KEY)"
 DB_URL="$(getvar "$ML_ENV" DATABASE_URL)"
 SERVICE_KEY="$(getvar "$ML_ENV" SUPABASE_KEY)"
 IG_BRANDS_JSON="$(getraw "$ML_ENV" IG_BRANDS_JSON)"
+IG_SYNC_POST_LIMIT="$(getvar "$ML_ENV" IG_SYNC_POST_LIMIT)"
 LOGIN_EMAIL="${VERIFY_LOGIN_EMAIL:-}"
 LOGIN_PASSWORD="${VERIFY_LOGIN_PASSWORD:-}"
 ML_PYTHON="${ML_PYTHON:-}"
@@ -42,7 +43,10 @@ if [ -f "$ROOT_ENV" ]; then
   [ -n "$DB_URL" ] || DB_URL="$(getvar "$ROOT_ENV" DATABASE_URL)"
   [ -n "$SERVICE_KEY" ] || SERVICE_KEY="$(getvar "$ROOT_ENV" SUPABASE_KEY)"
   [ -n "$IG_BRANDS_JSON" ] || IG_BRANDS_JSON="$(getraw "$ROOT_ENV" IG_BRANDS_JSON)"
+  [ -n "$IG_SYNC_POST_LIMIT" ] || IG_SYNC_POST_LIMIT="$(getvar "$ROOT_ENV" IG_SYNC_POST_LIMIT)"
 fi
+
+IG_SYNC_POST_LIMIT="${IG_SYNC_POST_LIMIT:-500}"
 
 if [ -z "$ML_PYTHON" ]; then
   if [ -x "$ROOT/ml-service/venv/bin/python" ]; then
@@ -155,6 +159,14 @@ else
 fi
 
 echo "== 4. Instagram credential bindings =="
+if [[ "$IG_SYNC_POST_LIMIT" =~ ^[0-9]+$ ]] \
+  && [ "$IG_SYNC_POST_LIMIT" -ge 1 ] \
+  && [ "$IG_SYNC_POST_LIMIT" -le 1000 ]; then
+  pass "IG_SYNC_POST_LIMIT is within the supported 1-1000 range"
+else
+  fail "IG_SYNC_POST_LIMIT must be an integer between 1 and 1000"
+fi
+
 if [ -z "$IG_BRANDS_JSON" ]; then
   warn "IG_BRANDS_JSON is not set — Insights/sync remain disconnected"
   if grep -Eq '^[A-Z0-9_]+_(INSTAGRAM_ID|PAGE_ACCESS_TOKEN)=' "$ML_ENV" 2>/dev/null; then

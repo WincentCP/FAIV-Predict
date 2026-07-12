@@ -87,6 +87,11 @@ def main() -> int:
         )
 
     n8n_service = compose.split("\n  n8n:\n", 1)[1].split("\nvolumes:\n", 1)[0]
+    ml_service = compose.split("\n  ml-service:\n", 1)[1].split("\n  frontend:\n", 1)[0]
+    require(
+        "IG_SYNC_POST_LIMIT=${IG_SYNC_POST_LIMIT:-500}" in ml_service,
+        "ML service must receive the bounded historical Instagram sync limit",
+    )
     require(
         "N8N_BLOCK_ENV_ACCESS_IN_NODE=true" in n8n_service,
         "Compose must block workflow access to process environment variables",
@@ -100,6 +105,7 @@ def main() -> int:
         "INTERNAL_API_TOKEN=",
         "NOTIFICATION_FROM_EMAIL=",
         "NOTIFICATION_TO_EMAIL=",
+        "IG_SYNC_POST_LIMIT=",
     ):
         require(forbidden not in n8n_service, f"n8n service still receives {forbidden}")
 

@@ -28,6 +28,9 @@ from app.train_pipeline import (
 
 MAX_INSTAGRAM_HEALTH_BRANDS = 100
 SUPPORTED_INSTAGRAM_MEDIA_TYPES = {"IMAGE", "CAROUSEL_ALBUM", "VIDEO"}
+DEFAULT_INSTAGRAM_SYNC_POST_LIMIT = 500
+MAX_INSTAGRAM_SYNC_POST_LIMIT = 1000
+INSTAGRAM_GRAPH_PAGE_SIZE = 100
 # Legacy bundles do not carry a learned posting-hour distribution. For them,
 # use all clock hours as an explicit provisional fallback. Newer bundles use
 # the frequency distribution of hours actually observed in their train split.
@@ -815,21 +818,68 @@ def _fetch_ig_profile(ig_id: str, token: str) -> Optional[int]:
         followers = r.json().get("followers_count")
         return int(followers) if isinstance(followers, (int, float)) and followers >= 0 else None
 
-def _fetch_ig_posts(ig_id: str, token: str, limit: int = 250) -> list:
+def _validate_instagram_sync_post_limit(value: Any) -> int:
+    """Validate the operator-controlled historical media cap.
+
+    A finite upper bound prevents one workflow execution from walking an
+    unexpectedly large account history and exhausting Meta/API resources.
+    """
+    try:
+        limit = int(str(value).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError("IG_SYNC_POST_LIMIT must be an integer") from exc
+    if not 1 <= limit <= MAX_INSTAGRAM_SYNC_POST_LIMIT:
+        raise ValueError(
+            "IG_SYNC_POST_LIMIT must be between 1 and "
+            f"{MAX_INSTAGRAM_SYNC_POST_LIMIT}"
+        )
+    return limit
+
+
+def _instagram_sync_post_limit() -> int:
+    return _validate_instagram_sync_post_limit(
+        os.getenv("IG_SYNC_POST_LIMIT", str(DEFAULT_INSTAGRAM_SYNC_POST_LIMIT))
+    )
+
+
+def _fetch_ig_posts(
+    ig_id: str,
+    token: str,
+    limit: Optional[int] = None,
+) -> tuple[list, bool]:
+    """Fetch bounded history and report whether the cap actually truncated it."""
+    resolved_limit = _instagram_sync_post_limit() if limit is None else (
+        _validate_instagram_sync_post_limit(limit)
+    )
     url = f"https://graph.facebook.com/v25.0/{ig_id}/media"
-    params = {"fields": "caption,like_count,comments_count,media_type,timestamp", "limit": limit, "access_token": token}
+    params = {
+        "fields": "caption,like_count,comments_count,media_type,timestamp",
+        # Request bounded pages and follow Meta's opaque `next` URL until the
+        # configured total is reached. Do not assume Meta accepts the total cap
+        # as one page size.
+        "limit": min(resolved_limit, INSTAGRAM_GRAPH_PAGE_SIZE),
+        "access_token": token,
+    }
     posts = []
+    history_truncated_by_limit = False
     with httpx.Client(timeout=30.0) as client:
-        while url and len(posts) < limit:
+        while url and len(posts) < resolved_limit:
             r = client.get(url, params=params)
             r.raise_for_status()
             res = r.json()
-            posts.extend(res.get("data", []))
-            url = res.get("paging", {}).get("next")
-            params = {}
-            if not res.get("data") or not url:
+            page = res.get("data", [])
+            posts.extend(page)
+            next_url = res.get("paging", {}).get("next")
+            if len(posts) >= resolved_limit:
+                history_truncated_by_limit = bool(next_url) or (
+                    len(posts) > resolved_limit
+                )
                 break
-    return posts[:limit]
+            url = next_url
+            params = {}
+            if not page or not url:
+                break
+    return posts[:resolved_limit], history_truncated_by_limit
 
 def _get_brands_config() -> list[Dict[str, Any]]:
     """
@@ -1448,12 +1498,22 @@ def _sync_and_retrain_pipeline():
     if not db_url:
         return {"status": "error", "message": "DATABASE_URL not configured"}
 
+    try:
+        post_limit = _instagram_sync_post_limit()
+    except ValueError as exc:
+        return {
+            "status": "error",
+            "message": str(exc),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "results": [],
+        }
+
     brands_config = _bound_instagram_configs()
     if not brands_config:
         return {
             "status": "error",
             "message": "No Instagram connections are configured.",
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "results": [],
         }
     results = []
@@ -1480,7 +1540,11 @@ def _sync_and_retrain_pipeline():
                     "Instagram returned no usable follower denominator; refusing to write fabricated 0% engagement rates."
                 )
 
-            posts = _fetch_ig_posts(config["instagram_id"], config["access_token"])
+            posts, history_truncated_by_limit = _fetch_ig_posts(
+                config["instagram_id"],
+                config["access_token"],
+                limit=post_limit,
+            )
             valid_posts = [
                 post for post in posts
                 if isinstance(post.get("like_count"), (int, float))
@@ -1523,6 +1587,10 @@ def _sync_and_retrain_pipeline():
             conn.close()
             conn = None
             brand_result["sync"]["posts_received"] = len(posts)
+            brand_result["sync"]["configured_post_limit"] = post_limit
+            brand_result["sync"]["history_truncated_by_limit"] = (
+                history_truncated_by_limit
+            )
             brand_result["sync"]["posts_synced"] = len(valid_posts)
             brand_result["sync"]["posts_inserted"] = sync_counts["inserted"]
             brand_result["sync"]["posts_updated"] = sync_counts["updated"]
@@ -1623,7 +1691,7 @@ def _sync_and_retrain_pipeline():
     )
     return {
         "status": "success" if fully_successful else "partial",
-        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "results": results,
     }
 
