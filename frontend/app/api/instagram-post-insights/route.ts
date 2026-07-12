@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getRequestUser } from "@/lib/authz";
+import { publicUpstreamStatus, whitelistedUpstreamMessage } from "@/lib/http-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,11 @@ const COMPARISON_UNAVAILABLE_MESSAGES: Record<string, string> = {
 };
 const NO_BASELINE_MESSAGE = "No other mature, model-eligible posts are available for a brand-history baseline.";
 const RECENT_PERFORMANCE_REASON = "Recent performance trend is unavailable because cumulative engagement rates were not captured at an equal post-age horizon. Fixed-horizon metric snapshots are required before recent and older posts can be compared fairly.";
+const SAFE_POST_INSIGHT_DETAILS = new Set([
+  "No Instagram connection is configured for this brand.",
+  "Instagram media was not found for this connection.",
+  "Instagram media does not belong to this brand.",
+]);
 
 function finiteNumber(value: unknown, maximum = Number.POSITIVE_INFINITY): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= maximum
@@ -112,19 +118,18 @@ export async function POST(request: Request) {
         { status: 503 }
       );
     }
-    const data = await response.json().catch(() => null);
     if (!response.ok) {
-      const status = response.status === 401 ? 503 : response.status;
+      const message = await whitelistedUpstreamMessage(
+        response,
+        SAFE_POST_INSIGHT_DETAILS,
+        "Post metrics are temporarily unavailable."
+      );
       return NextResponse.json(
-        {
-          status: "error",
-          message: response.status === 401
-            ? "Detailed post metrics service is unavailable."
-            : (typeof data?.detail === "string" ? data.detail : "Post metrics are unavailable."),
-        },
-        { status }
+        { status: "error", message },
+        { status: publicUpstreamStatus(response.status) }
       );
     }
+    const data = await response.json().catch(() => null);
 
     const rawMetrics = data?.metrics && typeof data.metrics === "object"
       ? data.metrics as Record<string, unknown>

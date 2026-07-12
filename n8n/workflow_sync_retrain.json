@@ -67,6 +67,9 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [470, 560],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "onError": "continueRegularOutput"
     },
     {
@@ -128,9 +131,9 @@
           "conditions": [
             {
               "id": "pipeline-success",
-              "leftValue": "={{ $json.status }}",
-              "rightValue": "success",
-              "operator": { "type": "string", "operation": "equals" }
+              "leftValue": "={{ $json.status === 'success' && Array.isArray($json.results) && $json.results.length > 0 && $json.results.every(r => r?.sync?.status === 'success' && r?.train?.status === 'success') }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
             }
           ],
           "combinator": "and"

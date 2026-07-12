@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   repository-contract:
@@ -87,4 +91,5 @@ jobs:
             ml-service/requirements.txt
             ml-service/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
+      - run: ruff check app tests
       - run: python -m pytest -q

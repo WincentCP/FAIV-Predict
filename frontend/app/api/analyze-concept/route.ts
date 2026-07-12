@@ -179,10 +179,17 @@ Write strengths and suggestions in the same language the brief is mostly written
       { status: 502 }
     );
   } catch (error: unknown) {
+    const errorName = error instanceof Error ? error.name : "unknown error";
     console.error(
       "[BFF AnalyzeConcept] Request failed:",
-      error instanceof Error ? error.name : "unknown error"
+      errorName
     );
+    if (errorName === "TimeoutError" || errorName === "AbortError") {
+      return NextResponse.json(
+        { status: "error", message: "Concept analysis timed out. Your draft was not changed." },
+        { status: 504 }
+      );
+    }
     return publicErrorResponse(error, "Concept analysis could not be completed.", 500);
   }
 }

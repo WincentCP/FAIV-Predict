@@ -15,7 +15,6 @@ export async function GET() {
     const brandIds = (await getOwnedBrands(supabase, user.id)).map((brand) => brand.id);
     if (brandIds.length === 0) return NextResponse.json([]);
 
-    // Fetch predictions joined with brand metadata
     const { data: predictions, error } = await supabase
       .from("predictions")
       .select(`
@@ -74,7 +73,6 @@ export async function GET() {
     );
     const postById = new Map((linkedPosts || []).map((post) => [post.id, post]));
 
-    // Map database properties to the schema required by the history UI
     const formatted = (predictions || []).map((p: any) => {
       const is_reels = p.features?.is_reels === 1.0;
       const is_carousel = p.features?.is_carousel === 1.0;

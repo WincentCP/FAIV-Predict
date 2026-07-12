@@ -15,7 +15,6 @@ interface PickerProps {
   "aria-label"?: string;
 }
 
-// ─── DatePicker ──────────────────────────────────────────────────────────────
 export function DatePicker({ value, onChange, className, id, "aria-label": ariaLabel }: PickerProps) {
   const [open, setOpen] = React.useState(false);
 
@@ -60,7 +59,6 @@ export function DatePicker({ value, onChange, className, id, "aria-label": ariaL
   );
 }
 
-// ─── WheelColumn ─────────────────────────────────────────────────────────────
 export function TimePicker({ value, onChange, className, id, "aria-label": ariaLabel }: PickerProps) {
   const hourValue = String(value.getHours());
 

@@ -17,10 +17,28 @@ def require(condition: bool, message: str) -> None:
 
 
 def main() -> int:
+    for development_artifact in (
+        ".agents",
+        ".claude",
+        ".github/hooks/impeccable.json",
+        "AGENTS.md",
+        "DESIGN.md",
+        "skills-lock.json",
+        "frontend/.prettierignore",
+        "frontend/.prettierrc",
+        "frontend/components.json",
+    ):
+        require(
+            not (ROOT / development_artifact).exists(),
+            f"development-only artifact must not be committed: {development_artifact}",
+        )
+
     workflow_path = ROOT / "n8n" / "workflow_sync_retrain.json"
     workflow_text = workflow_path.read_text(encoding="utf-8")
     workflow = json.loads(workflow_text)
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    ci_workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    ml_dev_requirements = (ROOT / "ml-service" / "requirements-dev.txt").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     n8n_readme = (ROOT / "n8n" / "README.md").read_text(encoding="utf-8")
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
@@ -83,6 +101,10 @@ def main() -> int:
     powershell_preflight = (ROOT / "scripts" / "thesis_preflight.ps1").read_text(encoding="utf-8")
 
     require(workflow.get("active") is False, "workflow template must import inactive")
+    require(
+        "ruff==" in ml_dev_requirements and "ruff check app tests" in ci_workflow,
+        "CI must enforce Python static quality alongside the ML test suite",
+    )
     require("$env" not in workflow_text, "workflow template must not read $env")
     require("example.invalid" in workflow_text, "portable template needs safe email placeholders")
     require(
@@ -144,6 +166,10 @@ def main() -> int:
     require(
         "IG_SYNC_POST_LIMIT=${IG_SYNC_POST_LIMIT:-500}" in ml_service,
         "ML service must receive the bounded historical Instagram sync limit",
+    )
+    require(
+        "LLM_MODEL=${LLM_MODEL:-gemini-2.5-flash}" in compose,
+        "Compose must expose the documented server-side LLM model selector",
     )
     require(
         "N8N_BLOCK_ENV_ACCESS_IN_NODE=true" in n8n_service,
@@ -297,9 +323,12 @@ def main() -> int:
         "Brand Performance Snapshot BFF must authenticate and authorize brand ownership",
     )
     require(
-        "Brand Performance Snapshot" in brand_patterns_ui
+        (
+            "Brand Performance Snapshot" in brand_patterns_ui
+            or "What has worked for this brand" in brand_patterns_ui
+        )
         and "/api/brand-patterns" in brand_patterns_ui
-        and "Not measured" in brand_patterns_ui,
+        and "Not measured by this system" in brand_patterns_ui,
         "Predict UI must expose observed brand evidence and honest unavailable dimensions",
     )
     require(
@@ -326,7 +355,10 @@ def main() -> int:
         and "plan_id" in predict_ui
         and "persistContentPlan" in predict_ui
         and "/api/publication-links" in insights_ui
-        and "Confirm this publication" in insights_ui,
+        and (
+            "Confirm this publication" in insights_ui
+            or "Verify this publication" in insights_ui
+        ),
         "Content Plan UI must support prediction handoff and verified publication outcome states",
     )
     require(
@@ -348,7 +380,7 @@ def main() -> int:
         and "recent_median_er" not in instagram_post_insights_bff
         and "recent_median_er" not in insights_ui
         and "fixed_horizon_snapshots_unavailable" in inference_source
-        and "Recent performance trend unavailable" in insights_ui,
+        and "unequal-age cumulative ER is not presented as a recent trend" in insights_ui,
         "unequal-age cumulative ER must never be presented as a recent performance trend",
     )
     for route_name, route_source in (

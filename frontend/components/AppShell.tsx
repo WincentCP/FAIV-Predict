@@ -127,11 +127,13 @@ function Navigation({ pathname, onNavigate }: { pathname: string; onNavigate?: (
 }
 
 function UserMenuPanel({
+  id,
   displayName,
   userEmail,
   onLogout,
   className,
 }: {
+  id: string;
   displayName: string;
   userEmail: string;
   onLogout: () => void;
@@ -139,7 +141,7 @@ function UserMenuPanel({
 }) {
   return (
     <motion.div
-      role="menu"
+      id={id}
       initial={{ opacity: 0, y: 4, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={MOTION}
@@ -151,7 +153,6 @@ function UserMenuPanel({
       </div>
       <button
         type="button"
-        role="menuitem"
         onClick={onLogout}
         className="mt-1 flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-medium text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
@@ -324,6 +325,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <AnimatePresence>
               {sidebarUserOpen && (
                 <UserMenuPanel
+                  id="sidebar-account-panel"
                   displayName={displayName}
                   userEmail={userEmail}
                   onLogout={handleLogout}
@@ -335,7 +337,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={() => setSidebarUserOpen((open) => !open)}
               aria-expanded={sidebarUserOpen}
-              aria-haspopup="menu"
+              aria-controls="sidebar-account-panel"
               className="flex min-h-12 w-full items-center gap-3 rounded-xl px-2 text-left hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-foreground text-xs font-bold text-background">{avatarInitial}</div>
@@ -393,7 +395,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   type="button"
                   onClick={() => setTopbarUserOpen((open) => !open)}
                   aria-expanded={topbarUserOpen}
-                  aria-haspopup="menu"
+                  aria-controls="mobile-account-panel"
                   className="grid h-10 w-10 place-items-center rounded-[10px] bg-foreground text-xs font-bold text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
                   <span aria-hidden="true">{avatarInitial}</span>
@@ -402,6 +404,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <AnimatePresence>
                   {topbarUserOpen && (
                     <UserMenuPanel
+                      id="mobile-account-panel"
                       displayName={displayName}
                       userEmail={userEmail}
                       onLogout={handleLogout}

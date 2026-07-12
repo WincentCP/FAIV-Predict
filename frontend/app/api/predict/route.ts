@@ -19,6 +19,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const SAFE_PREDICTION_DETAILS = new Set([
   "Prediction could not be saved with user provenance; no result was returned.",
 ]);
+const PREDICTION_TIMEOUT_MS = 60_000;
 
 export async function POST(request: Request) {
   try {
@@ -164,6 +165,7 @@ export async function POST(request: Request) {
       mlResponse = await fetch(`${FASTAPI_URL}/predict`, {
         method: "POST",
         headers: backendHeaders,
+        signal: AbortSignal.timeout(PREDICTION_TIMEOUT_MS),
         body: JSON.stringify({
           caption,
           format,
@@ -176,15 +178,20 @@ export async function POST(request: Request) {
           supersession_reason: supersessionReason,
         }),
       });
-    } catch (netErr) {
+    } catch (netErr: unknown) {
+      const errorName = netErr instanceof Error ? netErr.name : "UnknownError";
       console.error("[BFF Proxy] FastAPI service is unreachable:", netErr);
       return NextResponse.json(
         {
           status: "error",
-          code: "FASTAPI_UNAVAILABLE",
-          message: "Prediction service is unreachable. Please try again in a few moments.",
+          code: errorName === "TimeoutError" || errorName === "AbortError"
+            ? "PREDICTION_TIMEOUT"
+            : "FASTAPI_UNAVAILABLE",
+          message: errorName === "TimeoutError" || errorName === "AbortError"
+            ? "Prediction timed out before a result was saved. Please try again."
+            : "Prediction service is unreachable. Please try again in a few moments.",
         },
-        { status: 503 }
+        { status: errorName === "TimeoutError" || errorName === "AbortError" ? 504 : 503 }
       );
     }
 

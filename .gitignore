@@ -16,6 +16,7 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
+.ruff_cache/
 .ipynb_checkpoints/
 
 # Environment Variables
@@ -38,6 +39,10 @@ pnpm-debug.log*
 # Editor & OS files
 .vscode/
 .idea/
+.agents/
+.claude/
+skills-lock.json
+.github/hooks/impeccable.json
 .DS_Store
 Thumbs.db
 *.suo

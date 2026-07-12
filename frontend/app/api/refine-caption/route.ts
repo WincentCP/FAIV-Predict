@@ -24,9 +24,9 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (caption.length > 5000) {
+    if (caption.length > 2200) {
       return NextResponse.json(
-        { status: "error", message: "Caption must be at most 5,000 characters." },
+        { status: "error", message: "Caption must be at most 2,200 characters." },
         { status: 400 }
       );
     }
@@ -136,10 +136,17 @@ Output requirements:
       },
     });
   } catch (error: unknown) {
+    const errorName = error instanceof Error ? error.name : "unknown error";
     console.error(
       "[BFF Refine] Request failed:",
-      error instanceof Error ? error.name : "unknown error"
+      errorName
     );
+    if (errorName === "TimeoutError" || errorName === "AbortError") {
+      return NextResponse.json(
+        { status: "error", message: "Caption refinement timed out. Your caption was not changed." },
+        { status: 504 }
+      );
+    }
     return publicErrorResponse(error, "Caption refinement could not be completed.", 500);
   }
 }

@@ -136,11 +136,78 @@ def test_train_endpoint_without_db_refuses_untrackable_job(monkeypatch):
     response = client.post("/train", json=payload)
     assert response.status_code == 503
 
+
+@pytest.mark.parametrize("payload", [
+    {},
+    {"brand_id": "not-a-uuid"},
+    {"niche": "   "},
+    {"niche": "Fitness", "unexpected": True},
+])
+def test_train_rejects_invalid_or_ambiguous_scope_before_database_io(payload):
+    response = client.post("/train", json=payload)
+    assert response.status_code == 422
+
 def test_train_status_without_db_is_honest(monkeypatch):
     """Without a database there is no job state — the service must not fabricate success."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
     response = client.get("/train/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 503
+
+
+def test_train_uses_persisted_brand_niche_for_background_scope(monkeypatch):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+    queries = []
+
+    class Cursor:
+        rowcount = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def execute(self, query, params):
+            queries.append((query, params))
+
+        @staticmethod
+        def fetchone():
+            return ("Fitness",)
+
+    class Connection:
+        @staticmethod
+        def cursor():
+            return Cursor()
+
+        @staticmethod
+        def commit():
+            pass
+
+        @staticmethod
+        def close():
+            pass
+
+    class Tasks:
+        call = None
+
+        def add_task(self, function, *args):
+            self.call = (function, args)
+
+    tasks = Tasks()
+    brand_id = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setattr(main_module.psycopg2, "connect", lambda *_args: Connection())
+
+    result = main_module.train(
+        main_module.TrainRequest(brand_id=brand_id, niche="Wrong caller niche"),
+        tasks,
+    )
+
+    assert result["status"] == "pending"
+    assert tasks.call[1][1:] == (brand_id, "Fitness")
+    assert "owner_id IS NOT NULL" in queries[0][0]
 
 
 # ── v2 feature set + counterfactuals ────────────────────────────────────────
@@ -177,6 +244,7 @@ from app.main import (
     _reconcile_prediction_publications,
     _sync_and_retrain_pipeline,
     _upsert_instagram_media,
+    run_training_job_async,
 )
 
 
@@ -722,9 +790,15 @@ def test_thesis_evidence_scope_uses_only_valid_explicit_and_configured_brands(mo
 
 
 def test_thesis_evidence_uses_served_account_model_instead_of_legacy_cohort():
+    served_metrics = {
+        "data_source": "instagram_graph",
+        "identity_key": "instagram_media_id",
+        "evaluation_contract": "faiv-thesis-v2",
+        "promotion_gate": {"passed": True},
+    }
     rows = [
-        {"id": "account-new", "brand_id": "brand-1", "model_type": "account", "niche": None},
-        {"id": "cohort-old", "brand_id": None, "model_type": "niche", "niche": "Fitness"},
+        {"id": "account-new", "brand_id": "brand-1", "model_type": "account", "niche": None, "metrics": served_metrics},
+        {"id": "cohort-old", "brand_id": None, "model_type": "niche", "niche": "Fitness", "metrics": served_metrics},
     ]
     selected = effective_models_for_brands(
         rows,
@@ -732,6 +806,37 @@ def test_thesis_evidence_uses_served_account_model_instead_of_legacy_cohort():
     )
 
     assert [row["id"] for row in selected] == ["account-new"]
+
+
+def test_thesis_evidence_excludes_models_that_serving_would_reject():
+    served_metrics = {
+        "data_source": "instagram_graph",
+        "identity_key": "instagram_media_id",
+        "evaluation_contract": "faiv-thesis-v2",
+        "promotion_gate": {"passed": True},
+    }
+    rejected_metrics = {**served_metrics, "promotion_gate": {"passed": False}}
+    selected = effective_models_for_brands(
+        [
+            {
+                "id": "rejected-account",
+                "brand_id": "brand-1",
+                "model_type": "account",
+                "niche": None,
+                "metrics": rejected_metrics,
+            },
+            {
+                "id": "served-cohort",
+                "brand_id": None,
+                "model_type": "niche",
+                "niche": "Fitness",
+                "metrics": served_metrics,
+            },
+        ],
+        [{"id": "brand-1", "niche": "Fitness"}],
+    )
+
+    assert [row["id"] for row in selected] == ["served-cohort"]
 
 
 def _tiny_model(classes=("HIGH", "AVERAGE", "LOW"), n_features=10):
@@ -1672,6 +1777,51 @@ def test_stale_retrain_jobs_are_failed_before_new_work_is_queued():
     assert cursor.params == (30,)
 
 
+def test_background_training_failure_records_terminal_timestamps(monkeypatch):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+    calls = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def execute(self, query, params):
+            calls.append((query, params))
+
+    class Connection:
+        @staticmethod
+        def cursor():
+            return Cursor()
+
+        @staticmethod
+        def commit():
+            pass
+
+        @staticmethod
+        def close():
+            pass
+
+    def fail_training(*_args, **_kwargs):
+        raise RuntimeError("failed")
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setattr(main_module.psycopg2, "connect", lambda *_args: Connection())
+    monkeypatch.setattr(ModelTrainer, "run_training", fail_training)
+
+    run_training_job_async("job-id", "brand-id", "Fitness")
+
+    failure_query, failure_params = calls[-1]
+    assert "status = 'failed'" in failure_query
+    assert "completed_at" in failure_query and "finished_at" in failure_query
+    assert failure_params[-1] == "job-id"
+    assert all(value.tzinfo is not None for value in failure_params[1:3])
+
+
 def test_instagram_sync_post_limit_is_configurable_and_bounded(monkeypatch):
     monkeypatch.delenv("IG_SYNC_POST_LIMIT", raising=False)
     assert _instagram_sync_post_limit() == DEFAULT_INSTAGRAM_SYNC_POST_LIMIT
@@ -1794,6 +1944,40 @@ def test_instagram_media_fetch_exact_total_without_next_is_not_truncated(monkeyp
 
     assert [post["id"] for post in posts] == ["1", "2"]
     assert truncated is False
+
+
+def test_instagram_media_fetch_rejects_malformed_graph_payload(monkeypatch):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+
+    class Response:
+        @staticmethod
+        def raise_for_status():
+            pass
+
+        @staticmethod
+        def json():
+            return {"data": {"id": "not-an-array"}, "paging": {}}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        @staticmethod
+        def get(url, params):
+            return Response()
+
+    monkeypatch.setattr(main_module.httpx, "Client", Client)
+
+    with pytest.raises(ValueError, match="data must be a JSON array"):
+        _fetch_ig_posts("ig-account", "secret", limit=2)
 
 
 def test_invalid_instagram_sync_limit_fails_before_binding_or_graph_io(monkeypatch):
@@ -2227,6 +2411,120 @@ def test_model_loader_rejects_artifact_without_verified_post_provenance(monkeypa
 
     with pytest.raises(ModelUnavailableError, match="provenance"):
         ModelLoader.load_model(brand_id="brand-id")
+
+
+def test_model_loader_uses_persisted_brand_niche_for_cohort_fallback(monkeypatch):
+    queries = []
+    rows = [
+        None,
+        {"niche": "Fitness"},
+        {
+            "id": "cohort-model",
+            "brand_id": None,
+            "niche": "Fitness",
+            "model_type": "niche",
+        },
+    ]
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def execute(self, query, params):
+            queries.append((query, params))
+
+        @staticmethod
+        def fetchone():
+            return rows.pop(0)
+
+    class Connection:
+        @staticmethod
+        def cursor(*_args, **_kwargs):
+            return Cursor()
+
+        @staticmethod
+        def close():
+            pass
+
+    monkeypatch.setattr(
+        ModelLoader, "_get_db_connection", staticmethod(lambda: Connection())
+    )
+
+    metadata = ModelLoader.get_model_metadata(
+        brand_id="bfd6dbca-613d-4950-8b1e-45ad7dcf1088",
+        niche="Wrong caller niche",
+    )
+
+    assert metadata["id"] == "cohort-model"
+    assert queries[-1][1] == ("Fitness",)
+    assert "owner_id IS NOT NULL" in queries[0][0]
+
+
+def test_model_loader_validates_cache_paths_and_artifact_schema():
+    filename = ModelLoader._cache_filename("niche", "../../outside", "v/1")
+    assert os.path.basename(filename) == filename
+    assert "/" not in filename and "\\" not in filename
+
+    model = _tiny_model()
+    valid_bundle = {
+        "model": model,
+        "features": FEATURE_ORDER_V2,
+        "data_provenance": {
+            "source": "instagram_graph",
+            "identity_key": "instagram_media_id",
+        },
+    }
+    ModelLoader._validate_model_bundle(valid_bundle)
+
+    invalid_bundle = {**valid_bundle, "features": FEATURE_ORDER_V2[:-1]}
+    with pytest.raises(ModelUnavailableError, match="feature schema"):
+        ModelLoader._validate_model_bundle(invalid_bundle)
+
+
+def test_model_download_with_secret_key_uses_apikey_and_atomic_cache(
+    monkeypatch, tmp_path
+):
+    import importlib
+
+    loader_module = importlib.import_module("app.model_loader")
+    captured_headers = {}
+
+    class Response:
+        status_code = 200
+        content = b"complete-model-bytes"
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        @staticmethod
+        def get(url, headers):
+            captured_headers.update(headers)
+            return Response()
+
+    monkeypatch.setattr(loader_module, "CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(loader_module.httpx, "Client", Client)
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setenv("SUPABASE_KEY", "sb_secret_example")
+
+    path = ModelLoader.download_model(
+        "",
+        "niche/model.joblib",
+        "model_niche_Fitness_v1.joblib",
+    )
+
+    assert Path(path).read_bytes() == b"complete-model-bytes"
+    assert captured_headers == {"apikey": "sb_secret_example"}
+    assert not list(tmp_path.glob(".model-*"))
 
 
 def test_model_loader_does_not_expose_storage_exception_details(monkeypatch):

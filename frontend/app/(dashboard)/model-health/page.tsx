@@ -55,7 +55,7 @@ export default function ModelHealthPage() {
     try {
       const [modelsRes, connectionsRes] = await Promise.all([
         fetchWithRetry("/api/models"),
-        fetchWithRetry("/api/instagram-health"),
+        fetchWithRetry("/api/instagram-health", { cache: "no-store" }, 0),
       ]);
       const [modelPayload, connectionPayload] = await Promise.all([
         modelsRes.json().catch(() => null),

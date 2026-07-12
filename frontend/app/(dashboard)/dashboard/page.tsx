@@ -92,7 +92,7 @@ export default function DashboardPage() {
         fetchWithRetry("/api/dashboard", { cache: "no-store" }),
         fetchWithRetry("/api/brands", { cache: "no-store" }),
         fetchWithRetry("/api/calendar", { cache: "no-store" }),
-        fetchWithRetry("/api/instagram-health", { cache: "no-store" }, 1),
+        fetchWithRetry("/api/instagram-health", { cache: "no-store" }, 0),
       ]);
 
       if (cancelled) return;

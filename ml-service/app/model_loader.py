@@ -1,10 +1,14 @@
 import os
+import re
+import tempfile
 import joblib
 import httpx
 import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from typing import Optional, Any, Tuple
+
+from app.preprocessing import FEATURE_ORDER_V1
 
 logger = logging.getLogger("model_loader")
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +30,67 @@ class ModelLoader:
     """
     
     _model_cache = {}
+
+    @staticmethod
+    def _safe_cache_component(value: Any, *, fallback: str) -> str:
+        """Return a readable filename component that cannot escape CACHE_DIR."""
+        raw = str(value or "")
+        normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._-")[:80]
+        return normalized or fallback
+
+    @classmethod
+    def _cache_filename(
+        cls, model_type: Any, identifier: Any, version: Any
+    ) -> str:
+        return "model_{}_{}_{}.joblib".format(
+            cls._safe_cache_component(model_type, fallback="unknown"),
+            cls._safe_cache_component(identifier, fallback="scope"),
+            cls._safe_cache_component(version, fallback="version"),
+        )
+
+    @staticmethod
+    def _validate_model_bundle(bundle: Any) -> None:
+        """Fail closed when a registered artifact does not match inference."""
+        if not isinstance(bundle, dict):
+            raise ModelUnavailableError(
+                "The registered model artifact has an unsupported structure. Retrain it."
+            )
+        provenance = bundle.get("data_provenance")
+        if not isinstance(provenance, dict) or (
+            provenance.get("source") != "instagram_graph"
+            or provenance.get("identity_key") != "instagram_media_id"
+        ):
+            raise ModelUnavailableError(
+                "The model artifact predates verified Instagram media provenance. Retrain it before serving."
+            )
+
+        model = bundle.get("model")
+        classes = getattr(model, "classes_", None)
+        if not callable(getattr(model, "predict_proba", None)) or classes is None:
+            raise ModelUnavailableError(
+                "The registered model artifact is incomplete. Retrain it before serving."
+            )
+        if {str(value).upper() for value in classes} != {"LOW", "AVERAGE", "HIGH"}:
+            raise ModelUnavailableError(
+                "The registered model artifact does not implement the required three tiers. Retrain it."
+            )
+
+        features = bundle.get("features")
+        if features is not None and (
+            not isinstance(features, list)
+            or not features
+            or any(not isinstance(name, str) or not name for name in features)
+            or len(set(features)) != len(features)
+        ):
+            raise ModelUnavailableError(
+                "The registered model artifact has an invalid feature schema. Retrain it."
+            )
+        expected_feature_count = len(features or FEATURE_ORDER_V1)
+        fitted_feature_count = getattr(model, "n_features_in_", expected_feature_count)
+        if int(fitted_feature_count) != expected_feature_count:
+            raise ModelUnavailableError(
+                "The registered model artifact feature schema is incompatible. Retrain it."
+            )
     
     @staticmethod
     def _get_db_connection():
@@ -47,27 +112,43 @@ class ModelLoader:
         try:
             conn = cls._get_db_connection()
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                effective_niche = niche
                 if brand_id:
-                    # Look for active brand-specific model first
                     cur.execute(
                         """
-                        SELECT id, brand_id, niche, model_type, storage_path, storage_url, version, accuracy, metrics
-                        FROM models 
-                        WHERE brand_id = %s AND model_type = 'account'
-                          AND metrics->>'data_source' = 'instagram_graph'
-                          AND metrics->>'identity_key' = 'instagram_media_id'
-                          AND metrics->>'evaluation_contract' IN ('faiv-thesis-v1', 'faiv-thesis-v2')
-                          AND metrics->'promotion_gate'->>'passed' = 'true'
-                        ORDER BY created_at DESC LIMIT 1
+                        SELECT m.id, m.brand_id, m.niche, m.model_type,
+                               m.storage_path, m.storage_url, m.version,
+                               m.accuracy, m.metrics
+                        FROM models m
+                        JOIN brands b ON b.id = m.brand_id
+                        WHERE m.brand_id = %s AND b.owner_id IS NOT NULL
+                          AND m.model_type = 'account'
+                          AND m.metrics->>'data_source' = 'instagram_graph'
+                          AND m.metrics->>'identity_key' = 'instagram_media_id'
+                          AND m.metrics->>'evaluation_contract' IN ('faiv-thesis-v1', 'faiv-thesis-v2')
+                          AND m.metrics->'promotion_gate'->>'passed' = 'true'
+                        ORDER BY m.created_at DESC LIMIT 1
                         """,
                         (brand_id,)
                     )
                     row = cur.fetchone()
                     if row:
                         return dict(row)
-                
-                if niche:
-                    # Look for shared niche model
+
+                    # Cohort fallback is derived from the persisted brand, not
+                    # from a caller-provided niche that could reference a
+                    # different scope.
+                    cur.execute(
+                        """SELECT niche FROM brands
+                           WHERE id = %s AND owner_id IS NOT NULL LIMIT 1""",
+                        (brand_id,),
+                    )
+                    brand = cur.fetchone()
+                    if not brand:
+                        return None
+                    effective_niche = brand.get("niche")
+
+                if effective_niche:
                     cur.execute(
                         """
                         SELECT id, brand_id, niche, model_type, storage_path, storage_url, version, accuracy, metrics
@@ -79,7 +160,7 @@ class ModelLoader:
                           AND metrics->'promotion_gate'->>'passed' = 'true'
                         ORDER BY created_at DESC LIMIT 1
                         """,
-                        (niche,)
+                        (effective_niche,)
                     )
                     row = cur.fetchone()
                     if row:
@@ -97,6 +178,8 @@ class ModelLoader:
         Downloads the joblib model from Supabase Storage and returns the local file path.
         Uses Supabase environment variables for authorization if needed.
         """
+        if os.path.basename(filename) != filename:
+            raise ValueError("Model cache filename must not contain a path")
         local_path = os.path.join(CACHE_DIR, filename)
         
         # If already cached locally, return it
@@ -115,25 +198,34 @@ class ModelLoader:
             if not storage_url or "supabase" in supabase_url:
                 bucket_name = "models"
                 download_url = f"{supabase_url.rstrip('/')}/storage/v1/object/authenticated/{bucket_name}/{storage_path.lstrip('/')}"
-                # New-format keys (sb_secret_...) are only valid in the apikey
-                # header; legacy JWT service keys also work as a Bearer token.
                 headers["apikey"] = supabase_key
-                headers["Authorization"] = f"Bearer {supabase_key}"
+                if not supabase_key.startswith(("sb_secret_", "sb_publishable_")):
+                    headers["Authorization"] = f"Bearer {supabase_key}"
 
-        logger.info(f"Downloading model from {download_url}...")
+        logger.info("Downloading registered model artifact: %s", filename)
+        temporary_path = None
         try:
             with httpx.Client(timeout=15.0) as client:
                 response = client.get(download_url, headers=headers)
                 if response.status_code == 200:
-                    with open(local_path, "wb") as f:
-                        f.write(response.content)
-                    logger.info(f"Successfully downloaded model to {local_path}")
+                    with tempfile.NamedTemporaryFile(
+                        mode="wb", dir=CACHE_DIR, prefix=".model-", delete=False
+                    ) as temporary_file:
+                        temporary_path = temporary_file.name
+                        temporary_file.write(response.content)
+                    os.replace(temporary_path, local_path)
+                    temporary_path = None
+                    logger.info("Model artifact cached: %s", filename)
                     return local_path
-                else:
-                    raise IOError(f"Supabase Storage returned status code {response.status_code}: {response.text}")
-        except Exception as e:
-            logger.error(f"Failed to download model: {e}")
+                raise IOError(
+                    f"Supabase Storage returned status code {response.status_code}"
+                )
+        except Exception as exc:
+            logger.error("Failed to download model artifact: %s", type(exc).__name__)
             raise
+        finally:
+            if temporary_path and os.path.exists(temporary_path):
+                os.remove(temporary_path)
 
     @classmethod
     def load_model(cls, brand_id: Optional[str] = None, niche: Optional[str] = None) -> Tuple[Any, dict]:
@@ -163,8 +255,14 @@ class ModelLoader:
         version = metadata.get("version", "v1.0")
         model_type = metadata.get("model_type", "niche")
 
-        filename = f"model_{model_type}_{brand_id or niche}_{version}.joblib"
-        cache_key = f"{brand_id or niche}_{version}"
+        identifier = (
+            metadata.get("brand_id")
+            or metadata.get("niche")
+            or brand_id
+            or niche
+        )
+        filename = cls._cache_filename(model_type, identifier, version)
+        cache_key = f"{metadata.get('id') or identifier}_{version}"
 
         # Check RAM cache first
         if cache_key in cls._model_cache:
@@ -173,18 +271,11 @@ class ModelLoader:
 
         try:
             local_path = cls.download_model(storage_url, storage_path, filename)
-            model = joblib.load(local_path)
-            provenance = model.get("data_provenance") if isinstance(model, dict) else None
-            if not isinstance(provenance, dict) or (
-                provenance.get("source") != "instagram_graph"
-                or provenance.get("identity_key") != "instagram_media_id"
-            ):
-                raise ModelUnavailableError(
-                    "The model artifact predates verified Instagram media provenance. Retrain it before serving."
-                )
-            cls._model_cache[cache_key] = model
+            bundle = joblib.load(local_path)
+            cls._validate_model_bundle(bundle)
+            cls._model_cache[cache_key] = bundle
             logger.info(f"Successfully loaded model {filename} and cached in memory.")
-            return model, metadata
+            return bundle, metadata
         except ModelUnavailableError:
             # Provenance failures are already intentionally worded for callers.
             raise

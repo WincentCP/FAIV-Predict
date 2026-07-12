@@ -43,7 +43,6 @@ function asPercentMetric(value: unknown): number | null {
 export default function PredictPage() {
   const [view, setView] = useState<PredictView>("compose");
 
-  // Brands from the real database
   const [brandsList, setBrandsList] = useState<Brand[]>([]);
   const [brandsError, setBrandsError] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
@@ -66,19 +65,15 @@ export default function PredictPage() {
   const [planSaveState, setPlanSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [planSaveMessage, setPlanSaveMessage] = useState<string | null>(null);
 
-  // Prediction state — null until the model has actually returned a result.
   const [prediction, setPrediction] = useState<InsightsPrediction | null>(null);
   const [predictError, setPredictError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [optimizationsApplied, setOptimizationsApplied] = useState(false);
 
-  // Staged changes from measured counterfactuals.
   const [appliedRecs, setAppliedRecs] = useState<Record<string, boolean>>({});
 
-  // Feature importances kept separately for the evidence panels
   const [featureImportances, setFeatureImportances] = useState<Record<string, number> | null>(null);
 
-  // Snapshot of the inputs used for the last prediction (staleness detection)
   const [predictionSnapshot, setPredictionSnapshot] = useState<{
     caption: string;
     contentFormat: ContentFormat;
@@ -183,7 +178,6 @@ export default function PredictPage() {
     })();
   }, []);
 
-  // Clear the "optimizations applied" note once inputs are edited again
   useEffect(() => {
     setOptimizationsApplied(false);
     setPlanSaveState("idle");
@@ -458,7 +452,6 @@ export default function PredictPage() {
 
   return (
     <div className="relative mx-auto min-h-screen max-w-[1480px] px-4 py-6 md:px-8 md:py-8">
-      {/* Header + view switch */}
       <div className="mb-8 flex flex-col justify-between gap-5 border-b border-border/60 pb-6 md:flex-row md:items-end">
         <div>
           <p className="mb-2 text-xs font-semibold text-primary">Predict workspace</p>

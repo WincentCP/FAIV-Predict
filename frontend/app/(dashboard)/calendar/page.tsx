@@ -27,9 +27,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 type CalendarEntry = {
   id: string;
   date: string; // YYYY-MM-DD
@@ -187,6 +184,8 @@ export default function CalendarPage() {
   const [planFilter, setPlanFilter] = useState<PlanFilter>("all");
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const importDialogRef = useRef<HTMLDivElement>(null);
+  const importCloseRef = useRef<HTMLButtonElement>(null);
 
   const loadCalendar = useCallback(async () => {
     try {
@@ -301,8 +300,42 @@ export default function CalendarPage() {
     [brandsList]
   );
 
-  // ------- CSV/XLSX Import: parse → detect columns → review → confirm -------
   const [csvStage, setCsvStage] = useState<CsvStage | null>(null);
+  const importDialogOpen = csvStage !== null;
+
+  useEffect(() => {
+    if (!importDialogOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    importCloseRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setCsvStage(null);
+        return;
+      }
+      if (event.key !== "Tab" || !importDialogRef.current) return;
+      const focusable = Array.from(importDialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+      ));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [importDialogOpen]);
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -473,7 +506,6 @@ export default function CalendarPage() {
     await loadCalendar();
   };
 
-  // ------- Editable CSV export of the visible month -------
   const handleExportCsv = () => {
     const header = ["posting_date", "time", "brand", "type", "content_details", "visual_reference", "caption", "voice_over", "pic", "status"];
     const lines = [header.join(",")];
@@ -562,8 +594,7 @@ export default function CalendarPage() {
     doc.save(`faiv-content-plan-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.pdf`);
   };
 
-  const handleSave = async (next: CalendarEntry) => {
-    setEditing(null);
+  const handleSave = async (next: CalendarEntry): Promise<string | null> => {
     try {
       const isNew = next.id.startsWith("new:");
       const res = await fetch("/api/calendar", {
@@ -574,25 +605,38 @@ export default function CalendarPage() {
           ...toCalendarPayload(next),
         }),
       });
-      if (!res.ok) throw new Error();
+      const result = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(result?.message || "The Content Plan change could not be saved.");
+      }
       await loadCalendar();
-    } catch {
-      setLoadError("Saving the Content Plan change failed — the database rejected the update.");
+      setLoadError(null);
+      return null;
+    } catch (error: unknown) {
+      return error instanceof Error
+        ? error.message
+        : "The Content Plan change could not be saved.";
     }
   };
 
-  const handleDelete = async (id: string) => {
-    setEditing(null);
+  const handleDelete = async (id: string): Promise<string | null> => {
     try {
       const res = await fetch("/api/calendar", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
-      if (!res.ok) throw new Error();
+      const result = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(result?.message || "The Content Plan entry could not be deleted.");
+      }
       setEntries((prev) => prev.filter((e) => e.id !== id));
-    } catch {
-      setLoadError("Deleting the Content Plan entry failed — the database rejected the delete.");
+      setLoadError(null);
+      return null;
+    } catch (error: unknown) {
+      return error instanceof Error
+        ? error.message
+        : "The Content Plan entry could not be deleted.";
     }
   };
 
@@ -785,7 +829,6 @@ export default function CalendarPage() {
         </div>
       )}
 
-      {/* Spreadsheet review: nothing imports until the user confirms here */}
       {csvStage && csvValidation && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-background/75 p-4 backdrop-blur-sm"
@@ -793,6 +836,7 @@ export default function CalendarPage() {
           role="presentation"
         >
           <div
+            ref={importDialogRef}
             className="relative w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border border-border bg-surface/95 backdrop-blur-2xl shadow-[var(--shadow-elevated)]"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
@@ -808,8 +852,10 @@ export default function CalendarPage() {
                 </p>
               </div>
               <button
+                ref={importCloseRef}
+                type="button"
                 onClick={() => setCsvStage(null)}
-                className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-surface-2 hover:text-foreground"
                 aria-label="Cancel import"
               >
                 <X className="h-4 w-4" />
@@ -817,7 +863,6 @@ export default function CalendarPage() {
             </div>
 
             <div className="p-5 space-y-5 overflow-y-auto flex-1">
-              {/* Column mapping */}
               <div>
                 <div className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   Column mapping <span className="font-normal normal-case">(auto-detected — adjust if wrong)</span>
@@ -856,7 +901,6 @@ export default function CalendarPage() {
                 </div>
               </div>
 
-              {/* Validation summary */}
               <div
                 className={cn(
                   "rounded-xl border p-3.5 text-xs font-semibold",
@@ -872,7 +916,6 @@ export default function CalendarPage() {
                   "Rows with warnings still import."}
               </div>
 
-              {/* Preview table (first 8 rows) */}
               <div className="overflow-x-auto rounded-xl border border-border">
                 <table className="w-full min-w-[640px] text-left text-xs">
                   <thead>
@@ -923,15 +966,17 @@ export default function CalendarPage() {
 
             <div className="flex items-center justify-end gap-2 border-t border-border bg-surface-2/40 p-4 shrink-0">
               <button
+                type="button"
                 onClick={() => setCsvStage(null)}
-                className="rounded-lg border border-border bg-surface px-4 py-2 text-xs font-semibold hover:bg-surface-2"
+                className="min-h-11 rounded-lg border border-border bg-surface px-4 text-xs font-semibold hover:bg-surface-2"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={runImport}
                 disabled={csvValidation.importable.length === 0}
-                className="rounded-lg bg-foreground px-4 py-2 text-xs font-bold text-background hover:opacity-90 disabled:opacity-50"
+                className="min-h-11 rounded-lg bg-foreground px-4 text-xs font-bold text-background hover:opacity-90 disabled:opacity-50"
               >
                 Import {csvValidation.importable.length} post
                 {csvValidation.importable.length === 1 ? "" : "s"}
@@ -941,13 +986,12 @@ export default function CalendarPage() {
         </div>
       )}
 
-      {/* Controls: month navigation + view switcher */}
       <div className="mt-4 flex flex-col md:flex-row items-center justify-between gap-4 border border-border bg-surface p-3 rounded-xl shadow-[var(--shadow-soft)]">
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
           <button
             type="button"
             onClick={goPrev}
-            className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-surface hover:bg-surface-2 active:scale-95"
+            className="grid h-11 w-11 place-items-center rounded-lg border border-border bg-surface hover:bg-surface-2 active:scale-95"
             aria-label="Previous month"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -955,7 +999,7 @@ export default function CalendarPage() {
           <button
             type="button"
             onClick={goNext}
-            className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-surface hover:bg-surface-2 active:scale-95"
+            className="grid h-11 w-11 place-items-center rounded-lg border border-border bg-surface hover:bg-surface-2 active:scale-95"
             aria-label="Next month"
           >
             <ChevronRight className="h-4 w-4" />
@@ -963,7 +1007,7 @@ export default function CalendarPage() {
           <button
             type="button"
             onClick={goToday}
-            className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold hover:bg-surface-2 active:scale-95"
+            className="min-h-11 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 active:scale-95"
           >
             Today
           </button>
@@ -1000,7 +1044,6 @@ export default function CalendarPage() {
       </div>
 
       <div className="mt-6">
-        {/* MONTH GRID */}
         {view === "month" && (
           <section className="overflow-hidden rounded-xl border border-border bg-surface/30">
             <div className="grid grid-cols-7 border-b border-border bg-surface-2/60">
@@ -1120,7 +1163,6 @@ export default function CalendarPage() {
           </section>
         )}
 
-        {/* LIST VIEW */}
         {view === "list" && (
           <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
             <div className="space-y-3 p-3 lg:hidden">
@@ -1365,9 +1407,6 @@ function PlanEmptyState({ filtered, onAdd }: { filtered: boolean; onAdd: () => v
   );
 }
 
-// ---------------------------------------------------------------------------
-// Entry Modal — edits persist through /api/calendar
-// ---------------------------------------------------------------------------
 function EntryModal({
   initial,
   brands,
@@ -1378,14 +1417,21 @@ function EntryModal({
   initial: CalendarEntry;
   brands: Brand[];
   onClose: () => void;
-  onSave: (next: CalendarEntry) => void;
-  onDelete: () => void;
+  onSave: (next: CalendarEntry) => Promise<string | null>;
+  onDelete: () => Promise<string | null>;
 }) {
   const [draft, setDraft] = useState<CalendarEntry>(initial);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [mutation, setMutation] = useState<"idle" | "saving" | "deleting">("idle");
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const cancelDeleteRef = useRef<HTMLButtonElement>(null);
+  const mutationRef = useRef(mutation);
+
+  useEffect(() => {
+    mutationRef.current = mutation;
+  }, [mutation]);
 
   useEffect(() => {
     if (confirmDelete) cancelDeleteRef.current?.focus();
@@ -1397,7 +1443,7 @@ function EntryModal({
     document.body.style.overflow = "hidden";
     closeButtonRef.current?.focus();
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && mutationRef.current === "idle") {
         onClose();
       }
       if (e.key === "Tab" && dialogRef.current) {
@@ -1424,10 +1470,36 @@ function EntryModal({
     };
   }, [onClose]);
 
+  const saveDraft = async () => {
+    if (mutation !== "idle") return;
+    setMutation("saving");
+    setMutationError(null);
+    const error = await onSave(draft);
+    if (error) {
+      setMutationError(error);
+      setMutation("idle");
+      return;
+    }
+    onClose();
+  };
+
+  const deleteDraft = async () => {
+    if (mutation !== "idle") return;
+    setMutation("deleting");
+    setMutationError(null);
+    const error = await onDelete();
+    if (error) {
+      setMutationError(error);
+      setMutation("idle");
+      return;
+    }
+    onClose();
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex justify-end bg-background/60 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={() => { if (mutation === "idle") onClose(); }}
       role="presentation"
     >
       <div
@@ -1453,6 +1525,7 @@ function EntryModal({
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
+            disabled={mutation !== "idle"}
             className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-surface-2 hover:text-foreground"
             aria-label="Close content plan editor"
           >
@@ -1591,14 +1664,22 @@ function EntryModal({
         </div>
 
         <div className="sticky bottom-0 border-t border-border bg-surface p-4 sm:px-6">
+          {mutationError && (
+            <p role="alert" className="mb-3 rounded-xl border border-destructive/25 bg-destructive/[0.04] p-3 text-sm text-destructive">
+              {mutationError}
+            </p>
+          )}
           {confirmDelete ? (
             <div role="alert" className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <p className="flex-1 text-sm leading-6 text-muted-foreground">
                 <strong className="text-foreground">Delete this planned content?</strong> Its immutable prediction history will remain available.
               </p>
               <div className="flex items-center gap-2">
-                <button ref={cancelDeleteRef} type="button" onClick={() => setConfirmDelete(false)} className="min-h-11 rounded-lg border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2">Keep plan</button>
-                <button type="button" onClick={onDelete} className="min-h-11 rounded-lg bg-destructive px-4 text-sm font-semibold text-destructive-foreground hover:bg-destructive/90">Delete plan</button>
+                <button ref={cancelDeleteRef} type="button" onClick={() => setConfirmDelete(false)} disabled={mutation !== "idle"} className="min-h-11 rounded-lg border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2 disabled:opacity-50">Keep plan</button>
+                <button type="button" onClick={deleteDraft} disabled={mutation !== "idle"} aria-busy={mutation === "deleting"} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-destructive px-4 text-sm font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50">
+                  {mutation === "deleting" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                  {mutation === "deleting" ? "Deleting…" : "Delete plan"}
+                </button>
               </div>
             </div>
           ) : (
@@ -1610,17 +1691,20 @@ function EntryModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="min-h-11 rounded-lg border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2"
+                  disabled={mutation !== "idle"}
+                  className="min-h-11 rounded-lg border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2 disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  onClick={() => onSave(draft)}
-                  className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-foreground px-4 text-sm font-semibold text-background hover:opacity-90"
+                  onClick={saveDraft}
+                  disabled={mutation !== "idle"}
+                  aria-busy={mutation === "saving"}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-foreground px-4 text-sm font-semibold text-background hover:opacity-90 disabled:opacity-50"
                 >
-                  <Save className="h-4 w-4" />
-                  {draft.id.startsWith("new:") ? "Save plan" : "Save changes"}
+                  {mutation === "saving" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4" aria-hidden="true" />}
+                  {mutation === "saving" ? "Saving…" : draft.id.startsWith("new:") ? "Save plan" : "Save changes"}
                 </button>
               </div>
             </div>
@@ -1642,9 +1726,6 @@ function ModalField({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 type GridCell = { year: number; month: number; day: number; inMonth: boolean };
 
 function buildMonthGrid(year: number, month: number): GridCell[] {

@@ -820,6 +820,8 @@ function MediaPreview({ post, src, compact = false }: { post: IgPost; src: strin
         <img
           src={src}
           alt={compact ? "" : (post.caption?.slice(0, 100) || `${media.label} preview`)}
+          loading={compact ? "lazy" : "eager"}
+          decoding="async"
           className="absolute inset-0 h-full w-full object-cover"
           onError={(event) => { event.currentTarget.style.display = "none"; }}
         />

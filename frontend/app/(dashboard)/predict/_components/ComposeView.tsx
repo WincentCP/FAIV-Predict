@@ -207,7 +207,7 @@ export function ComposeView(props: {
                 rows={12}
                 maxLength={CAPTION_MAX + 100}
                 disabled={submitting}
-                className="min-h-[280px] w-full resize-y bg-transparent p-4 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-70 sm:text-sm"
+                className="min-h-[280px] w-full resize-y bg-transparent p-4 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-70 sm:text-sm"
                 placeholder="Write the caption you plan to publish…"
               />
               <div className="border-t border-border bg-surface-2/50 px-4 py-3">

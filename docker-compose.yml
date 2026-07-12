@@ -10,9 +10,9 @@ services:
       - SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:?NEXT_PUBLIC_SUPABASE_URL is required}
       - SUPABASE_KEY=${SUPABASE_KEY:?SUPABASE_KEY is required}
       - PORT=8000
-      - FRONTEND_URL=${FRONTEND_URL}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
       - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
-      - IG_BRANDS_JSON=${IG_BRANDS_JSON}
+      - IG_BRANDS_JSON=${IG_BRANDS_JSON:-[]}
       - IG_SYNC_POST_LIMIT=${IG_SYNC_POST_LIMIT:-500}
     healthcheck:
       test:
@@ -24,7 +24,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
-    restart: always
+    restart: unless-stopped
 
   frontend:
     build:
@@ -34,12 +34,13 @@ services:
         - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:?NEXT_PUBLIC_SUPABASE_URL is required}
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:?NEXT_PUBLIC_SUPABASE_ANON_KEY is required}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:?NEXT_PUBLIC_SUPABASE_URL is required}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:?NEXT_PUBLIC_SUPABASE_ANON_KEY is required}
       - FASTAPI_URL=http://ml-service:8000
-      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-gemini-2.5-flash}
       - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
     depends_on:
       ml-service:
@@ -54,7 +55,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
-    restart: always
+    restart: unless-stopped
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:2.29.10

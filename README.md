@@ -47,7 +47,7 @@
 * **Optional LLM**: Google Gemini powers the brand classifier (`/api/classify`), Creative Brief review (`/api/analyze-concept`), and caption refinement (`/api/refine-caption`). Each reports itself unavailable (`501`) when `LLM_API_KEY` is not configured and requires an authenticated session; Creative Brief routes additionally authorize the selected brand before using safe aggregate context.
 * **Automation**: one inactive-by-default n8n workflow (`n8n/workflow_sync_retrain.json`) with two schedules — a **weekly** run (Mon 06:00 WIB) that calls `POST /sync/now` to pull Instagram Graph data, reconcile mature already-confirmed publication outcomes, and retrain models, and a **daily** run (07:00 WIB) that calls `GET /instagram/health` and alerts operators if a verified connection is unhealthy. n8n never chooses a publication link. API and SMTP secrets live in encrypted n8n Credentials; `$env` access is blocked. The pinned, persistent runtime and activation checklist are documented in [`n8n/README.md`](./n8n/README.md).
 * **Row-Level Security**: `brands.owner_id` is the ownership root and `predictions.created_by` records the initiating user. Every authenticated user sees only owned records. Legacy predictions and posts without verifiable provenance are quarantined from user-facing metrics and model training instead of being guessed or destructively deleted. The BFF repeats ownership checks before invoking the privileged ML service.
-* **CI**: GitHub Actions (`.github/workflows/ci.yml`) runs frontend lint + type-check + production build and the ML service test suite on every push and PR.
+* **CI**: GitHub Actions (`.github/workflows/ci.yml`) runs frontend lint + type-check + production build, Python Ruff checks, and the ML service test suite on every push and PR.
 
 The release-time trace from each UI surface to its authenticated query and
 authoritative integration is maintained in
@@ -171,21 +171,29 @@ For Docker Compose, copy `.env.example` to repository-root `.env`. Native develo
 * `DATABASE_URL` must be a Postgres DSN, **not** the project `https://` URL.
 * `SUPABASE_KEY` (ML service) should be a secret/service-role key so model artifacts can be uploaded to Storage.
 * `INTERNAL_API_TOKEN` must match between the frontend and ML service. Enter that same value into the encrypted n8n Header Auth credential; do not expose it to the n8n process environment.
-* `LLM_API_KEY` is optional and server-only. Use a current Gemini authorization/restricted key, keep it out of browser variables and Git, and rotate it if exposed. The BFF sends it in the `x-goog-api-key` header rather than a request URL.
+* `LLM_API_KEY` is optional and server-only. Use a current Gemini authorization/restricted key, keep it out of browser variables and Git, and rotate it if exposed. `LLM_MODEL` selects the server-side model and defaults to `gemini-2.5-flash`. The BFF sends the key in the `x-goog-api-key` header rather than a request URL.
 * `IG_BRANDS_JSON` (ML service, optional) is the thesis deployment's **operator-assisted** Instagram connection registry. Each entry binds a Meta credential and immutable Instagram Business account ID to an existing owned `brand_id`; sync never creates brands. The first verified sync persists that identity and later mismatches fail closed. This is not public OAuth or user self-service. Without a verified binding, the UI reports the account as disconnected and never fabricates metrics.
 * `IG_SYNC_POST_LIMIT` controls how many historical media rows each weekly sync may retrieve (default `500`, accepted range `1–1000`). The importer follows Meta pagination, upserts immutable media IDs idempotently, and reports whether additional Graph history was actually truncated by the configured cap. Training still uses every eligible verified row accumulated in the database; lowering a later sync limit never deletes older history.
 * Meta tokens are secrets: rotate any token that appears in terminal output, screenshots, logs, or chat. The ML service suppresses HTTP client request logs and records only sanitized Graph status/type diagnostics.
 * n8n has no access to application environment secrets. Create a Header Auth credential for `X-Internal-Token`, select it in both HTTP Request nodes, replace the safe `.invalid` email placeholders, and select an SMTP credential before activation. See [`n8n/README.md`](./n8n/README.md).
 * Login accounts are provisioned by an administrator (Supabase dashboard → Authentication → Users → *Add user* with auto-confirm; self-signup requires email confirmation).
 
-### Migration-first deployment order
+### Database setup and upgrade order
 
-Apply database changes before rebuilding services that query the new contract:
+Choose exactly one path before rebuilding services that query the database:
 
-1. `202607110001_user_data_ownership_and_calendar.sql`
-2. `202607110002_prediction_lifecycle.sql`
-3. `202607120003_brand_patterns_and_media_product.sql`
-4. `202607120004_content_lifecycle_integration.sql`
+* **Fresh Supabase project:** run `supabase_schema.sql` once. It is the canonical
+  bootstrap schema and already contains the final contracts from migrations
+  001–004; do not replay those upgrade migrations afterward.
+* **Existing FAIV Predict database:** do not rerun `supabase_schema.sql`. Apply
+  only migrations that have not already succeeded, in filename order:
+  `202607110001_user_data_ownership_and_calendar.sql`,
+  `202607110002_prediction_lifecycle.sql`,
+  `202607120003_brand_patterns_and_media_product.sql`, then
+  `202607120004_content_lifecycle_integration.sql`.
+
+Record successful migrations in the Supabase SQL history used for the thesis
+deployment. Never apply both paths blindly to the same project.
 
 Then rebuild/restart the frontend and ML service, run one verified n8n
 sync/reconcile/retrain execution, export fresh model evidence, and run
@@ -210,7 +218,8 @@ Open [http://localhost:3000](http://localhost:3000). Or run the complete stack w
 
 ### Tests
 ```bash
-cd ml-service && ./venv/bin/python -m pytest   # ML service API tests
+cd ml-service && ./venv/bin/pip install -r requirements-dev.txt
+./venv/bin/ruff check app tests && ./venv/bin/python -m pytest
 cd frontend && npm run lint && npx tsc --noEmit
 ```
 

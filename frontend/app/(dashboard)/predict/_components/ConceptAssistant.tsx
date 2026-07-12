@@ -113,7 +113,7 @@ export function ConceptAssistant({
           onChange={(event) => setVisualConcept(event.target.value)}
           rows={5}
           maxLength={4000}
-          className="w-full resize-y bg-transparent p-4 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 sm:text-sm"
+          className="w-full resize-y bg-transparent p-4 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground sm:text-sm"
           placeholder={`Content pillar, visual style, opening hook, story flow, shots, CTA, campaign or seasonal context…\nExample: Educational Reel · close-up demo · two-second problem hook · before/after story · Ramadan campaign.`}
         />
       </div>

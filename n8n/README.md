@@ -7,6 +7,13 @@
 
 The template intentionally contains no token, SMTP password, personal email address, or `$env` expression. The Compose runtime sets `N8N_BLOCK_ENV_ACCESS_IN_NODE=true`, so editable workflow code cannot read deployment environment variables.
 
+The read-only connection check makes up to three attempts after transient failures. The
+sync/retrain POST is deliberately not retried automatically because repeating a
+long training run can create unnecessary model versions; a failed execution is
+kept visible for an operator to inspect and rerun. A pipeline is successful only
+when the top-level result and every configured brand's sync and training result
+are successful.
+
 ## Supported runtime
 
 n8n is pinned to `2.29.10` and persists its encrypted database in the named `n8n_data` volume. Keep the existing `N8N_ENCRYPTION_KEY` stable and back it up separately. Changing or losing that key makes stored credentials unreadable.

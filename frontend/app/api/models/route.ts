@@ -56,8 +56,7 @@ export async function GET() {
       return NextResponse.json([]);
     }
 
-    // Map database models to match the frontend MlModel schema
-    // Keep only the latest model version for each brand/niche to avoid duplicates in the UI list
+    // Expose only the latest model version for each owned brand or cohort.
     const seen = new Set<string>();
     const uniqueModels: any[] = [];
 
@@ -70,7 +69,7 @@ export async function GET() {
         ? parseFloat(m.accuracy) * 100
         : null;
       const trainedDate = new Date(m.created_at);
-      const hoursAgo = Math.round((Date.now() - trainedDate.getTime()) / 3600000);
+      const hoursAgo = Math.max(0, Math.round((Date.now() - trainedDate.getTime()) / 3600000));
       const trainedText = hoursAgo < 24 ? `${hoursAgo} hours ago` : `${Math.round(hoursAgo / 24)} days ago`;
 
       uniqueModels.push({

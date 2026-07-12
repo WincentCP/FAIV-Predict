@@ -17,6 +17,7 @@ const SAFE_HEALTH_DETAILS = new Set([
   "brand_ids must contain valid UUIDs.",
 ]);
 const CONNECTION_STATUSES = new Set(["connected", "error", "unreachable", "unbound"]);
+const HEALTH_TIMEOUT_MS = 20_000;
 
 function sanitizeConnection(value: unknown, ownedIds: Set<string>) {
   if (!value || typeof value !== "object") return null;
@@ -68,12 +69,20 @@ export async function GET() {
       )}`;
       mlResponse = await fetch(healthUrl, {
         headers: backendHeaders,
+        cache: "no-store",
+        signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
       });
-    } catch (netErr) {
+    } catch (netErr: unknown) {
+      const errorName = netErr instanceof Error ? netErr.name : "UnknownError";
       console.error("[BFF InstagramHealth] FastAPI service is unreachable:", netErr);
       return NextResponse.json(
-        { status: "error", message: "Connection health service is unreachable." },
-        { status: 503 }
+        {
+          status: "error",
+          message: errorName === "TimeoutError" || errorName === "AbortError"
+            ? "Connection health check timed out."
+            : "Connection health service is unreachable.",
+        },
+        { status: errorName === "TimeoutError" || errorName === "AbortError" ? 504 : 503 }
       );
     }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getRequestUser } from "@/lib/authz";
+import { publicUpstreamStatus, whitelistedUpstreamMessage } from "@/lib/http-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,10 @@ const COMPARISON_UNAVAILABLE_MESSAGES: Record<string, string> = {
   incomplete_features: "This synchronized post is missing features required for a like-for-like model comparison.",
   lookup_unavailable: "Comparison eligibility could not be verified from synchronized history.",
 };
+const SAFE_POST_DETAILS = new Set([
+  "No Instagram connection is configured for this brand.",
+  "Instagram Graph API is unavailable and no stored verified history exists.",
+]);
 
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
@@ -96,19 +101,18 @@ export async function GET(request: Request) {
       );
     }
 
-    const data = await mlResponse.json().catch(() => null);
     if (!mlResponse.ok) {
-      const status = mlResponse.status === 401 ? 503 : mlResponse.status;
+      const message = await whitelistedUpstreamMessage(
+        mlResponse,
+        SAFE_POST_DETAILS,
+        "Published post data is temporarily unavailable."
+      );
       return NextResponse.json(
-        {
-          status: "error",
-          message: mlResponse.status === 401
-            ? "Post insights service is unavailable."
-            : (typeof data?.detail === "string" ? data.detail : "Failed to fetch post insights."),
-        },
-        { status }
+        { status: "error", message },
+        { status: publicUpstreamStatus(mlResponse.status) }
       );
     }
+    const data = await mlResponse.json().catch(() => null);
     if (!data || !Array.isArray(data.posts)) {
       return NextResponse.json(
         { status: "error", message: "Post insights service returned an invalid response." },

@@ -2,7 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* FAIV Predict — quiet, decision-first product system. */
 :root,
 .light {
   color-scheme: light;
@@ -22,10 +21,8 @@
   /* Indigo identifies model/AI information. Primary product actions use ink. */
   --primary: 233 64% 55%;
   --primary-foreground: 0 0% 100%;
-  --primary-glow: 233 64% 55%;
   --secondary: 224 18% 93%;
   --secondary-foreground: 220 10% 18%;
-  --secondary-glow: 233 64% 55%;
   --muted: 220 14% 94%;
   --muted-foreground: 220 7% 41%;
   --accent: 230 32% 94%;
@@ -64,11 +61,6 @@
   --shadow-elevated:
     0 1px 2px hsl(220 15% 15% / 0.05),
     0 14px 36px -20px hsl(220 15% 15% / 0.24);
-  --shadow-glow-purple: 0 0 0 1px hsl(var(--primary) / 0.14);
-  --shadow-glow-lime: 0 0 0 1px hsl(var(--success) / 0.16);
-  --shadow-glow-cyan: var(--shadow-glow-purple);
-  --shadow-glow-violet: var(--shadow-glow-purple);
-  --transition-base: 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .dark {
@@ -85,10 +77,8 @@
 
   --primary: 232 78% 70%;
   --primary-foreground: 228 35% 12%;
-  --primary-glow: 232 78% 70%;
   --secondary: 220 8% 19%;
   --secondary-foreground: 220 12% 92%;
-  --secondary-glow: 232 78% 70%;
   --muted: 220 8% 17%;
   --muted-foreground: 220 8% 66%;
   --accent: 229 21% 20%;
@@ -127,8 +117,6 @@
   --shadow-elevated:
     0 1px 2px hsl(0 0% 0% / 0.32),
     0 18px 42px -20px hsl(0 0% 0% / 0.72);
-  --shadow-glow-purple: 0 0 0 1px hsl(var(--primary) / 0.22);
-  --shadow-glow-lime: 0 0 0 1px hsl(var(--success) / 0.22);
 }
 
 @layer base {
@@ -198,124 +186,14 @@
     letter-spacing: -0.025em;
   }
 
-  /* Backward-compatible surfaces, intentionally opaque and quiet. */
-  .glass,
-  .glass-strong {
-    background: hsl(var(--surface));
-    border: 1px solid hsl(var(--border));
-  }
-
-  .panel,
-  .surface-card {
-    background: hsl(var(--surface));
-    border: 1px solid hsl(var(--border));
-    border-radius: calc(var(--radius) + 4px);
-    box-shadow: var(--shadow-soft);
-  }
-
-  .panel-elevated {
-    background: hsl(var(--surface));
-    border: 1px solid hsl(var(--border));
-    border-radius: calc(var(--radius) + 8px);
-    box-shadow: var(--shadow-elevated);
-  }
-
-  .decision-panel {
-    background: hsl(var(--foreground));
-    color: hsl(var(--background));
-    border-radius: calc(var(--radius) + 4px);
-  }
-
-  .glow-purple,
-  .glow-lime {
-    box-shadow: var(--shadow-soft);
-  }
-
-  /* Legacy background hooks now remain visually neutral. */
-  .grid-bg,
-  .dotted-bg {
-    background-image: none;
-  }
-
-  .hover-lift {
-    transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
-  }
-
-  .hover-lift:hover {
-    transform: translateY(-1px);
-    border-color: hsl(var(--border-strong));
-    box-shadow: var(--shadow-elevated);
-  }
-
-  .ring-focus:focus-visible {
-    outline: 2px solid hsl(var(--ring));
-    outline-offset: 3px;
-  }
-
-  .input-base {
-    min-height: 2.75rem;
-    width: 100%;
-    border-radius: 0.625rem;
-    border: 1px solid hsl(var(--border-strong));
-    background: hsl(var(--surface));
-    padding-inline: 0.875rem;
-    color: hsl(var(--foreground));
-    font-size: 0.875rem;
-    outline: none;
-    transition: border-color var(--transition-base), box-shadow var(--transition-base);
-  }
-
-  .input-base::placeholder {
-    color: hsl(var(--muted-foreground) / 0.72);
-  }
-
-  .input-base:focus {
-    border-color: hsl(var(--ring));
-    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.14);
-  }
-
-  .scrollbar-none {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-
-  .scrollbar-none::-webkit-scrollbar {
-    display: none;
-  }
-
   .page-enter {
     animation: page-enter 180ms cubic-bezier(0.2, 0, 0, 1) both;
-  }
-
-  .shimmer {
-    background: linear-gradient(
-      90deg,
-      hsl(var(--surface-2)) 0%,
-      hsl(var(--surface-3)) 45%,
-      hsl(var(--surface-2)) 100%
-    );
-    background-size: 220% 100%;
-    animation: shimmer 1.8s linear infinite;
-  }
-
-  .predict-ring {
-    animation: predict-ring 1.4s ease-in-out infinite;
   }
 }
 
 @keyframes page-enter {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -20% 0; }
-}
-
-@keyframes predict-ring {
-  0%, 100% { opacity: 0.52; transform: scale(0.96); }
-  50% { opacity: 1; transform: scale(1); }
 }
 
 @media (max-width: 640px) {
@@ -334,9 +212,5 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-  }
-
-  .hover-lift:hover {
-    transform: none;
   }
 }

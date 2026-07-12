@@ -37,6 +37,17 @@ def _metrics(row: Dict[str, Any]) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _is_served_model(row: Dict[str, Any]) -> bool:
+    """Apply the same provenance and promotion contract as ModelLoader."""
+    metrics = _metrics(row)
+    return (
+        metrics.get("data_source") == "instagram_graph"
+        and metrics.get("identity_key") == "instagram_media_id"
+        and metrics.get("evaluation_contract") in {"faiv-thesis-v1", "faiv-thesis-v2"}
+        and (metrics.get("promotion_gate") or {}).get("passed") is True
+    )
+
+
 def latest_per_scope(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Keep the newest row for every account/cohort scope."""
     selected: Dict[str, Dict[str, Any]] = {}
@@ -81,7 +92,7 @@ def effective_models_for_brands(
     configured_brands: Iterable[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """Mirror serving policy: newest account model, otherwise newest cohort."""
-    rows = list(rows)
+    rows = [row for row in rows if _is_served_model(row)]
     selected: List[Dict[str, Any]] = []
     selected_ids = set()
     uncovered = []
@@ -256,11 +267,15 @@ def fetch_rows(brand_ids: Iterable[str]) -> List[Dict[str, Any]]:
                   AND m.model_type = 'account'
                   AND m.metrics->>'data_source' = 'instagram_graph'
                   AND m.metrics->>'identity_key' = 'instagram_media_id'
+                  AND m.metrics->>'evaluation_contract' IN ('faiv-thesis-v1', 'faiv-thesis-v2')
+                  AND m.metrics->'promotion_gate'->>'passed' = 'true'
                 ) OR (
                   m.brand_id IS NULL
                   AND m.model_type = 'niche'
                   AND m.metrics->>'data_source' = 'instagram_graph'
                   AND m.metrics->>'identity_key' = 'instagram_media_id'
+                  AND m.metrics->>'evaluation_contract' IN ('faiv-thesis-v1', 'faiv-thesis-v2')
+                  AND m.metrics->'promotion_gate'->>'passed' = 'true'
                   AND m.niche IN (
                     SELECT DISTINCT scoped.niche
                     FROM public.brands scoped

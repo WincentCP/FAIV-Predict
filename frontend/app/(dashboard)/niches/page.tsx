@@ -68,7 +68,7 @@ export default function NichesPage() {
   const loadConnectionHealth = useCallback(async () => {
     setConnectionState("loading");
     try {
-      const response = await fetchWithRetry("/api/instagram-health", { cache: "no-store" }, 1);
+      const response = await fetchWithRetry("/api/instagram-health", { cache: "no-store" }, 0);
       const payload = await response.json().catch(() => null);
       if (!response.ok || !Array.isArray(payload?.connections)) throw new Error("Connection health is unavailable.");
       const next: Record<string, Connection> = {};
@@ -266,7 +266,7 @@ function BrandReadinessCard({ brand, connection, connectionState }: { brand: Bra
               </span>
               <div className="min-w-0">
                 <h3 className="truncate text-lg font-semibold tracking-tight" title={brand.name}>{brand.name}</h3>
-                <p className="mt-0.5 truncate text-sm text-muted-foreground">{brand.niche} · Asia/Jakarta</p>
+                <p className="mt-0.5 truncate text-sm text-muted-foreground">{brand.niche} · {brand.timezone || "Asia/Jakarta"}</p>
               </div>
             </div>
             <StatusPill tone={modelReady ? "success" : "warning"} label={personal ? "Personal model" : cohort ? "Cohort model" : "Model unavailable"} />

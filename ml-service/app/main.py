@@ -3,23 +3,21 @@ import re
 import json
 import uuid
 import hashlib
+import secrets
 import datetime
 import logging
 from urllib.parse import parse_qs, urlparse
 from typing import Optional, Dict, Any, Literal
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header
 from dotenv import load_dotenv
-
-# Load environment variables from .env relative to this file
-env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-load_dotenv(env_path)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+import httpx
 import numpy as np
 import psycopg2
 import psycopg2.extras
 
-from app.preprocessing import DataPreprocessor, HASHTAG_PATTERN, CTA_PATTERN, FEATURE_ORDER_V1
+from app.preprocessing import DataPreprocessor, FEATURE_ORDER_V1
 from app.brand_patterns import build_brand_patterns
 from app.model_loader import ModelLoader, ModelUnavailableError
 from app.train_pipeline import (
@@ -27,6 +25,12 @@ from app.train_pipeline import (
     MIN_POST_AGE_DAYS,
     ModelTrainer,
 )
+
+# Load the service-local file before reading configuration below. Production
+# values supplied by Docker remain authoritative because dotenv does not
+# override variables that are already present.
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(env_path)
 
 MAX_INSTAGRAM_HEALTH_BRANDS = 100
 SUPPORTED_INSTAGRAM_MEDIA_TYPES = {"IMAGE", "CAROUSEL_ALBUM", "VIDEO"}
@@ -107,7 +111,9 @@ def verify_internal_token(x_internal_token: Optional[str] = Header(default=None)
     """Rejects requests that do not present the shared internal token."""
     if not INTERNAL_API_TOKEN and ALLOW_UNAUTHENTICATED_LOCAL_DEV:
         return
-    if x_internal_token != INTERNAL_API_TOKEN:
+    if not x_internal_token or not secrets.compare_digest(
+        x_internal_token, str(INTERNAL_API_TOKEN)
+    ):
         raise HTTPException(status_code=401, detail="Unauthorized: invalid internal token")
 
 
@@ -157,8 +163,25 @@ class PredictionRequest(BaseModel):
         return self
 
 class TrainRequest(BaseModel):
-    brand_id: Optional[str] = None
-    niche: Optional[str] = None
+    """Validated model scope accepted from the authenticated BFF."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    brand_id: Optional[str] = Field(default=None, max_length=36)
+    niche: Optional[str] = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def scope_is_valid(self):
+        if not self.brand_id and not self.niche:
+            raise ValueError("brand_id or niche is required")
+        if self.brand_id:
+            try:
+                uuid.UUID(self.brand_id)
+            except ValueError as exc:
+                raise ValueError("brand_id must be a valid UUID") from exc
+        if self.niche is not None and not self.niche.strip():
+            raise ValueError("niche must contain non-whitespace text")
+        return self
 
 class InstagramPostInsightsRequest(BaseModel):
     """Tenant-scoped request for one media node owned by the linked account.
@@ -218,28 +241,38 @@ def run_training_job_async(job_id: str, brand_id: Optional[str], niche: Optional
                 conn.commit()
 
         # Execute pipeline
-        result = ModelTrainer.run_training(brand_id, niche)
+        ModelTrainer.run_training(brand_id, niche)
 
         if db_url and conn:
             with conn.cursor() as cur:
+                completed_at = datetime.datetime.now(datetime.timezone.utc)
                 cur.execute(
                     """
                     UPDATE model_retrain_jobs 
                     SET status = 'success', completed_at = %s, finished_at = %s 
                     WHERE id = %s
                     """,
-                    (datetime.datetime.utcnow(), datetime.datetime.utcnow(), job_id)
+                    (completed_at, completed_at, job_id)
                 )
                 conn.commit()
             logger.info(f"Background training job {job_id} succeeded.")
-    except Exception as e:
+    except Exception:
         logger.exception("Background training job %s failed", job_id)
         if db_url and conn:
             try:
                 with conn.cursor() as cur:
+                    completed_at = datetime.datetime.now(datetime.timezone.utc)
                     cur.execute(
-                        "UPDATE model_retrain_jobs SET status = 'failed', error_message = %s WHERE id = %s",
-                        ("Training failed. Inspect the ML service logs for the cause.", job_id)
+                        """UPDATE model_retrain_jobs
+                           SET status = 'failed', error_message = %s,
+                               completed_at = %s, finished_at = %s
+                           WHERE id = %s""",
+                        (
+                            "Training failed. Inspect the ML service logs for the cause.",
+                            completed_at,
+                            completed_at,
+                            job_id,
+                        )
                     )
                     conn.commit()
             except Exception as inner_e:
@@ -770,12 +803,23 @@ def train(req: TrainRequest, background_tasks: BackgroundTasks):
             detail="Cannot queue retraining: DATABASE_URL is not configured.",
         )
     job_id = str(uuid.uuid4())
+    resolved_niche = req.niche
     
     # Register job in DB
     conn = None
     try:
         conn = psycopg2.connect(db_url)
         with conn.cursor() as cur:
+            if req.brand_id:
+                cur.execute(
+                    """SELECT niche FROM brands
+                       WHERE id = %s AND owner_id IS NOT NULL LIMIT 1""",
+                    (req.brand_id,),
+                )
+                brand = cur.fetchone()
+                if not brand:
+                    raise HTTPException(status_code=404, detail="Brand was not found.")
+                resolved_niche = brand[0]
             reconciled_jobs = _fail_stale_retrain_jobs(cur)
             if reconciled_jobs:
                 logger.warning(
@@ -787,9 +831,11 @@ def train(req: TrainRequest, background_tasks: BackgroundTasks):
                 INSERT INTO model_retrain_jobs (id, brand_id, status, created_at)
                 VALUES (%s, %s, 'pending', %s)
                 """,
-                (job_id, req.brand_id, datetime.datetime.utcnow())
+                (job_id, req.brand_id, datetime.datetime.now(datetime.timezone.utc))
             )
             conn.commit()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to record retrain job in database: {e}")
         raise HTTPException(status_code=503, detail="Cannot queue retraining: job store is unavailable.")
@@ -798,7 +844,9 @@ def train(req: TrainRequest, background_tasks: BackgroundTasks):
             conn.close()
     
     # Run in background
-    background_tasks.add_task(run_training_job_async, job_id, req.brand_id, req.niche)
+    background_tasks.add_task(
+        run_training_job_async, job_id, req.brand_id, resolved_niche
+    )
     
     return {
         "status": "pending",
@@ -852,8 +900,6 @@ def get_train_status(job_id: str):
 # ──────────────────────────────────────────────────────────────────
 # n8n Orchestration Endpoint: Sync Instagram Data + Auto-Retrain
 # ──────────────────────────────────────────────────────────────────
-import httpx
-
 def _fetch_ig_profile(ig_id: str, token: str) -> Optional[int]:
     url = f"https://graph.facebook.com/v25.0/{ig_id}"
     params = {"fields": "followers_count", "access_token": token}
@@ -913,9 +959,15 @@ def _fetch_ig_posts(
             r = client.get(url, params=params)
             r.raise_for_status()
             res = r.json()
+            if not isinstance(res, dict):
+                raise ValueError("Instagram media response must be a JSON object")
             page = res.get("data", [])
+            if not isinstance(page, list):
+                raise ValueError("Instagram media response data must be a JSON array")
             posts.extend(page)
             paging = res.get("paging", {})
+            if not isinstance(paging, dict):
+                raise ValueError("Instagram media response paging must be a JSON object")
             next_url = paging.get("next")
             after = (paging.get("cursors") or {}).get("after")
             if not after and next_url:

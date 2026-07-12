@@ -141,6 +141,7 @@ export function BrandPatterns({
           <BarChart3 className="h-4 w-4" />
         </span>
         <div className="min-w-0">
+          <p className="text-xs font-semibold text-primary">Brand Performance Snapshot</p>
           <h2 id="brand-patterns-title" className="text-sm font-semibold text-foreground">What has worked for this brand</h2>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             Descriptive patterns from mature, verified posts—not causal audience preferences.
@@ -212,7 +213,14 @@ export function BrandPatterns({
               <div className="space-y-4 border-t border-border p-3.5">
                 <div className="space-y-1 text-sm leading-relaxed text-muted-foreground">
                   <p>{data.evidence.eligible_posts} of {data.evidence.mature_verified_posts} mature verified posts use model-supported formats.</p>
-                  {data.overall && <p>Brand median ER: <strong className="text-foreground">{engagementRate(data.overall.median_er)}</strong>.</p>}
+                  {data.overall && (
+                    <p>
+                      Brand median ER: <strong className="text-foreground">{engagementRate(data.overall.median_er)}</strong>. Observed ER IQR: {engagementRate(data.overall.q1_er)}–{engagementRate(data.overall.q3_er)}.
+                    </p>
+                  )}
+                  <p>
+                    {data.evidence.excluded_unmodeled_posts} mature post{data.evidence.excluded_unmodeled_posts === 1 ? " was" : "s were"} excluded because the format is not supported by the prediction model.
+                  </p>
                   <p>Last synchronized: {dateTime(data.evidence.latest_sync_at)} WIB.</p>
                   <p>Evidence labels are sample-size guards, not statistical-significance tests.</p>
                 </div>

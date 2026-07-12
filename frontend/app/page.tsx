@@ -54,7 +54,7 @@ export default function Page() {
               <Sparkles aria-hidden="true" className="h-4 w-4" />
               Evidence before publishing
             </div>
-            <h1 className="font-display text-[2.65rem] font-semibold leading-[1.08] tracking-[-0.05em] xl:text-[3.2rem]">
+            <h1 className="font-display text-[2.65rem] font-semibold leading-[1.08] tracking-[-0.04em] xl:text-[3.2rem]">
               Make a better content decision before it goes live.
             </h1>
             <p className="mt-6 max-w-lg text-[15px] leading-7 text-background/70">
@@ -155,7 +155,7 @@ function Field({
         <input
           {...props}
           id={id}
-          className="ml-3 min-h-11 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+          className="ml-3 min-h-11 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
       </div>
     </div>

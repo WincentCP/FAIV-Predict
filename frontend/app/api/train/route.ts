@@ -15,8 +15,9 @@ const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_TRAIN_STATUS_DETAILS = new Set(["Job not found"]);
 const SAFE_TRAIN_START_DETAILS = new Set<string>();
+const TRAIN_STATUS_TIMEOUT_MS = 20_000;
+const TRAIN_START_TIMEOUT_MS = 30_000;
 
-// GET Handler to query retrain status
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -46,9 +47,10 @@ export async function GET(request: Request) {
       backendHeaders["X-Internal-Token"] = INTERNAL_API_TOKEN;
     }
 
-    console.log(`[BFF Proxy] Fetching retrain job status: ${FASTAPI_URL}/train/${job_id}`);
     const response = await fetch(`${FASTAPI_URL}/train/${job_id}`, {
       headers: backendHeaders,
+      cache: "no-store",
+      signal: AbortSignal.timeout(TRAIN_STATUS_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -85,7 +87,6 @@ export async function GET(request: Request) {
   }
 }
 
-// POST Handler to trigger retraining
 export async function POST(request: Request) {
   try {
     const body = await readJsonObject(request);
@@ -112,10 +113,10 @@ export async function POST(request: Request) {
       backendHeaders["X-Internal-Token"] = INTERNAL_API_TOKEN;
     }
 
-    console.log(`[BFF Proxy] Forwarding retrain request to FastAPI: ${FASTAPI_URL}/train`);
     const response = await fetch(`${FASTAPI_URL}/train`, {
       method: "POST",
       headers: backendHeaders,
+      signal: AbortSignal.timeout(TRAIN_START_TIMEOUT_MS),
       body: JSON.stringify({
         brand_id: brand_id || null,
         niche: ownedBrand.niche
