@@ -27,7 +27,7 @@ ml-service/.env
 *.env.local
 n8n/.data/
 backups/
-docs/FINAL_MODEL_EVIDENCE.md
+evidence/
 
 # Logs
 logs/

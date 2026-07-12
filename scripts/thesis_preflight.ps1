@@ -261,5 +261,5 @@ if ($Failures.Count -gt 0) {
 }
 
 Write-Host "All automated thesis-machine preflight checks passed." -ForegroundColor Green
-Write-Host "Complete and record the manual A01-A12 scenarios in docs/THESIS_TEST_REPORT.md."
+Write-Host "The local system is ready for a final browser and workflow demonstration."
 exit 0

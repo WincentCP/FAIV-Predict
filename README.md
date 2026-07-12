@@ -45,13 +45,9 @@
 * **Inference engine**: FastAPI hosting Random Forest classifiers per niche/brand. If no trained model exists it returns an honest `503` — there is no fabricated fallback model.
 * **Storage & Auth**: Supabase Postgres for brands/posts/predictions/model metadata; Supabase Storage for trained `.joblib` bundles; Supabase Auth for login sessions.
 * **Optional LLM**: Google Gemini powers the brand classifier (`/api/classify`), Creative Brief review (`/api/analyze-concept`), and caption refinement (`/api/refine-caption`). Each reports itself unavailable (`501`) when `LLM_API_KEY` is not configured and requires an authenticated session; Creative Brief routes additionally authorize the selected brand before using safe aggregate context.
-* **Automation**: one inactive-by-default n8n workflow (`n8n/workflow_sync_retrain.json`) with two schedules — a **weekly** run (Mon 06:00 WIB) that calls `POST /sync/now` to pull Instagram Graph data, reconcile mature already-confirmed publication outcomes, and retrain models, and a **daily** run (07:00 WIB) that calls `GET /instagram/health` and alerts operators if a verified connection is unhealthy. n8n never chooses a publication link. API and SMTP secrets live in encrypted n8n Credentials; `$env` access is blocked. The pinned, persistent runtime and activation checklist are documented in [`n8n/README.md`](./n8n/README.md).
+* **Automation**: one inactive-by-default n8n workflow (`n8n/workflow_sync_retrain.json`) with two schedules — a **weekly** run (Mon 06:00 WIB) that calls `POST /sync/now` to pull Instagram Graph data, reconcile mature already-confirmed publication outcomes, and retrain models, and a **daily** run (07:00 WIB) that calls `GET /instagram/health` and alerts operators if a verified connection is unhealthy. n8n never chooses a publication link. API and SMTP secrets live in encrypted n8n Credentials; `$env` access is blocked. Setup and recovery are documented below.
 * **Row-Level Security**: `brands.owner_id` is the ownership root and `predictions.created_by` records the initiating user. Every authenticated user sees only owned records. Legacy predictions and posts without verifiable provenance are quarantined from user-facing metrics and model training instead of being guessed or destructively deleted. The BFF repeats ownership checks before invoking the privileged ML service.
 * **CI**: GitHub Actions (`.github/workflows/ci.yml`) runs frontend lint + type-check + production build, Python Ruff checks, and the ML service test suite on every push and PR.
-
-The release-time trace from each UI surface to its authenticated query and
-authoritative integration is maintained in
-[`docs/DATA_PROVENANCE.md`](./docs/DATA_PROVENANCE.md).
 
 ### BFF API surface
 
@@ -175,7 +171,7 @@ For Docker Compose, copy `.env.example` to repository-root `.env`. Native develo
 * `IG_BRANDS_JSON` (ML service, optional) is the thesis deployment's **operator-assisted** Instagram connection registry. Each entry binds a Meta credential and immutable Instagram Business account ID to an existing owned `brand_id`; sync never creates brands. The first verified sync persists that identity and later mismatches fail closed. This is not public OAuth or user self-service. Without a verified binding, the UI reports the account as disconnected and never fabricates metrics.
 * `IG_SYNC_POST_LIMIT` controls how many historical media rows each weekly sync may retrieve (default `500`, accepted range `1–1000`). The importer follows Meta pagination, upserts immutable media IDs idempotently, and reports whether additional Graph history was actually truncated by the configured cap. Training still uses every eligible verified row accumulated in the database; lowering a later sync limit never deletes older history.
 * Meta tokens are secrets: rotate any token that appears in terminal output, screenshots, logs, or chat. The ML service suppresses HTTP client request logs and records only sanitized Graph status/type diagnostics.
-* n8n has no access to application environment secrets. Create a Header Auth credential for `X-Internal-Token`, select it in both HTTP Request nodes, replace the safe `.invalid` email placeholders, and select an SMTP credential before activation. See [`n8n/README.md`](./n8n/README.md).
+* n8n has no access to application environment secrets. Create a Header Auth credential for `X-Internal-Token`, select it in both HTTP Request nodes, replace the safe `.invalid` email placeholders, and select an SMTP credential before activation. Follow the n8n setup below.
 * Login accounts are provisioned by an administrator (Supabase dashboard → Authentication → Users → *Add user* with auto-confirm; self-signup requires email confirmation).
 
 ### Database setup and upgrade order
@@ -223,10 +219,13 @@ cd ml-service && ./venv/bin/pip install -r requirements-dev.txt
 cd frontend && npm run lint && npx tsc --noEmit
 ```
 
-After a final retraining run, export the actual model evidence without exposing secrets:
+After a final retraining run, optionally export private model evidence to the
+gitignored `evidence` directory:
 
-```bash
-docker compose exec -T ml-service python -m app.thesis_evidence --format markdown
+```powershell
+New-Item -ItemType Directory -Force .\evidence | Out-Null
+docker compose exec -T ml-service python -m app.thesis_evidence --format markdown |
+  Out-File -Encoding utf8 .\evidence\FINAL_MODEL_EVIDENCE.md
 ```
 
 Then run `scripts/thesis_preflight.ps1` on the thesis machine. It compares each
@@ -234,7 +233,43 @@ model's recorded `training_code_sha256` with the fingerprint produced by the
 currently running ML container; a model trained before the deployed
 preprocessing/training revision is rejected and must be retrained.
 
-The academic method, acceptance criteria, recorded verification evidence, and demonstration sequence are maintained in [`docs/THESIS_ML_METHOD.md`](./docs/THESIS_ML_METHOD.md), [`docs/THESIS_TEST_REPORT.md`](./docs/THESIS_TEST_REPORT.md), and [`docs/THESIS_DEMO_RUNBOOK.md`](./docs/THESIS_DEMO_RUNBOOK.md).
+### n8n setup and recovery
+
+1. Start the stack and wait until all services are healthy:
+
+   ```bash
+   docker compose up -d --wait --wait-timeout 180
+   ```
+
+2. For a fresh n8n volume, open `http://localhost:5678`, create the local owner,
+   then import `n8n/workflow_sync_retrain.json` once. Do not re-import it into an
+   existing persistent installation because that can create a duplicate or remove
+   local credential assignments.
+3. Create a **Header Auth** credential named `FAIV Internal API` with header
+   `X-Internal-Token` and the same value used by the frontend and ML service.
+   Assign it to `Check Instagram Connections` and `Sync Instagram and Retrain`.
+4. Replace the `.invalid` addresses and select an encrypted SMTP credential in
+   all three Email Send nodes. Never paste secrets directly into workflow JSON.
+5. Keep retry enabled only for the idempotent health GET (three attempts, five
+   seconds apart). Do not automatically retry the sync/retrain POST; inspect and
+   rerun a failed execution manually to avoid duplicate model versions.
+6. Execute both branches manually, confirm every configured brand reports a
+   successful sync and training result, then activate the workflow.
+
+The n8n database is stored in the `n8n_data` volume and credentials depend on
+the stable `N8N_ENCRYPTION_KEY`. Back up both, never change the key, and never
+run `docker compose down -v` unless permanent deletion is intended. To verify
+the runtime exposes no application secret to editable workflow code:
+
+```bash
+docker compose exec n8n node -e "console.log({blocked:process.env.N8N_BLOCK_ENV_ACCESS_IN_NODE,hasToken:Boolean(process.env.INTERNAL_API_TOKEN),hasMlUrl:Boolean(process.env.FAIV_ML_URL)})"
+```
+
+Expected: `blocked: 'true'`, `hasToken: false`, and `hasMlUrl: false`.
+
+This `README.md` is the repository's single documentation source. Runtime
+correctness remains enforced by CI, `scripts/verify_thesis_readiness.py`, and
+`scripts/thesis_preflight.ps1`.
 
 ---
 

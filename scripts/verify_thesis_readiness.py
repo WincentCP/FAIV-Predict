@@ -40,7 +40,6 @@ def main() -> int:
     ci_workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     ml_dev_requirements = (ROOT / "ml-service" / "requirements-dev.txt").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    n8n_readme = (ROOT / "n8n" / "README.md").read_text(encoding="utf-8")
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     training_source = (ROOT / "ml-service" / "app" / "train_pipeline.py").read_text(encoding="utf-8")
@@ -188,7 +187,7 @@ def main() -> int:
     ):
         require(forbidden not in n8n_service, f"n8n service still receives {forbidden}")
 
-    combined_docs = readme + "\n" + n8n_readme
+    combined_docs = readme
     require(
         "n8n reads `FAIV_ML_URL`" not in combined_docs,
         "documentation still describes the retired environment-secret workflow",
@@ -396,18 +395,7 @@ def main() -> int:
             '"x-goog-api-key"' in route_source and "?key=" not in route_source,
             f"{route_name} Gemini route must keep its key out of request URLs",
         )
-    combined_thesis_docs = "\n".join(
-        (readme,)
-        + tuple(
-            (ROOT / path).read_text(encoding="utf-8")
-            for path in (
-                "docs/THESIS_ML_METHOD.md",
-                "docs/DATA_PROVENANCE.md",
-                "docs/THESIS_DEMO_RUNBOOK.md",
-                "docs/THESIS_TEST_REPORT.md",
-            )
-        )
-    )
+    combined_thesis_docs = readme
     for required_disclosure in (
         "Brand Performance Snapshot",
         "not statistical significance",
@@ -419,7 +407,7 @@ def main() -> int:
         "Content Plan",
         "immutable Instagram media ID",
         "actual_class",
-        "rejects every new",
+        "rejects new",
         "new versioned schema/migration",
     ):
         require(
@@ -465,22 +453,25 @@ def main() -> int:
         and "Content Plan/publication-cohesion migrations are applied" in powershell_preflight,
         "runtime preflight must verify migrations 003 and 004",
     )
-    for private_evidence_path in ("docs/FINAL_MODEL_EVIDENCE.md",):
+    for private_evidence_path in ("evidence/",):
         require(
             private_evidence_path in gitignore,
             f"private evidence path is not ignored: {private_evidence_path}",
         )
 
-    for required_path in (
-        "docs/THESIS_TEST_REPORT.md",
-        "docs/THESIS_DEMO_RUNBOOK.md",
-        "docs/THESIS_ML_METHOD.md",
-        "docs/DATA_PROVENANCE.md",
-        "docs/PRODUCTION_READINESS.md",
-    ):
-        require((ROOT / required_path).is_file(), f"missing required document: {required_path}")
+    ignored_markdown_parts = {".git", ".next", "node_modules", "models_cache"}
+    markdown_paths = sorted(
+        str(path.relative_to(ROOT)).replace("\\", "/")
+        for path in ROOT.rglob("*.md")
+        if not ignored_markdown_parts.intersection(path.relative_to(ROOT).parts)
+    )
+    require(
+        markdown_paths == ["README.md"],
+        "README.md must be the repository's only Markdown document: "
+        + ", ".join(markdown_paths),
+    )
 
-    print("PASS thesis repository contract: ML evidence, observed brand patterns, content lifecycle cohesion, secure n8n template, docs, and demo artifacts are present")
+    print("PASS system repository contract: ML evidence, observed brand patterns, content lifecycle cohesion, secure n8n template, and single-source README are present")
     return 0
 
 
