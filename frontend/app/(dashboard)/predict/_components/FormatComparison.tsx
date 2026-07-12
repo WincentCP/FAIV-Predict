@@ -1,6 +1,5 @@
 "use client";
 
-import { LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type ContentFormat } from "@/lib/types";
 import { Panel } from "./Panel";
@@ -31,11 +30,10 @@ export function FormatComparison({
   return (
     <Panel
       title="Compare formats"
-      subtitle="A one-feature model sensitivity check. These raw class scores are not calibrated probabilities or guaranteed performance changes."
+      subtitle="See how the same draft scores in each supported format."
     >
-      <div className="mb-4 flex items-start gap-2 rounded-xl border border-border/60 bg-surface-2/40 p-3 text-xs text-muted-foreground">
-        <LayoutGrid className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-        <span>Display-only comparison. Changing format can affect production scope, approvals, and budget.</span>
+      <div className="mb-4 rounded-xl border border-border/60 bg-surface-2/40 p-3 text-xs text-muted-foreground">
+        Comparison only. Scores are relative model signals, not success percentages.
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         {cells.map((cell) => {
@@ -57,7 +55,7 @@ export function FormatComparison({
                 )}
               </div>
               <div className="mt-4 flex items-end justify-between font-mono tabular-nums">
-                <span className="text-xs text-muted-foreground">Raw High score</span>
+                <span className="text-xs text-muted-foreground">High score</span>
                 <span className="text-lg font-black text-foreground">{highClassScore}/100</span>
               </div>
               <div

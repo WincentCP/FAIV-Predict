@@ -41,25 +41,25 @@ export function TrustStrip({
   modelVersion: string | null;
   outOfRange: string[];
 }) {
-  const scopeLabel = isPersonalModel ? "Personal brand model" : "Shared niche model";
+  const scopeLabel = isPersonalModel ? "Personalized model" : "Niche model";
   const qualityLabel = evaluationStatus === "validated"
-    ? "Passed evaluation"
+    ? "Ready"
     : evaluationStatus === "exploratory"
-      ? "Limited evidence"
-      : "Status unavailable";
+      ? "Use with caution"
+      : "Not ready";
 
   return (
     <section aria-labelledby="prediction-evidence-title" className="rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
       {(outOfRange.length > 0 || (trainedSamples !== null && trainedSamples < 50) || heldOutClassesComplete === false) && (
         <div className="space-y-2 border-b border-border p-4">
           {trainedSamples !== null && trainedSamples < 50 && (
-            <WarningLine>Limited training set: fewer than 50 eligible posts. Treat this result with caution.</WarningLine>
+            <WarningLine>Fewer than 50 comparable posts are available. Use this estimate with caution.</WarningLine>
           )}
           {heldOutClassesComplete === false && (
-            <WarningLine>The chronological holdout is missing at least one performance tier.</WarningLine>
+            <WarningLine>The test data does not include every performance level.</WarningLine>
           )}
           {outOfRange.map((feature) => (
-            <WarningLine key={feature}>{OOD_LABELS[feature] || feature} is outside the model&apos;s training range.</WarningLine>
+          <WarningLine key={feature}>{OOD_LABELS[feature] || feature} is outside the range seen in past posts.</WarningLine>
           ))}
         </div>
       )}
@@ -68,13 +68,13 @@ export function TrustStrip({
         <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 marker:hidden">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 id="prediction-evidence-title" className="text-sm font-semibold text-foreground">Model quality</h3>
+              <h3 id="prediction-evidence-title" className="text-sm font-semibold text-foreground">Prediction reliability</h3>
               <span className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-muted-foreground">
                 {qualityLabel}
               </span>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {scopeLabel}{trainedSamples !== null ? ` · ${trainedSamples} training posts` : ""}{testSamples !== null ? ` · ${testSamples} holdout posts` : ""}
+              {scopeLabel}{trainedSamples !== null ? ` · ${trainedSamples} past posts` : ""}{testSamples !== null ? ` · tested on ${testSamples} later posts` : ""}
             </p>
           </div>
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
@@ -82,13 +82,13 @@ export function TrustStrip({
 
         <div className="border-t border-border px-5 py-5">
           <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
-            These are chronological holdout metrics for the saved model artifact. They describe model evaluation—not the certainty of this individual post and not guaranteed business outcomes.
+            These technical metrics show how the saved model performed on later posts. They do not measure certainty for this draft or guarantee business results.
           </p>
 
           <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <EvidenceItem label="Model scope" value={scopeLabel} />
-            <EvidenceItem label="Training data" value={trainedSamples !== null ? `${trainedSamples} eligible posts` : "Unavailable"} />
-            <EvidenceItem label="Chronological holdout" value={testSamples !== null ? `${testSamples} posts` : "Unavailable"} />
+            <EvidenceItem label="Past data" value={trainedSamples !== null ? `${trainedSamples} comparable posts` : "Unavailable"} />
+            <EvidenceItem label="Test data" value={testSamples !== null ? `${testSamples} later posts` : "Unavailable"} />
             <EvidenceItem label="Model version" value={modelVersion ? `v${modelVersion}` : "Unavailable"} />
           </dl>
 

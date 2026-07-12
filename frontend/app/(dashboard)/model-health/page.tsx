@@ -25,9 +25,9 @@ type IgConnection = {
 type LoadState = "loading" | "ready" | "error";
 
 function formatRelativeTime(iso: string | null): string {
-  if (!iso) return "No verified sync yet";
+  if (!iso) return "Not updated yet";
   const timestamp = new Date(iso).getTime();
-  if (!Number.isFinite(timestamp)) return "Sync time unavailable";
+  if (!Number.isFinite(timestamp)) return "Update time unavailable";
   const diffMs = Math.max(0, Date.now() - timestamp);
   const days = Math.floor(diffMs / 86_400_000);
   if (days > 1) return `${days} days ago`;
@@ -57,7 +57,7 @@ export default function ModelHealthPage() {
       ]);
 
       if (!modelsRes.ok || !Array.isArray(modelPayload)) {
-        throw new Error("The model registry could not be loaded.");
+        throw new Error("Prediction quality could not be loaded.");
       }
 
       setModels(modelPayload);
@@ -67,14 +67,14 @@ export default function ModelHealthPage() {
           : []
       );
       if (!connectionsRes.ok) {
-        setLoadError("Model evidence is available, but Instagram freshness could not be verified.");
+        setLoadError("Prediction quality is available, but the latest Instagram update could not be checked.");
       }
       setState("ready");
     } catch (error: unknown) {
       setModels([]);
       setConnections([]);
       setState("error");
-      setLoadError(error instanceof Error ? error.message : "Model quality is temporarily unavailable.");
+      setLoadError(error instanceof Error ? error.message : "Prediction quality is temporarily unavailable.");
     }
   }, []);
 
@@ -93,8 +93,8 @@ export default function ModelHealthPage() {
   return (
     <div className="mx-auto min-h-dvh max-w-[1400px] space-y-7 px-4 py-6 md:px-8 md:py-8">
       <SectionHeader
-        title="Model quality"
-        description="Review evaluation results and data freshness for each active model."
+        title="Prediction quality"
+        description="Check which prediction models are ready to use."
         actions={
           <button
             type="button"
@@ -134,20 +134,20 @@ export default function ModelHealthPage() {
         <>
           <section aria-labelledby="evidence-summary-title" className="overflow-hidden rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]">
             <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
-              <EvidenceSummary label="Current models" value={models.length} helper="Latest active versions" />
-              <EvidenceSummary label="Passed checks" value={summary.validated} helper={`${summary.evaluated} evaluated`} />
-              <EvidenceSummary label="Limited evidence" value={summary.exploratory} helper="Review before use" />
-              <EvidenceSummary label="Connected brands" value={summary.freshConnections} helper="Instagram verified" />
+              <EvidenceSummary label="Active models" value={models.length} helper="Latest versions" />
+              <EvidenceSummary label="Ready" value={summary.validated} helper={`${summary.evaluated} checked`} />
+              <EvidenceSummary label="Use with caution" value={summary.exploratory} helper="Limited supporting data" />
+              <EvidenceSummary label="Instagram connected" value={summary.freshConnections} helper="Accounts available" />
             </div>
-            <h2 id="evidence-summary-title" className="sr-only">Model quality summary</h2>
+            <h2 id="evidence-summary-title" className="sr-only">Prediction quality summary</h2>
           </section>
 
           <section aria-labelledby="model-evidence-title" className="space-y-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 id="model-evidence-title" className="text-xl font-semibold tracking-tight">Model evaluation records</h2>
+                <h2 id="model-evidence-title" className="text-xl font-semibold tracking-tight">Prediction readiness</h2>
                 <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                  Held-out metrics recorded when each model was trained.
+                  Test results saved when each model was trained.
                 </p>
               </div>
               <span className="text-sm text-muted-foreground">{models.length} current record{models.length === 1 ? "" : "s"}</span>
@@ -165,9 +165,9 @@ export default function ModelHealthPage() {
           <section aria-labelledby="freshness-title" className="rounded-3xl border border-border bg-surface p-5 shadow-[var(--shadow-soft)] md:p-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 id="freshness-title" className="text-lg font-semibold tracking-tight">Verified data freshness</h2>
+                <h2 id="freshness-title" className="text-lg font-semibold tracking-tight">Instagram data updates</h2>
                 <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                  Connection status confirms identity and access. Model evaluation changes only after the synchronized dataset is retrained.
+                  Predictions use the latest synchronized data after retraining.
                 </p>
               </div>
               <Link href="/niches" className="inline-flex min-h-10 items-center self-start rounded-lg px-2 text-sm font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40">
@@ -177,7 +177,7 @@ export default function ModelHealthPage() {
 
             {connections.length === 0 ? (
               <div className="mt-5 rounded-2xl border border-dashed border-border p-5 text-sm text-muted-foreground">
-                No live connection evidence is available. Brand setup and administrator-assisted Instagram authorization are managed from Brands.
+                No Instagram connection information is available. Manage brand connections from Brands.
               </div>
             ) : (
               <ul className="mt-5 grid gap-3 md:grid-cols-2" aria-label="Instagram data freshness by brand">
@@ -194,10 +194,10 @@ export default function ModelHealthPage() {
                         </div>
                         <StatusBadge
                           tone={connected ? "success" : connection.status === "error" ? "danger" : "warning"}
-                          label={connected ? "Verified" : connection.status === "error" ? "Reconnect" : "Unavailable"}
+                          label={connected ? "Connected" : connection.status === "error" ? "Reconnect" : "Unavailable"}
                         />
                       </div>
-                      <p className="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">Latest sync: {formatRelativeTime(connection.last_synced)}</p>
+                      <p className="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">Last updated: {formatRelativeTime(connection.last_synced)}</p>
                     </li>
                   );
                 })}
@@ -207,16 +207,16 @@ export default function ModelHealthPage() {
 
           <details className="group rounded-2xl border border-border bg-surface p-5">
             <summary className="flex min-h-10 cursor-pointer list-none items-center gap-3 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
-              How to read these metrics
+              Technical metrics
               <span className="ml-auto text-sm font-normal text-muted-foreground group-open:hidden">Show definitions</span>
             </summary>
             <dl className="mt-4 grid gap-4 border-t border-border pt-4 text-sm sm:grid-cols-2">
-              <MetricDefinition term="Held-out accuracy" description="The share of unseen evaluation samples classified correctly. It can look optimistic when classes are imbalanced." />
-              <MetricDefinition term="Macro F1" description="F1 calculated for each class and averaged equally, so weak minority-class performance remains visible." />
-              <MetricDefinition term="Balanced accuracy" description="Average recall across classes. This gives each observed class equal importance." />
-              <MetricDefinition term="Gain vs majority" description="Held-out accuracy minus a simple classifier that always predicts the most common class." />
-              <MetricDefinition term="Passed evaluation" description="The recorded model met the configured evaluation checks; this is not a guarantee for every future post." />
-              <MetricDefinition term="Limited evidence" description="The model is available, but its recorded limitations should be considered when interpreting predictions." />
+              <MetricDefinition term="Test accuracy" description="The share of recent test posts classified correctly. It may look stronger when one performance level dominates the data." />
+              <MetricDefinition term="Macro F1" description="Checks performance across all levels so weaker results are not hidden by the most common level." />
+              <MetricDefinition term="Balanced accuracy" description="Gives each observed performance level equal weight." />
+              <MetricDefinition term="Gain vs benchmark" description="Compares the model with a simple rule that always selects the most common level." />
+              <MetricDefinition term="Ready" description="The model passed the configured quality checks. Individual post results are still not guaranteed." />
+              <MetricDefinition term="Use with caution" description="The model is available, but its supporting data or test results are limited." />
             </dl>
           </details>
         </>
@@ -229,7 +229,7 @@ function ModelEvidenceCard({ model }: { model: MlModel }) {
   const validated = model.evaluationStatus === "validated";
   const evaluated = model.evaluationStatus !== null;
   const holdoutAccuracy = model.baselineAccuracy;
-  const scopeLabel = model.scope === "Personal" ? "Brand model" : "Niche model";
+  const scopeLabel = model.scope === "Personal" ? "Personalized" : "Uses niche data";
 
   return (
     <article className="rounded-3xl border border-border bg-surface p-5 shadow-[var(--shadow-soft)] md:p-6">
@@ -241,38 +241,37 @@ function ModelEvidenceCard({ model }: { model: MlModel }) {
         </div>
         <StatusBadge
           tone={validated ? "success" : evaluated ? "warning" : "neutral"}
-          label={validated ? "Passed evaluation" : evaluated ? "Limited evidence" : "Not evaluated"}
+          label={validated ? "Ready" : evaluated ? "Use with caution" : "Not ready"}
         />
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-4">
-        <MetricCell label="Held-out accuracy" value={formatMetric(holdoutAccuracy)} />
-        <MetricCell label="Macro F1" value={formatMetric(model.macroF1)} />
-        <MetricCell label="Balanced accuracy" value={formatMetric(model.balancedAccuracy)} />
-        <MetricCell label="Holdout samples" value={model.holdoutSamples == null ? "—" : model.holdoutSamples.toLocaleString()} />
+        <MetricCell label="Test accuracy" value={formatMetric(holdoutAccuracy)} />
+        <MetricCell label="Precision and recall" value={formatMetric(model.macroF1)} />
+        <MetricCell label="Accuracy across tiers" value={formatMetric(model.balancedAccuracy)} />
+        <MetricCell label="Test posts" value={model.holdoutSamples == null ? "—" : model.holdoutSamples.toLocaleString()} />
       </div>
 
       <div className="mt-4 rounded-2xl bg-surface-2/60 p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-foreground">Comparison with majority-class baseline</p>
+            <p className="text-sm font-medium text-foreground">Improvement over a simple benchmark</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Baseline {formatMetric(model.majorityBaselineAccuracy)}
+              Benchmark {formatMetric(model.majorityBaselineAccuracy)}
             </p>
           </div>
           <span className={cn(
             "text-lg font-semibold tabular-nums",
             model.accuracyGain == null ? "text-muted-foreground" : model.accuracyGain > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-warning"
           )}>
-            {model.accuracyGain == null ? "Gain unavailable" : `${model.accuracyGain >= 0 ? "+" : ""}${model.accuracyGain.toFixed(1)} pp`}
+            {model.accuracyGain == null ? "Comparison unavailable" : `${model.accuracyGain >= 0 ? "+" : ""}${model.accuracyGain.toFixed(1)} points`}
           </span>
         </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border pt-4 text-xs text-muted-foreground">
         <span className="font-mono">Version {model.version}</span>
-        <span className="font-mono truncate" title={model.id}>Record {model.id.slice(0, 8)}…</span>
-        <span>Verified Instagram training provenance</span>
+        <span>Trained with verified Instagram posts</span>
       </div>
     </article>
   );
@@ -321,9 +320,9 @@ function StatusBadge({ label, tone }: { label: string; tone: "success" | "warnin
 function EmptyEvidence() {
   return (
     <div className="rounded-3xl border border-dashed border-border bg-surface p-8 text-center">
-      <h3 className="text-lg font-semibold">No evaluation record yet</h3>
+      <h3 className="text-lg font-semibold">No prediction model yet</h3>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
-        Models appear after verified Instagram data has been synchronized and the sync/retrain workflow completes.
+        Connect Instagram and complete synchronization and retraining to create a model.
       </p>
       <Link href="/niches" className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
         Review brands
@@ -334,14 +333,14 @@ function EmptyEvidence() {
 
 function EvidenceSkeleton() {
   return (
-    <div role="status" aria-label="Loading model quality" className="space-y-6">
+    <div role="status" aria-label="Loading prediction quality" className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[0, 1, 2, 3].map((item) => <div key={item} className="h-32 motion-safe:animate-pulse rounded-2xl bg-surface-2" />)}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {[0, 1].map((item) => <div key={item} className="h-72 motion-safe:animate-pulse rounded-3xl bg-surface-2" />)}
       </div>
-      <span className="sr-only">Loading model and data evidence</span>
+      <span className="sr-only">Loading prediction and Instagram data status</span>
     </div>
   );
 }

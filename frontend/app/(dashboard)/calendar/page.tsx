@@ -4,6 +4,7 @@ import { fetchWithRetry } from "@/lib/fetch-retry";
 import Link from "next/link";
 import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
+import { creativeBriefSummary, isStructuredCreativeBrief } from "@/lib/creative-brief";
 import { type ContentFormat, type Brand, type Tier, normalizeBrandReference } from "@/lib/types";
 import {
   UploadCloud,
@@ -89,6 +90,19 @@ const CALENDAR_STATUSES = [
   "Posted",
 ] as const;
 
+const PRODUCTION_STATUS_LABELS: Record<NonNullable<CalendarEntry["status"]>, string> = {
+  "Need Shooting": "Needs filming",
+  "Need Design": "Needs design",
+  "Need Editing": "Needs editing",
+  Screening: "In review",
+  "Ready to Post": "Ready to publish",
+  Posted: "Published",
+};
+
+function productionStatusLabel(status: CalendarEntry["status"]): string {
+  return status ? PRODUCTION_STATUS_LABELS[status] : "Not specified";
+}
+
 const VOICE_OVER_VALUES = ["Need", "No Need", "Done"] as const;
 
 const CSV_FIELDS: { field: CsvField; label: string; required: boolean }[] = [
@@ -96,12 +110,12 @@ const CSV_FIELDS: { field: CsvField; label: string; required: boolean }[] = [
   { field: "date", label: "Posting Date", required: true },
   { field: "time", label: "Time", required: false },
   { field: "brand", label: "Brand", required: false },
-  { field: "format", label: "Type", required: false },
-  { field: "contentDetails", label: "Content Details", required: false },
+  { field: "format", label: "Format", required: false },
+  { field: "contentDetails", label: "Creative Brief", required: false },
   { field: "visualReference", label: "Visual Reference", required: false },
   { field: "caption", label: "Caption", required: false },
   { field: "voiceOver", label: "Voice Over", required: false },
-  { field: "pic", label: "PIC", required: false },
+  { field: "pic", label: "Owner", required: false },
   { field: "status", label: "Status", required: false },
 ];
 
@@ -116,7 +130,7 @@ const CSV_SYNONYMS: Record<CsvField, string[]> = {
   caption: ["caption", "text", "content", "copy", "teks", "description"],
   date: ["date", "scheduled", "scheduled_date", "day", "tanggal", "publish date", "posting date", "tanggal posting"],
   time: ["time", "hour", "jam", "post_time", "posting time"],
-  contentDetails: ["content details", "content detail", "details", "detail konten", "judul", "topic"],
+  contentDetails: ["creative brief", "content details", "content detail", "details", "detail konten", "judul", "topic"],
   visualReference: ["visual reference", "visual", "reference", "referensi visual", "link visual"],
   voiceOver: ["voice over", "voiceover", "vo"],
   pic: ["pic", "person in charge", "owner", "assignee"],
@@ -504,7 +518,7 @@ export default function CalendarPage() {
   };
 
   const handleExportCsv = () => {
-    const header = ["posting_date", "time", "brand", "type", "content_details", "visual_reference", "caption", "voice_over", "pic", "status"];
+    const header = ["posting_date", "time", "brand", "format", "creative_brief", "visual_reference", "caption", "voice_over", "owner", "status"];
     const lines = [header.join(",")];
     for (const e of monthEntries) {
       lines.push(
@@ -536,10 +550,10 @@ export default function CalendarPage() {
     });
     sheet.columns = [
       { header: "Posting Date", width: 14 }, { header: "Time", width: 10 },
-      { header: "Brand", width: 22 }, { header: "Type", width: 16 },
-      { header: "Content Details", width: 30 }, { header: "Visual Reference", width: 30 },
+      { header: "Brand", width: 22 }, { header: "Format", width: 16 },
+      { header: "Creative Brief", width: 30 }, { header: "Visual Reference", width: 30 },
       { header: "Caption", width: 48 }, { header: "Voice Over", width: 14 },
-      { header: "PIC", width: 20 }, { header: "Status", width: 20 },
+      { header: "Owner", width: 20 }, { header: "Status", width: 20 },
     ];
     for (const entry of monthEntries) {
       sheet.addRow([
@@ -577,9 +591,9 @@ export default function CalendarPage() {
     doc.text("Exported from FAIV Predict. Only user-created and imported planning records are included.", 14, 22);
     autoTable(doc, {
       startY: 28,
-      head: [["Date", "Time", "Brand", "Type", "Content", "Caption", "VO", "PIC", "Status"]],
+      head: [["Date", "Time", "Brand", "Format", "Creative Brief", "Caption", "Voice-over", "Owner", "Status"]],
       body: monthEntries.map((entry) => [
-        entry.date, entry.time || "—", entry.brand, entry.format, entry.title || "—",
+        entry.date, entry.time || "—", entry.brand, entry.format, creativeBriefSummary(entry.title) || "—",
         entry.caption || "—", entry.voiceOver || "—", entry.pic || "—", entry.status || "—",
       ]),
       styles: { fontSize: 7, cellPadding: 2, overflow: "linebreak" },
@@ -679,7 +693,7 @@ export default function CalendarPage() {
     <div className="px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto">
       <SectionHeader
         title="Content plan"
-        description="Plan and evaluate upcoming content."
+        description="Organize ideas, production, and predictions."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -747,17 +761,17 @@ export default function CalendarPage() {
       <section aria-labelledby="plan-state-title" className="mt-6 rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-soft)]">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 id="plan-state-title" className="text-sm font-bold text-foreground">Decision state</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">Filter this month by the next useful action.</p>
+            <h2 id="plan-state-title" className="text-sm font-bold text-foreground">Status</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Filter by what needs to happen next.</p>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1 lg:pb-0" aria-label="Filter Content Plan by decision state">
             {([
               ["all", "All"],
-              ["needs_prediction", "Needs prediction"],
-              ["stale", "Re-evaluate"],
+              ["needs_prediction", "Ready to predict"],
+              ["stale", "Needs update"],
               ["current", "Predicted"],
-              ["learning", "Awaiting outcome"],
-              ["observed", "Outcome observed"],
+              ["learning", "Waiting for results"],
+              ["observed", "Results ready"],
             ] as Array<[PlanFilter, string]>).map(([id, label]) => (
               <button
                 key={id}
@@ -1128,7 +1142,7 @@ export default function CalendarPage() {
                               {e.format}
                             </span>
                             {e.status && (
-                              <span className="truncate rounded-full bg-surface-2 px-1.5 py-0.5 text-xs font-bold text-muted-foreground">{e.status}</span>
+                              <span className="truncate rounded-full bg-surface-2 px-1.5 py-0.5 text-xs font-bold text-muted-foreground">{productionStatusLabel(e.status)}</span>
                             )}
                           </div>
                           {(e.prediction || e.publication) && (
@@ -1139,7 +1153,7 @@ export default function CalendarPage() {
                                 </span>
                               )}
                               {e.publication && e.publication.observed_er !== null && (
-                                <span className="text-emerald-700 dark:text-emerald-300">Observed ER {e.publication.observed_er.toFixed(2)}%</span>
+                                <span className="text-emerald-700 dark:text-emerald-300">Engagement {e.publication.observed_er.toFixed(2)}%</span>
                               )}
                             </div>
                           )}
@@ -1175,7 +1189,7 @@ export default function CalendarPage() {
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-bold text-foreground">{entry.title || entry.caption || "Untitled content idea"}</div>
+                            <div className="truncate text-sm font-bold text-foreground">{creativeBriefSummary(entry.title) || entry.caption || "Untitled content idea"}</div>
                             <div className="mt-1 text-xs font-semibold text-muted-foreground">
                               {entry.brand} · {entry.format}
                             </div>
@@ -1193,9 +1207,9 @@ export default function CalendarPage() {
                             <span className="rounded-full border border-border bg-surface-2 px-2 py-1 text-[11px] font-bold">Predicted {entry.prediction.tier}</span>
                           )}
                           {entry.publication?.observed_er != null && (
-                            <span className="text-[11px] font-bold text-success-foreground">Observed ER {entry.publication.observed_er.toFixed(2)}%</span>
+                            <span className="text-[11px] font-bold text-success-foreground">Engagement {entry.publication.observed_er.toFixed(2)}%</span>
                           )}
-                          {entry.status && <span className="text-[11px] font-semibold text-muted-foreground">Production: {entry.status}</span>}
+                          {entry.status && <span className="text-[11px] font-semibold text-muted-foreground">Production: {productionStatusLabel(entry.status)}</span>}
                         </div>
                       </button>
                       <div className="flex items-center justify-between gap-3 border-t border-border bg-surface-2/35 px-4 py-2.5">
@@ -1219,10 +1233,10 @@ export default function CalendarPage() {
                 <caption className="sr-only">Content decisions planned for {MONTH_NAMES[cursor.m]} {cursor.y}</caption>
                 <thead>
                   <tr className="border-b border-border bg-surface-2/55 text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-                    <th className="px-5 py-3.5 font-semibold">Content direction</th>
+                    <th className="px-5 py-3.5 font-semibold">Creative Brief</th>
                     <th className="px-5 py-3.5 font-semibold">Schedule</th>
                     <th className="px-5 py-3.5 font-semibold">Decision</th>
-                    <th className="px-5 py-3.5 font-semibold">Learning outcome</th>
+                    <th className="px-5 py-3.5 font-semibold">Result</th>
                     <th className="px-5 py-3.5 font-semibold">Production</th>
                     <th className="px-6 py-4 font-semibold"><span className="sr-only">Actions</span></th>
                   </tr>
@@ -1245,7 +1259,7 @@ export default function CalendarPage() {
                           <td className="max-w-[350px] px-5 py-4 align-middle">
                             <div className="min-w-0">
                               <button type="button" onClick={() => setEditing(r)} className="max-w-full truncate text-left text-sm font-bold text-foreground hover:text-primary hover:underline">
-                                {r.title || r.caption || "Untitled content idea"}
+                                {creativeBriefSummary(r.title) || r.caption || "Untitled content idea"}
                               </button>
                               <p className="mt-1 truncate text-xs text-muted-foreground">{r.caption && r.title ? r.caption : "Add a caption or creative brief before evaluation."}</p>
                               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
@@ -1274,15 +1288,15 @@ export default function CalendarPage() {
                           <td className="px-5 py-4 align-middle text-xs">
                             {r.publication ? (
                               r.publication.observed_er !== null ? (
-                                <div><p className="font-bold text-success-foreground">Observed ER {r.publication.observed_er.toFixed(2)}%</p><p className="mt-1 text-[11px] text-muted-foreground">Mature verified result</p></div>
+                                <div><p className="font-bold text-success-foreground">Engagement {r.publication.observed_er.toFixed(2)}%</p><p className="mt-1 text-[11px] text-muted-foreground">7-day result</p></div>
                               ) : (
-                                <div><p className="inline-flex items-center gap-1.5 font-bold text-foreground"><Link2 className="h-3.5 w-3.5" /> Publication linked</p><p className="mt-1 text-[11px] text-muted-foreground">{r.publication.outcome_status === "pending_maturity" ? "Waiting until day 7" : "Awaiting synchronized outcome"}</p></div>
+                                <div><p className="inline-flex items-center gap-1.5 font-bold text-foreground"><Link2 className="h-3.5 w-3.5" /> Instagram post linked</p><p className="mt-1 text-[11px] text-muted-foreground">{r.publication.outcome_status === "pending_maturity" ? "Waiting for the 7-day result" : "Waiting for Instagram data"}</p></div>
                               )
                             ) : <span className="text-muted-foreground">Not linked yet</span>}
                           </td>
                           <td className="px-5 py-4 align-middle text-xs">
-                            <p className="font-semibold text-foreground">{r.status || "Not specified"}</p>
-                            <p className="mt-1 text-[11px] text-muted-foreground">{r.pic ? `PIC: ${r.pic}` : "No PIC assigned"}</p>
+                            <p className="font-semibold text-foreground">{productionStatusLabel(r.status)}</p>
+                            <p className="mt-1 text-[11px] text-muted-foreground">{r.pic ? `Owner: ${r.pic}` : "No owner assigned"}</p>
                           </td>
                           <td className="px-5 py-4 align-middle text-right">
                             <div className="flex items-center justify-end gap-2">
@@ -1298,7 +1312,7 @@ export default function CalendarPage() {
                   {visibleMonthEntries.length === 0 && (
                     <tr>
                       <td colSpan={6} className="px-6 py-10 text-center text-xs text-muted-foreground">
-                        {monthEntries.length > 0 ? "No entries match this decision-state filter." : "No content is planned this month yet."}
+                        {monthEntries.length > 0 ? "No content matches this status filter." : "No content is planned this month yet."}
                       </td>
                     </tr>
                   )}
@@ -1327,23 +1341,23 @@ type DecisionTone = "primary" | "warning" | "success" | "neutral";
 function getDecisionState(entry: CalendarEntry) {
   if (!entry.prediction) {
     return {
-      label: "Needs prediction",
+      label: "Ready to predict",
       tone: "primary" as DecisionTone,
-      action: "Evaluate",
+      action: "Predict",
       href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
     };
   }
   if (entry.prediction.status === "stale" || entry.prediction.status === "superseded") {
     return {
-      label: entry.prediction.status === "stale" ? "Prediction stale" : "Prediction superseded",
+      label: entry.prediction.status === "stale" ? "Needs update" : "Earlier version",
       tone: "warning" as DecisionTone,
-      action: "Re-evaluate",
+      action: "Update",
       href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
     };
   }
   if (entry.publication?.observed_er != null) {
     return {
-      label: "Outcome observed",
+      label: "Result ready",
       tone: "success" as DecisionTone,
       action: "View result",
       href: () => "/history",
@@ -1351,7 +1365,7 @@ function getDecisionState(entry: CalendarEntry) {
   }
   if (entry.publication) {
     return {
-      label: entry.publication.outcome_status === "pending_maturity" ? "Publication maturing" : "Awaiting outcome",
+      label: entry.publication.outcome_status === "pending_maturity" ? "Collecting results" : "Waiting for result",
       tone: "neutral" as DecisionTone,
       action: "View result",
       href: () => "/history",
@@ -1359,14 +1373,14 @@ function getDecisionState(entry: CalendarEntry) {
   }
   if (entry.prediction.status === "provisional") {
     return {
-      label: "Provisional · time optional",
+      label: "Add publish time",
       tone: "neutral" as DecisionTone,
-      action: "Refine",
+      action: "Update",
       href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
     };
   }
   return {
-    label: "Prediction current",
+    label: "Predicted",
     tone: "success" as DecisionTone,
     action: "Review",
     href: () => "/history",
@@ -1391,7 +1405,7 @@ function PlanEmptyState({ filtered, onAdd }: { filtered: boolean; onAdd: () => v
       </span>
       <h3 className="mt-3 text-sm font-bold text-foreground">{filtered ? "No matching decisions" : "Plan the first content idea"}</h3>
       <p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
-        {filtered ? "Choose another decision-state filter to see this month’s content." : "Capture the creative direction first, then evaluate it before publishing."}
+        {filtered ? "Choose another status to see this month’s content." : "Add the Creative Brief, then predict before publishing."}
       </p>
       {filtered ? null : (
         <button type="button" onClick={onAdd} className="mt-4 inline-flex min-h-10 items-center rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90">
@@ -1509,12 +1523,12 @@ function EntryModal({
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface p-5 sm:p-6">
           <div>
             <div className="text-xs font-bold text-primary">
-              {draft.id.startsWith("new:") ? "New content decision" : getDecisionState(draft).label}
+              {draft.id.startsWith("new:") ? "New content" : getDecisionState(draft).label}
             </div>
             <h2 id="plan-entry-title" className="mt-1 font-display text-xl font-semibold tracking-tight">
               {draft.id.startsWith("new:") ? "Plan content" : "Edit planned content"}
             </h2>
-            <p id="plan-entry-description" className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">Capture the creative and schedule context needed for a useful pre-publish decision.</p>
+            <p id="plan-entry-description" className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">Add the idea, schedule, and production details.</p>
           </div>
           <button
             ref={closeButtonRef}
@@ -1530,8 +1544,8 @@ function EntryModal({
 
         <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
           <div className="sm:col-span-2">
-            <h3 className="text-sm font-bold text-foreground">Publishing plan</h3>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">Posting time is optional. Leaving it blank keeps the prediction provisional instead of inventing a precise hour.</p>
+            <h3 className="text-sm font-bold text-foreground">Publish schedule</h3>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">Publish time is optional. Add it for a time-specific prediction.</p>
           </div>
           <ModalField label="Posting date">
             <input
@@ -1549,16 +1563,16 @@ function EntryModal({
 
           {!draft.time && (
             <p className="sm:col-span-2 inline-flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-xs font-semibold text-muted-foreground">
-              <Clock3 className="h-3.5 w-3.5" /> Time-specific influence will be omitted until a time is chosen.
+              <Clock3 className="h-3.5 w-3.5" /> The prediction will not consider publish time until one is chosen.
             </p>
           )}
 
           <div className="sm:col-span-2 mt-2 border-t border-border pt-5">
-            <h3 className="text-sm font-bold text-foreground">Creative direction</h3>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">The idea remains yours; these details give the prediction and recommendations useful context.</p>
+            <h3 className="text-sm font-bold text-foreground">Creative Brief</h3>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">Describe the idea so recommendations fit the content.</p>
           </div>
 
-          <ModalField label="Brand workspace">
+          <ModalField label="Brand">
             <select
               value={draft.brand_id || ""}
               onChange={(e) => {
@@ -1580,21 +1594,34 @@ function EntryModal({
             </select>
           </ModalField>
 
-          <ModalField label="Content format">
+          <ModalField label="Format">
             <select value={draft.format} onChange={(e) => setDraft({ ...draft, format: e.target.value as CalendarEntry["format"] })} className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15">
               <option value="Unspecified">Unspecified</option><option value="Reels">Reels</option><option value="Carousel">Carousel</option><option value="Single Image">Single Image</option>
             </select>
           </ModalField>
 
-          <div className="sm:col-span-2"><ModalField label="Content idea or creative direction">
-            <input
-              type="text"
-              value={draft.title}
-              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-              className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-              placeholder="e.g. Customer transformation story with a direct hook"
-            />
-          </ModalField></div>
+          <div className="sm:col-span-2">
+            {isStructuredCreativeBrief(draft.title) ? (
+              <div className="rounded-xl border border-border bg-surface-2/40 p-4">
+                <p className="text-xs font-bold text-muted-foreground">Creative Brief</p>
+                <p className="mt-2 text-sm font-semibold text-foreground">{creativeBriefSummary(draft.title) || "Structured brief added"}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Edit the full goal, hook, story, visuals, and current context in Predict.</p>
+                {!draft.id.startsWith("new:") && (
+                  <Link href={`/predict?plan_id=${encodeURIComponent(draft.id)}`} className="mt-3 inline-flex min-h-10 items-center rounded-lg border border-border bg-surface px-3 text-xs font-bold text-primary hover:bg-surface-2">Edit Creative Brief</Link>
+                )}
+              </div>
+            ) : (
+              <ModalField label="Creative idea">
+                <input
+                  type="text"
+                  value={draft.title}
+                  onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                  className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                  placeholder="e.g. Customer transformation story with a direct hook"
+                />
+              </ModalField>
+            )}
+          </div>
 
           <div className="sm:col-span-2"><ModalField label="Visual reference">
             <input type="text" value={draft.visualReference} onChange={(e) => setDraft({ ...draft, visualReference: e.target.value })} className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" placeholder="Optional URL or production reference" />
@@ -1606,13 +1633,13 @@ function EntryModal({
               onChange={(e) => setDraft({ ...draft, caption: e.target.value })}
               rows={5}
               className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm leading-6 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-              placeholder="Write or paste the caption you want to evaluate."
+              placeholder="Write or paste the caption you want to predict."
             />
           </ModalField></div>
 
           <div className="sm:col-span-2 mt-2 border-t border-border pt-5">
             <h3 className="text-sm font-bold text-foreground">Production details <span className="font-normal text-muted-foreground">(optional)</span></h3>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">These fields coordinate production. Marking “Posted” here is not verified Instagram publication evidence.</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">Use these fields to coordinate content production.</p>
           </div>
 
           <ModalField label="Voice over">
@@ -1621,36 +1648,36 @@ function EntryModal({
             </select>
           </ModalField>
 
-          <ModalField label="Person in charge">
+          <ModalField label="Owner">
             <input type="text" value={draft.pic} onChange={(e) => setDraft({ ...draft, pic: e.target.value })} className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary" />
           </ModalField>
 
-          <div className="sm:col-span-2"><ModalField label="Production status">
+          <div className="sm:col-span-2"><ModalField label="Status">
             <select value={draft.status || ""} onChange={(e) => setDraft({ ...draft, status: (e.target.value || null) as CalendarEntry["status"] })} className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary">
               <option value="">Not specified</option>
-              {CALENDAR_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+              {CALENDAR_STATUSES.map((status) => <option key={status} value={status}>{productionStatusLabel(status)}</option>)}
             </select>
           </ModalField></div>
 
           {!draft.id.startsWith("new:") && (
             <div className="sm:col-span-2 rounded-xl border border-border bg-surface-2/40 p-4 text-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="font-bold text-foreground">Prediction &amp; publication evidence</div>
+                <div className="font-bold text-foreground">Prediction and published result</div>
                 <PlanStateBadge label={getDecisionState(draft).label} tone={getDecisionState(draft).tone} />
               </div>
               <p className="mt-2 leading-5 text-muted-foreground">
                 {draft.prediction
-                  ? `Linked prediction: ${draft.prediction.tier} · ${draft.prediction.status}.`
+                  ? `Prediction: ${draft.prediction.tier} · ${getDecisionState(draft).label}.`
                   : "No prediction is linked yet."}
                 {draft.publication
-                  ? ` Verified media ${draft.publication.media_id}${draft.publication.observed_er !== null ? ` · observed ER ${draft.publication.observed_er.toFixed(2)}%` : " · outcome pending maturity"}.`
-                  : " No verified Instagram publication is linked yet."}
+                  ? ` Instagram post linked${draft.publication.observed_er !== null ? ` · engagement ${draft.publication.observed_er.toFixed(2)}%` : " · result pending"}.`
+                  : " No Instagram post is linked yet."}
               </p>
               <Link
                 href={`/predict?plan_id=${encodeURIComponent(draft.id)}`}
                 className="mt-3 inline-flex min-h-10 items-center rounded-lg bg-primary px-3 font-bold text-primary-foreground hover:bg-primary/90"
               >
-                {draft.prediction ? "Re-evaluate in Predict" : "Evaluate in Predict"}
+                {draft.prediction ? "Update prediction" : "Create prediction"}
               </Link>
             </div>
           )}
@@ -1666,7 +1693,7 @@ function EntryModal({
           {confirmDelete ? (
             <div role="alert" className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <p className="flex-1 text-sm leading-6 text-muted-foreground">
-                <strong className="text-foreground">Delete this planned content?</strong> Its immutable prediction history will remain available.
+                <strong className="text-foreground">Delete this planned content?</strong> Previous predictions will remain in History.
               </p>
               <div className="flex items-center gap-2">
                 <button ref={cancelDeleteRef} type="button" onClick={() => setConfirmDelete(false)} disabled={mutation !== "idle"} className="min-h-11 rounded-lg border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2 disabled:opacity-50">Keep plan</button>

@@ -10,6 +10,7 @@ import { TierBadge } from "@/components/TierBadge";
 import { fetchWithRetry } from "@/lib/fetch-retry";
 import { type Brand, type Tier } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { creativeBriefSummary } from "@/lib/creative-brief";
 
 type DashboardSummary = {
   totalPredictions: number;
@@ -235,7 +236,7 @@ export default function DashboardPage() {
               href="/predict"
               className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-5 text-sm font-bold text-primary-foreground shadow-[var(--shadow-soft)] hover:bg-primary/90"
             >
-              Evaluate a draft
+              Predict performance
             </Link>
           </div>
         </div>
@@ -244,7 +245,7 @@ export default function DashboardPage() {
           <span>{connectionHealthAvailable ? `${connectedCount} verified Instagram connection${connectedCount === 1 ? "" : "s"}` : "Instagram connection status unavailable"}</span>
           <span>{summary.totalPredictions} active prediction{summary.totalPredictions === 1 ? "" : "s"}</span>
           {summary.provisionalCount > 0 && (
-            <span className="text-warning-foreground">{summary.provisionalCount} provisional without a confirmed posting time</span>
+            <span className="text-warning-foreground">{summary.provisionalCount} need a publish time</span>
           )}
         </div>
       </header>
@@ -327,7 +328,7 @@ export default function DashboardPage() {
                         </div>
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="truncate text-sm font-bold text-foreground">{entry.content_details || entry.caption || "Untitled content idea"}</span>
+                            <span className="truncate text-sm font-bold text-foreground">{creativeBriefSummary(entry.content_details) || entry.caption || "Untitled content idea"}</span>
                             <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">{entry.content_type || "Unspecified"}</span>
                           </div>
                           <p className="mt-1 truncate text-xs text-muted-foreground">
@@ -337,7 +338,7 @@ export default function DashboardPage() {
                             <DecisionBadge label={decision.label} tone={decision.tone} />
                             {entry.prediction && <TierBadge tier={normalizeTier(entry.prediction.tier)} />}
                             {entry.publication?.observed_er != null && (
-                              <span className="text-[11px] font-bold text-success-foreground">Observed ER {entry.publication.observed_er.toFixed(2)}%</span>
+                              <span className="text-[11px] font-bold text-success-foreground">Engagement rate {entry.publication.observed_er.toFixed(2)}%</span>
                             )}
                           </div>
                         </div>
@@ -420,10 +421,10 @@ export default function DashboardPage() {
               const connection = connections.find((item) => item.brand_id === brand.id);
               const connected = connection?.status === "connected";
               const modelLabel = brand.active_model_scope === "personal"
-                ? "Personal model"
+                ? "Personalized"
                 : brand.active_model_scope === "cohort"
-                  ? "Niche model"
-                  : "No serving model";
+                  ? "Uses niche data"
+                  : "Not ready";
               return (
                 <li key={brand.id} className="flex items-center gap-3 border-border/70 p-5 sm:border-r sm:[&:nth-child(2n)]:border-r-0 lg:[&:nth-child(2n)]:border-r lg:[&:nth-child(3n)]:border-r-0">
                   <div className="min-w-0 flex-1">
@@ -543,7 +544,7 @@ function getPlanDecision(entry: PlanEntry) {
   }
   if (entry.publication?.observed_er != null) {
     return {
-      label: "Outcome observed",
+      label: "Result ready",
       action: "View result",
       tone: "success" as const,
       href: () => "/history",
@@ -551,7 +552,7 @@ function getPlanDecision(entry: PlanEntry) {
   }
   if (entry.publication) {
     return {
-      label: entry.publication.outcome_status === "pending_maturity" ? "Publication maturing" : "Awaiting outcome",
+      label: entry.publication.outcome_status === "pending_maturity" ? "Collecting results" : "Waiting for result",
       action: "View result",
       tone: "neutral" as const,
       href: () => "/history",
@@ -559,15 +560,15 @@ function getPlanDecision(entry: PlanEntry) {
   }
   if (entry.prediction.status === "provisional") {
     return {
-      label: "Provisional prediction",
-      action: "Refine",
+      label: "Add publish time",
+      action: "Update",
       tone: "neutral" as const,
       href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
     };
   }
   return {
-    label: "Prediction current",
-    action: "View prediction",
+    label: "Predicted",
+    action: "Review",
     tone: "success" as const,
     href: () => "/history",
   };

@@ -1,4 +1,3 @@
-import { TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface WhyReason {
@@ -25,14 +24,12 @@ export function WhyThisScore({ reasons, context }: WhyThisScoreProps) {
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-primary">
-            Model context
-          </div>
+          <div className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">Result inputs</div>
           <h3
             id="why-score-heading"
             className="font-display mt-2 text-sm font-bold tracking-tight"
           >
-            Top Global Model Signals
+            What influenced this result
           </h3>
           {context && (
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -62,13 +59,7 @@ export function WhyThisScore({ reasons, context }: WhyThisScoreProps) {
               </span>
               <div>
                 <div className="flex items-center gap-1.5 text-xs font-semibold">
-                  {neutral ? (
-                    <span className="h-2 w-2 rounded-full bg-muted-foreground/60" />
-                  ) : positive ? (
-                    <TrendingUp className="h-3.5 w-3.5 text-success" />
-                  ) : (
-                    <TrendingDown className="h-3.5 w-3.5 text-destructive" />
-                  )}
+                  <span className={cn("h-2 w-2 rounded-full", neutral ? "bg-muted-foreground/60" : positive ? "bg-success" : "bg-destructive")} />
                   {r.label}
                 </div>
                 <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{r.detail}</p>

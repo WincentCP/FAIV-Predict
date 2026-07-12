@@ -17,6 +17,7 @@ import { Panel } from "./Panel";
 import { TrustStrip } from "./TrustStrip";
 import { MeasuredImprovements, type Counterfactual } from "./MeasuredImprovements";
 import { FormatComparison } from "./FormatComparison";
+import { type CreativeReviewSnapshot } from "./ConceptAssistant";
 
 const FeatureAttributionChart = dynamic(() => import("@/components/FeatureAttributionChart"), {
   ssr: false,
@@ -73,6 +74,10 @@ export function InsightsView(props: {
   prediction: InsightsPrediction;
   isPredictionStale: boolean;
   isCreativeBriefChanged: boolean;
+  hasCreativeBrief: boolean;
+  hasCurrentContext: boolean;
+  creativeReview: CreativeReviewSnapshot | null;
+  isCreativeReviewStale: boolean;
   brandName?: string;
   scheduledAt: Date;
   hasPostTime: boolean;
@@ -93,6 +98,10 @@ export function InsightsView(props: {
     prediction,
     isPredictionStale,
     isCreativeBriefChanged,
+    hasCreativeBrief,
+    hasCurrentContext,
+    creativeReview,
+    isCreativeReviewStale,
     brandName,
     scheduledAt,
     hasPostTime,
@@ -116,6 +125,7 @@ export function InsightsView(props: {
   const comparisonScope = prediction.isPersonalModel
     ? `${brandName || "this brand"}'s own verified history`
     : "the selected niche's verified history";
+  const modelMatch = Math.max(0, Math.min(100, Math.round(prediction.classScore)));
 
   return (
     <motion.div
@@ -130,15 +140,15 @@ export function InsightsView(props: {
         <div role="alert" className="flex items-start gap-3 rounded-2xl border border-warning/30 bg-warning/[0.04] p-4">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <div>
-            <p className="text-sm font-semibold text-foreground">This result is stale</p>
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">A model input changed after prediction. Return to the draft and predict again before using or saving this result.</p>
+            <p className="text-sm font-semibold text-foreground">Update needed</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">The caption, format, brand, or schedule changed. Update the estimate before using it.</p>
           </div>
         </div>
       )}
 
       {isCreativeBriefChanged && !isPredictionStale && (
         <div role="status" className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/[0.03] p-4">
-          <p className="text-sm leading-relaxed text-muted-foreground"><strong className="text-foreground">Creative direction changed.</strong> The score remains current because this brief is not a model input. Review any earlier AI guidance.</p>
+          <p className="text-sm leading-relaxed text-muted-foreground"><strong className="text-foreground">Creative Brief changed.</strong> The performance estimate is still current, but the creative review should be run again.</p>
         </div>
       )}
 
@@ -146,36 +156,43 @@ export function InsightsView(props: {
         <div className="grid gap-8 p-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] lg:p-8">
           <div className="flex flex-col justify-center">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">Predicted tier</span>
+              <span className="rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">Expected performance</span>
               {prediction.savedId && <span className="rounded-full border border-border bg-surface-2 px-2.5 py-1 text-xs font-semibold text-muted-foreground">Saved to history</span>}
-              {prediction.status === "provisional" && <span className="rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">Provisional · time unknown</span>}
+              {prediction.status === "provisional" && <span className="rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">Add time for final result</span>}
             </div>
 
             <h2 id="prediction-verdict" className="mt-5 font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
               {prediction.tier}
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-              This draft is predicted to fall in the <strong className="text-foreground">{prediction.tier.toLowerCase()} engagement tier</strong> for likes plus comments relative to {comparisonScope}. It does not predict reach, sales, or business impact.
+              Expected <strong className="text-foreground">{prediction.tier.toLowerCase()} engagement</strong> compared with {comparisonScope}. This estimate uses likes and comments; it does not estimate reach or sales.
             </p>
             {prediction.status === "provisional" && (
-              <p className="mt-3 text-sm font-medium text-warning">Set a target hour and predict again before final approval or publishing.</p>
+              <p className="mt-3 text-sm font-medium text-warning">Add a publish time and update the estimate before final approval.</p>
             )}
           </div>
 
-          <div className="rounded-2xl border border-border bg-surface-2/45 p-5">
-            <div className="flex items-end justify-between gap-4 border-b border-border pb-4">
-              <div>
-                <p className="text-sm font-semibold text-foreground">Raw class scores</p>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Classifier output, not calibrated probability</p>
-              </div>
-              <div className="text-right">
-                <div className="text-3xl font-semibold tabular-nums text-foreground">{prediction.classScore}<span className="text-sm text-muted-foreground">/100</span></div>
-                <div className="text-xs text-muted-foreground">winning class</div>
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-border bg-surface-2/45 p-5 text-center">
+            <div
+              role="img"
+              aria-label={`Model match ${modelMatch} out of 100. This is not a success probability.`}
+              className="grid h-40 w-40 place-items-center rounded-full"
+              style={{ background: `conic-gradient(hsl(var(--primary)) ${modelMatch}%, hsl(var(--surface-3)) 0)` }}
+            >
+              <div className="grid h-[126px] w-[126px] place-items-center rounded-full bg-surface shadow-inner">
+                <div>
+                  <div className="text-4xl font-semibold tabular-nums text-foreground">{modelMatch}</div>
+                  <div className="mt-1 text-xs font-semibold text-muted-foreground">Model match</div>
+                </div>
               </div>
             </div>
-            <div className="mt-5 space-y-4">
-              {prediction.classScores.map((item) => <RawScoreBar key={item.tier} tier={item.tier} score={item.score} active={item.tier === prediction.tier} />)}
-            </div>
+            <p className="mt-4 max-w-xs text-xs leading-relaxed text-muted-foreground">A relative model score—not a success percentage.</p>
+            <details className="group mt-4 w-full border-t border-border pt-3 text-left">
+              <summary className="cursor-pointer list-none text-center text-xs font-semibold text-primary marker:hidden">Compare performance levels</summary>
+              <div className="mt-4 space-y-4">
+                {prediction.classScores.map((item) => <RawScoreBar key={item.tier} tier={item.tier} score={item.score} active={item.tier === prediction.tier} />)}
+              </div>
+            </details>
           </div>
         </div>
 
@@ -185,11 +202,17 @@ export function InsightsView(props: {
           <span>{hasPostTime ? `${formatDate(scheduledAt, "HH")}:00 WIB` : "Time not set"}</span>
           <span className="rounded-lg border border-border bg-surface px-2 py-1 text-xs font-semibold text-foreground">{contentFormat}</span>
         </div>
+        <div className="grid border-t border-border sm:grid-cols-3">
+          <ResultCoverage label="Performance estimate" value="Caption, format, timing, history" active />
+          <ResultCoverage label="Creative review" value={creativeReview ? isCreativeReviewStale ? "Update needed" : "Ready" : hasCreativeBrief ? "Ready to review" : "Brief not added"} active={Boolean(creativeReview && !isCreativeReviewStale)} />
+          <ResultCoverage label="Current context" value={hasCurrentContext ? "Provided by you" : "No live trend data"} active={hasCurrentContext} />
+        </div>
       </section>
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <main className="space-y-5">
-          <h2 className="px-1 font-display text-2xl font-semibold tracking-tight text-foreground">Recommendations</h2>
+          {creativeReview && <CreativeReviewSummary review={creativeReview} stale={isCreativeReviewStale} />}
+          <h2 className="px-1 font-display text-2xl font-semibold tracking-tight text-foreground">What to try</h2>
 
           <MeasuredImprovements counterfactuals={improvementProbes} note={prediction.counterfactualsNote} appliedRecs={appliedRecs} onToggle={onToggleRec} />
           <FormatComparison formatProbes={formatProbes} currentFormat={contentFormat} />
@@ -218,16 +241,16 @@ export function InsightsView(props: {
               className="flex min-h-16 w-full items-center justify-between gap-4 p-5 text-left hover:bg-surface-2/40"
             >
               <div>
-                <h3 className="text-base font-semibold text-foreground">Model context and limitations</h3>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Inspect observed inputs and global feature influence without interpreting them as causal effects.</p>
+                <h3 className="text-base font-semibold text-foreground">How this result was calculated</h3>
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">See the inputs and model signals behind this estimate.</p>
               </div>
               <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", showModelContext && "rotate-180")} />
             </button>
 
             {showModelContext && (
               <div id="prediction-model-context" className="grid gap-5 border-t border-border p-5 md:grid-cols-2">
-                <WhyThisScore reasons={whyReasons} context="Observed input values ranked by global model importance. Importance has magnitude, not positive or negative direction." />
-                <Panel title="Global feature importance" subtitle="Mean Decrease in Impurity across the model; this is not a local causal explanation.">
+                <WhyThisScore reasons={whyReasons} context="The strongest signals across the model. They are associations, not causes." />
+                <Panel title="What the model considers" subtitle="Relative influence across the saved model, not a guarantee for this post.">
                   <div className="mt-2 h-56 w-full">
                     {mdiChartData.length === 0 ? (
                       <div className="flex h-full w-full flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface-2/40 p-5 text-center">
@@ -287,4 +310,50 @@ export function InsightsView(props: {
       </div>
     </motion.div>
   );
+}
+
+function ResultCoverage({ label, value, active }: { label: string; value: string; active: boolean }) {
+  return (
+    <div className="border-border px-6 py-4 sm:border-r sm:last:border-r-0 lg:px-8">
+      <div className="flex items-center gap-2">
+        <span className={cn("h-2 w-2 rounded-full", active ? "bg-primary" : "bg-muted-foreground/35")} />
+        <p className="text-xs font-semibold text-foreground">{label}</p>
+      </div>
+      <p className="mt-1 pl-4 text-xs text-muted-foreground">{value}</p>
+    </div>
+  );
+}
+
+function CreativeReviewSummary({ review, stale }: { review: CreativeReviewSnapshot; stale: boolean }) {
+  const { analysis } = review;
+  return (
+    <section className="rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-soft)] sm:p-6" aria-labelledby="creative-review-result-title">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+        <div>
+          <h2 id="creative-review-result-title" className="text-base font-semibold text-foreground">Creative guidance</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Use this before production; it does not change the performance estimate.</p>
+        </div>
+        <span className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", stale ? "bg-warning/10 text-warning" : "bg-primary/10 text-primary")}>{stale ? "Update needed" : "Ready"}</span>
+      </div>
+      {stale && <p className="mt-4 rounded-lg border border-warning/25 bg-warning/[0.04] px-3 py-2 text-sm text-warning">The draft changed after this review. Review the creative again before relying on it.</p>}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        {analysis.brand_alignment && <ReviewSummaryItem label="Brand fit" value={analysis.brand_alignment} />}
+        {analysis.trend_adaptation && <ReviewSummaryItem label="Trend adaptation" value={analysis.trend_adaptation} />}
+        {analysis.strengths.length > 0 && <ReviewSummaryList label="Strong points" items={analysis.strengths} />}
+        {analysis.suggestions.length > 0 && <ReviewSummaryList label="Try next" items={analysis.suggestions} />}
+      </div>
+      <div className="mt-4 flex flex-wrap gap-1.5 text-xs">
+        <span className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-muted-foreground">{review.historicalContextUsed ? "Brand history used" : "Brief only"}</span>
+        {review.userTrendContextUsed && <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-primary">Your current context used</span>}
+      </div>
+    </section>
+  );
+}
+
+function ReviewSummaryItem({ label, value }: { label: string; value: string }) {
+  return <div><p className="text-xs font-semibold text-foreground">{label}</p><p className="mt-1 text-sm leading-relaxed text-muted-foreground">{value}</p></div>;
+}
+
+function ReviewSummaryList({ label, items }: { label: string; items: string[] }) {
+  return <div><p className="text-xs font-semibold text-foreground">{label}</p><ul className="mt-1 space-y-1.5">{items.map((item, index) => <li key={`${label}-${index}`} className="text-sm leading-relaxed text-muted-foreground">{item}</li>)}</ul></div>;
 }

@@ -25,6 +25,7 @@ export function CaptionRefine({
   const [suggestedCaption, setSuggestedCaption] = useState("");
   const [isStale, setIsStale] = useState(false);
   const [historicalContextUsed, setHistoricalContextUsed] = useState(false);
+  const [userTrendContextUsed, setUserTrendContextUsed] = useState(false);
   const requestRef = useRef<AbortController | null>(null);
   const completedSignatureRef = useRef<string | null>(null);
   const inputSignature = JSON.stringify([caption, visualConcept, brandId, format]);
@@ -73,6 +74,7 @@ export function CaptionRefine({
         setAiState("enriched");
         setSuggestedCaption(data.suggestions);
         setHistoricalContextUsed(data.analysis_context?.historical_patterns_used === true);
+        setUserTrendContextUsed(data.analysis_context?.user_trend_context_used === true);
         return;
       }
       setAiState("unavailable");
@@ -131,9 +133,10 @@ export function CaptionRefine({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-primary">Suggested caption</span>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-bold text-muted-foreground">
-                  {historicalContextUsed ? "Brand-history context used" : "Brief-only context"}
+                <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+                  {historicalContextUsed ? "Brand history used" : "Brief only"}
                 </span>
+                {userTrendContextUsed && <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">Your current context used</span>}
                 {suggestedCaption && (
                   <button
                     type="button"

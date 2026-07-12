@@ -4,11 +4,11 @@ import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { ConceptAssistant } from "./ConceptAssistant";
+import { ConceptAssistant, type CreativeReviewSnapshot } from "./ConceptAssistant";
 import { CaptionRefine } from "./CaptionRefine";
 
 /**
- * Creative direction remains visible because it helps a specialist make a
+ * The Creative Brief remains visible because it helps a specialist make a
  * coherent plan. AI writing support is secondary and collapsed by default.
  * Neither semantic brief content nor AI output enters the Random Forest.
  */
@@ -19,6 +19,8 @@ export function AiToolsAccordion({
   brandId,
   format,
   onReplaceCaption,
+  reviewSnapshot,
+  onReviewComplete,
 }: {
   visualConcept: string;
   setVisualConcept: (v: string) => void;
@@ -26,14 +28,16 @@ export function AiToolsAccordion({
   brandId: string | null;
   format: string;
   onReplaceCaption: (text: string) => void;
+  reviewSnapshot: CreativeReviewSnapshot | null;
+  onReviewComplete: (review: CreativeReviewSnapshot) => void;
 }) {
   const [writingOpen, setWritingOpen] = useState(false);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]" aria-labelledby="creative-direction-title">
+    <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]" aria-labelledby="creative-brief-title">
       <div className="border-b border-border px-5 py-5 sm:px-6">
-        <h2 id="creative-direction-title" className="text-base font-semibold text-foreground">Creative direction <span className="font-normal text-muted-foreground">(optional)</span></h2>
-        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">Brief the AI review. This does not affect the prediction score.</p>
+        <h2 id="creative-brief-title" className="text-base font-semibold text-foreground">Creative Brief <span className="font-normal text-muted-foreground">(recommended)</span></h2>
+        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">Shape the idea before production. The brief guides creative feedback, not the performance estimate.</p>
       </div>
 
       <div className="px-5 py-5 sm:px-6">
@@ -43,6 +47,8 @@ export function AiToolsAccordion({
           caption={caption}
           brandId={brandId}
           format={format}
+          reviewSnapshot={reviewSnapshot}
+          onReviewComplete={onReviewComplete}
         />
       </div>
 
@@ -54,7 +60,7 @@ export function AiToolsAccordion({
           aria-controls="ai-writing-assistant"
           className="flex min-h-14 w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-surface-2/50 sm:px-6"
         >
-          <span className="text-sm font-semibold text-foreground">AI caption assistant</span>
+          <span className="text-sm font-semibold text-foreground">Caption help</span>
           <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", writingOpen && "rotate-180")} />
         </button>
         <AnimatePresence initial={false}>

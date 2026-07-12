@@ -34,13 +34,13 @@ const META: Record<MaturityState, {
   description: string;
 }> = {
   low: {
-    label: "Limited account history",
-    short: "Cold start",
+    label: "Building brand history",
+    short: "Uses niche data",
     tone: "text-[oklch(0.55_0.18_45)] dark:text-[oklch(0.82_0.16_75)]",
     ring: "ring-[color-mix(in_oklab,hsl(var(--warning))_40%,transparent)]",
     bg: "bg-[color-mix(in_oklab,hsl(var(--warning))_12%,transparent)]",
     dot: "bg-warning",
-    description: "Predictions use the available niche model while this account builds enough eligible history for a separate personal model.",
+    description: "Predictions use data from similar brands while this brand builds its own history.",
   },
   learning: {
     label: "Building personal history",
@@ -49,16 +49,16 @@ const META: Record<MaturityState, {
     ring: "ring-[color-mix(in_oklab,hsl(var(--primary))_35%,transparent)]",
     bg: "bg-[color-mix(in_oklab,hsl(var(--primary))_10%,transparent)]",
     dot: "bg-primary",
-    description: "Predictions continue using the available niche model until a separately trained personal model becomes active. The models are selected, not blended.",
+    description: "Predictions use data from similar brands until enough brand history is available.",
   },
   personal: {
-    label: "Personal model active",
+    label: "Personalized prediction",
     short: "Personalized",
     tone: "text-[oklch(0.40_0.18_130)] dark:text-[oklch(0.85_0.20_130)]",
     ring: "ring-[color-mix(in_oklab,hsl(var(--accent-lime))_45%,transparent)]",
     bg: "bg-[color-mix(in_oklab,hsl(var(--accent-lime))_18%,transparent)]",
     dot: "bg-accent-lime",
-    description: "Predictions use a separately trained model based on this account's eligible post history.",
+    description: "Predictions use this brand’s own comparable post history.",
   },
 };
 
@@ -83,7 +83,7 @@ export function ModelMaturity({
   const m = META[state];
   const pct = Math.min(100, Math.round((samples / target) * 100));
   const description = activeScope === "none"
-    ? "No trained model is currently available for this brand. Sync eligible posts and complete retraining before prediction."
+    ? "Prediction is not ready for this brand. Update Instagram data and train again."
     : m.description;
   const shortLabel = activeScope === "none" ? "No active model" : m.short;
 
@@ -91,7 +91,7 @@ export function ModelMaturity({
     return (
       <span
         className={cn("inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1 text-xs font-medium text-muted-foreground", className)}
-        title={`${samples}/${target} training-eligible posts · ${m.label}. Model activation also requires a successful model evaluation. This is not a confidence score.`}
+        title={`${samples}/${target} comparable posts · ${m.label}. This is history progress, not prediction confidence.`}
       >
         <span className={cn("h-1.5 w-1.5 rounded-full", m.dot)} aria-hidden />
         {shortLabel} · <span className="font-mono tabular-nums text-foreground">{samples}/{target}</span>
@@ -112,19 +112,19 @@ export function ModelMaturity({
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
               <span className="font-mono tabular-nums text-foreground">{samples}</span>
-              <span>/{target} eligible posts</span>
+              <span>/{target} comparable posts</span>
               <span className="mx-1.5 text-muted-foreground/50">·</span>
               <span className="font-mono tabular-nums">{pct}%</span>
             </div>
           </div>
         </div>
-        <span className="text-xs font-medium text-muted-foreground" title="This indicates data maturity, not prediction confidence">Data maturity</span>
+        <span className="text-xs font-medium text-muted-foreground" title="This is not prediction confidence">History progress</span>
       </div>
 
       <div
         className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-3"
         role="progressbar"
-        aria-label="Eligible history toward personal model threshold"
+        aria-label="Comparable posts toward personalized prediction"
         aria-valuemin={0}
         aria-valuemax={target}
         aria-valuenow={Math.min(samples, target)}
@@ -139,9 +139,6 @@ export function ModelMaturity({
       </div>
 
       <p className="mt-2.5 text-sm leading-6 text-muted-foreground">{description}</p>
-      <p className="mt-1 text-xs text-muted-foreground/80">
-        Training-eligible post count is a maturity indicator; model activation also requires successful training and evaluation.
-      </p>
     </div>
   );
 }

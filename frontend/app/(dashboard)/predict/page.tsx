@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import { format as formatDate } from "date-fns";
 import { AnimatePresence } from "framer-motion";
 import { fetchWithRetry } from "@/lib/fetch-retry";
+import { hasCreativeBriefContent, parseCreativeBrief } from "@/lib/creative-brief";
 import { analyzeCaption, CAPTION_MAX } from "@/components/CaptionIntel";
 import { type WhyReason } from "@/components/WhyThisScore";
 import { type ContentFormat, type Tier, type Brand } from "@/lib/types";
@@ -11,6 +12,7 @@ import { ViewSwitch, type PredictView } from "./_components/ViewSwitch";
 import { ComposeView } from "./_components/ComposeView";
 import { InsightsView, type InsightsPrediction } from "./_components/InsightsView";
 import { type Counterfactual } from "./_components/MeasuredImprovements";
+import { type CreativeReviewSnapshot } from "./_components/ConceptAssistant";
 
 interface ContentPlanContext {
   id: string;
@@ -24,14 +26,14 @@ interface ContentPlanContext {
 
 // Labels for the real model feature keys returned by the ML service.
 const FEATURE_LABELS: Record<string, string> = {
-  media_type: "Content Format",
-  post_hour: "Posting Hour",
-  caption_length: "Caption Length",
-  hashtag_count: "Hashtag Count",
-  has_cta: "Call-to-Action",
-  is_weekend: "Weekend Posting",
-  has_question: "Question Prompt",
-  emoji_count: "Emoji Count",
+  media_type: "Content format",
+  post_hour: "Posting time",
+  caption_length: "Caption length",
+  hashtag_count: "Hashtag count",
+  has_cta: "Call to action",
+  is_weekend: "Day of week",
+  has_question: "Question prompt",
+  emoji_count: "Emoji count",
 };
 
 function asPercentMetric(value: unknown): number | null {
@@ -60,6 +62,7 @@ export default function PredictPage() {
   const [hasPostTime, setHasPostTime] = useState(false);
   const [caption, setCaption] = useState("");
   const [visualConcept, setVisualConcept] = useState("");
+  const [creativeReview, setCreativeReview] = useState<CreativeReviewSnapshot | null>(null);
   const [contentPlan, setContentPlan] = useState<ContentPlanContext | null>(null);
   const [planLoadError, setPlanLoadError] = useState<string | null>(null);
   const [planSaveState, setPlanSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -112,6 +115,17 @@ export default function PredictPage() {
   const isCreativeBriefChanged = useMemo(
     () => Boolean(predictionSnapshot && predictionSnapshot.visualConcept !== visualConcept),
     [predictionSnapshot, visualConcept]
+  );
+  const parsedCreativeBrief = useMemo(() => parseCreativeBrief(visualConcept), [visualConcept]);
+  const hasCreativeBrief = hasCreativeBriefContent(parsedCreativeBrief);
+  const hasCurrentContext = Boolean(
+    parsedCreativeBrief.trendContext &&
+    parsedCreativeBrief.trendSource &&
+    parsedCreativeBrief.trendObservedAt
+  );
+  const currentCreativeSignature = JSON.stringify([visualConcept, caption, accountId, contentFormat]);
+  const isCreativeReviewStale = Boolean(
+    creativeReview && creativeReview.inputSignature !== currentCreativeSignature
   );
 
   const stats = useMemo(() => analyzeCaption(caption), [caption]);
@@ -395,8 +409,8 @@ export default function PredictPage() {
       {
         label: postHour == null ? "Posting time not set" : `Scheduled at ${String(postHour).padStart(2, "0")}:00`,
         detail: postHour == null
-          ? "This provisional result combines posting hours observed in training, weighted by how often each hour occurred."
-          : "Posting hour is an input used by this trained model.",
+          ? "The estimate combines posting times seen in past data."
+          : "The selected time is included in the estimate.",
         weight: fi.post_hour ?? 0,
         direction: "neutral" as const,
       },
@@ -404,19 +418,19 @@ export default function PredictPage() {
         label: snapshotStats.hasCTA
           ? `Call-to-action detected ("${snapshotStats.ctaTerms[0] || "CTA"}")`
           : "No call-to-action detected",
-        detail: "An explicit save/comment/share prompt is a model input feature.",
+        detail: "Save, comment, and share prompts are included in the estimate.",
         weight: fi.has_cta ?? 0,
         direction: "neutral" as const,
       },
       {
         label: `${snapshotStats.hashtags.length} hashtags detected`,
-        detail: "Hashtag count feeds the model directly.",
+        detail: "The number of hashtags is included.",
         weight: fi.hashtag_count ?? 0,
         direction: "neutral" as const,
       },
       {
         label: `${snapshotStats.charCount} caption characters`,
-        detail: "Caption length feeds the model directly.",
+        detail: "Caption length is included.",
         weight: fi.caption_length ?? 0,
         direction: "neutral" as const,
       },
@@ -426,7 +440,7 @@ export default function PredictPage() {
       const weekend = snapDate.getDay() === 0 || snapDate.getDay() === 6;
       reasons.push({
         label: weekend ? "Scheduled on a weekend" : "Scheduled on a weekday",
-        detail: "Day type is a model input learned from this data's posting history.",
+        detail: "Weekday and weekend patterns are included.",
         weight: fi.is_weekend,
         direction: "neutral" as const,
       });
@@ -434,7 +448,7 @@ export default function PredictPage() {
     if (fi.has_question !== undefined) {
       reasons.push({
         label: snapshotStats.hasQuestion ? "Caption asks the audience a question" : "No question in the caption",
-        detail: "Question prompts are a model input feature.",
+        detail: "Audience questions are included.",
         weight: fi.has_question,
         direction: "neutral" as const,
       });
@@ -442,7 +456,7 @@ export default function PredictPage() {
     if (fi.emoji_count !== undefined) {
       reasons.push({
         label: `${snapshotStats.emojiCount} emoji in the caption`,
-        detail: "Emoji density is a model input feature.",
+        detail: "The number of emoji is included.",
         weight: fi.emoji_count,
         direction: "neutral" as const,
       });
@@ -487,6 +501,8 @@ export default function PredictPage() {
             submitting={submitting}
             tooLong={tooLong}
             onAnalyze={handlePredict}
+            creativeReview={creativeReview}
+            onCreativeReview={setCreativeReview}
           />
         ) : (
           prediction && (
@@ -494,6 +510,10 @@ export default function PredictPage() {
               prediction={prediction}
               isPredictionStale={isPredictionStale}
               isCreativeBriefChanged={isCreativeBriefChanged}
+              hasCreativeBrief={hasCreativeBrief}
+              hasCurrentContext={hasCurrentContext}
+              creativeReview={creativeReview}
+              isCreativeReviewStale={isCreativeReviewStale}
               brandName={predictionSnapshot?.brandName ?? undefined}
               scheduledAt={predictionScheduledAt}
               hasPostTime={predictionSnapshot?.postHour != null}

@@ -143,11 +143,11 @@ export default function HistoryPage() {
         }),
       });
       const result = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.message || "The current model could not create a successor prediction.");
+      if (!response.ok) throw new Error(result?.message || "The prediction could not be updated.");
       await loadHistory();
       setHighlightId(result?.prediction_id || null);
     } catch (error: unknown) {
-      setLoadError(error instanceof Error ? error.message : "Recalculation failed. Try again in a moment.");
+      setLoadError(error instanceof Error ? error.message : "The prediction could not be updated. Try again.");
     } finally {
       setReEvaluating(null);
     }
@@ -156,8 +156,8 @@ export default function HistoryPage() {
   return (
     <div className="mx-auto min-h-dvh max-w-[1400px] space-y-7 px-4 py-6 md:px-8 md:py-8">
       <SectionHeader
-        title="History"
-        description="Review prediction versions and published outcomes."
+        title="Previous predictions"
+        description="See earlier predictions and how published posts performed."
         actions={
           <Link href="/predict" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary/40">
             New prediction
@@ -181,7 +181,7 @@ export default function HistoryPage() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search brand, caption, or record ID"
+              placeholder="Search brand or caption"
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
           </label>
@@ -211,7 +211,7 @@ export default function HistoryPage() {
                   scope === value ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {value === "latest" ? "Latest versions" : "All versions"}
+                {value === "latest" ? "Latest only" : "Full history"}
               </button>
             ))}
           </div>
@@ -219,10 +219,10 @@ export default function HistoryPage() {
 
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Filter by lifecycle state">
           {([
-            ["all", "All records"],
-            ["active", "Active decisions"],
-            ["needs_action", "Needs action"],
-            ["observed", "Observed outcomes"],
+            ["all", "All predictions"],
+            ["active", "Current"],
+            ["needs_action", "Needs update"],
+            ["observed", "Published results"],
           ] as Array<[LifecycleFilter, string]>).map(([value, label]) => (
             <button
               key={value}
@@ -246,11 +246,11 @@ export default function HistoryPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 id="ledger-results-title" className="text-sm font-semibold">
-              {isLoading ? "Loading decision records" : `${filtered.length} record${filtered.length === 1 ? "" : "s"}`}
+              {isLoading ? "Loading predictions" : `${filtered.length} prediction${filtered.length === 1 ? "" : "s"}`}
             </h2>
           </div>
           {scope === "latest" && history.length > filtered.length && (
-            <button type="button" onClick={() => setScope("all")} className="text-sm font-semibold text-primary hover:underline">Show version history</button>
+            <button type="button" onClick={() => setScope("all")} className="text-sm font-semibold text-primary hover:underline">Show full history</button>
           )}
         </div>
 
@@ -259,7 +259,7 @@ export default function HistoryPage() {
         ) : filtered.length === 0 ? (
           <EmptyLedger hasHistory={history.length > 0} onClear={() => { setQuery(""); setBrand("All"); setLifecycle("all"); setScope("latest"); }} />
         ) : (
-          <ul className="space-y-3" aria-label="Prediction records">
+          <ul className="space-y-3" aria-label="Previous predictions">
             {filtered.map((item) => (
               <PredictionRecord
                 key={item.id}
@@ -322,7 +322,7 @@ function PredictionRecord({
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <TierBadge tier={item.tier} />
               <span className="text-sm text-muted-foreground">
-                {item.confidence == null ? "Raw class score unavailable" : `${item.confidence}/100 raw class score`}
+                {item.confidence == null ? "Prediction score unavailable" : `${item.confidence}/100 prediction score`}
               </span>
               <PredictionStatusBadge item={item} />
             </div>
@@ -332,15 +332,14 @@ function PredictionRecord({
           </div>
 
           <div className="border-t border-border p-5 lg:border-l lg:border-t-0 md:p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Publication outcome</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Published result</p>
             <div className="mt-3"><OutcomeState item={item} /></div>
           </div>
 
           <div className="flex flex-col justify-between gap-5 border-t border-border bg-surface-2/25 p-5 lg:border-l lg:border-t-0 md:p-6">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Recorded</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Created</p>
               <time dateTime={item.when} className="mt-2 block text-sm font-medium text-foreground">{formatDateTime(item.when)}</time>
-              <p className="mt-1 text-xs text-muted-foreground">Immutable prediction ID {item.id.slice(0, 8)}…</p>
             </div>
             <div className="flex flex-wrap gap-2">
               {canRecalculate ? (
@@ -351,11 +350,11 @@ function PredictionRecord({
                   className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
                   <RefreshCw className={cn("h-4 w-4", reEvaluating && "animate-spin")} aria-hidden="true" />
-                  {reEvaluating ? "Creating successor…" : "Recalculate"}
+                  {reEvaluating ? "Updating…" : "Update prediction"}
                 </button>
               ) : item.status !== "superseded" ? (
                 <Link href={publicationHref} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
-                  {item.publication_linked ? "View result" : "Find publication"}
+                  {item.publication_linked ? "View result" : "Link Instagram post"}
                 </Link>
               ) : null}
             </div>
@@ -389,9 +388,9 @@ function OutcomeState({ item }: { item: HistoryItem }) {
       <div>
         <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
           <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
-          <span className="text-xl font-semibold tabular-nums">ER {item.observed_er.toFixed(2)}%</span>
+          <span className="text-xl font-semibold tabular-nums">Engagement {item.observed_er.toFixed(2)}%</span>
         </div>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Verified media · {item.observed_post_age_days ?? "—"} days old</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Instagram post · {item.observed_post_age_days ?? "—"} days old</p>
       </div>
     );
   }
@@ -401,11 +400,11 @@ function OutcomeState({ item }: { item: HistoryItem }) {
     const remaining = Math.max(1, 7 - age);
     return (
       <div>
-        <div className="flex items-center gap-2 font-semibold text-primary"><CalendarClock className="h-5 w-5" aria-hidden="true" />Maturing</div>
+        <div className="flex items-center gap-2 font-semibold text-primary"><CalendarClock className="h-5 w-5" aria-hidden="true" />Collecting results</div>
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-label="Publication maturity" aria-valuemin={0} aria-valuemax={7} aria-valuenow={age}>
           <div className="h-full rounded-full bg-primary" style={{ width: `${(age / 7) * 100}%` }} />
         </div>
-        <p className="mt-2 text-sm text-muted-foreground">{remaining} day{remaining === 1 ? "" : "s"} until the seven-day outcome window.</p>
+        <p className="mt-2 text-sm text-muted-foreground">{remaining} day{remaining === 1 ? "" : "s"} until the 7-day result is ready.</p>
       </div>
     );
   }
@@ -413,25 +412,25 @@ function OutcomeState({ item }: { item: HistoryItem }) {
   if (item.observation_status === "linked_awaiting_metrics") {
     return (
       <div>
-        <div className="flex items-center gap-2 font-semibold text-warning"><RefreshCw className="h-5 w-5" aria-hidden="true" />Sync required</div>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">The exact publication is linked and mature. Run the verified sync to observe ER.</p>
+        <div className="flex items-center gap-2 font-semibold text-warning"><RefreshCw className="h-5 w-5" aria-hidden="true" />Update Instagram data</div>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">The post is linked and old enough to compare. Update Instagram data to see its result.</p>
       </div>
     );
   }
 
   return (
     <div>
-      <div className="flex items-center gap-2 font-semibold text-muted-foreground"><Link2 className="h-5 w-5" aria-hidden="true" />Not linked</div>
-      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Match this prediction to the exact Instagram media after publishing.</p>
+      <div className="flex items-center gap-2 font-semibold text-muted-foreground"><Link2 className="h-5 w-5" aria-hidden="true" />Instagram post not linked</div>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Link the matching Instagram post after it is published.</p>
     </div>
   );
 }
 
 function PredictionStatusBadge({ item }: { item: HistoryItem }) {
-  if (item.status === "current") return <StatusPill label="Current decision" tone="success" />;
-  if (item.status === "provisional") return <StatusPill label="Time not set" tone="warning" />;
-  if (item.status === "stale") return <StatusPill label="Needs recalculation" tone="warning" />;
-  return <StatusPill label="Superseded" tone="neutral" />;
+  if (item.status === "current") return <StatusPill label="Current" tone="success" />;
+  if (item.status === "provisional") return <StatusPill label="Add publish time" tone="warning" />;
+  if (item.status === "stale") return <StatusPill label="Needs update" tone="warning" />;
+  return <StatusPill label="Earlier version" tone="neutral" />;
 }
 
 function StatusPill({ label, tone }: { label: string; tone: "primary" | "success" | "warning" | "neutral" }) {
@@ -465,9 +464,9 @@ function LedgerSkeleton() {
 function EmptyLedger({ hasHistory, onClear }: { hasHistory: boolean; onClear: () => void }) {
   return (
     <div className="rounded-3xl border border-dashed border-border bg-surface p-10 text-center">
-      <h3 className="text-lg font-semibold">{hasHistory ? "No records match these filters" : "No predictions recorded yet"}</h3>
+      <h3 className="text-lg font-semibold">{hasHistory ? "No predictions match these filters" : "No predictions yet"}</h3>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
-        {hasHistory ? "Adjust the filters to return to your decision history." : "Analyze a real content draft to create the first immutable prediction record."}
+        {hasHistory ? "Change or clear the filters to see more predictions." : "Create a prediction to start your history."}
       </p>
       {hasHistory ? (
         <button type="button" onClick={onClear} className="mt-5 min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2">Clear filters</button>

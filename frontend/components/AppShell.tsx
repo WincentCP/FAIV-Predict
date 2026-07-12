@@ -36,7 +36,7 @@ const NAV_GROUPS = [
     label: "Manage",
     items: [
       { to: "/niches", label: "Brands" },
-      { to: "/model-health", label: "Models" },
+      { to: "/model-health", label: "Quality" },
     ],
   },
 ] as const;
@@ -46,9 +46,9 @@ const PAGE_CONTEXT: Record<string, { title: string; description: string }> = {
   "/predict": { title: "Predict", description: "Evaluate before publishing" },
   "/calendar": { title: "Plan", description: "Plan upcoming content" },
   "/insights": { title: "Results", description: "Review published performance" },
-  "/history": { title: "History", description: "Track prediction versions" },
-  "/niches": { title: "Brands", description: "Manage brand data" },
-  "/model-health": { title: "Models", description: "Review model quality" },
+  "/history": { title: "Previous predictions", description: "Review earlier results" },
+  "/niches": { title: "Brands", description: "Instagram and prediction readiness" },
+  "/model-health": { title: "Prediction quality", description: "Check model readiness" },
 };
 
 const THEME_STORAGE_KEY = "faiv-theme";

@@ -283,7 +283,7 @@ export default function InsightsPage() {
     <div className="mx-auto min-h-dvh max-w-[1500px] space-y-7 px-4 py-6 md:px-8 md:py-8">
       <SectionHeader
         title="Results"
-        description="Review published performance and connect it to earlier predictions."
+        description="See how published posts performed against earlier predictions."
         actions={brandSelector}
       />
 
@@ -297,7 +297,7 @@ export default function InsightsPage() {
         <EmptyState
           title="No brand workspace yet"
           description="Add a brand before reviewing Instagram content."
-          action={<Link href="/niches" className={primaryButtonClass}>Register a brand</Link>}
+          action={<Link href="/niches" className={primaryButtonClass}>Add brand</Link>}
         />
       )}
 
@@ -306,10 +306,10 @@ export default function InsightsPage() {
           {summary && (
             <div className="overflow-hidden rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]" aria-label="Published result summary">
               <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
-                <SummaryMetric label="Published posts" value={summary.count.toLocaleString()} helper="Latest accessible Instagram media" />
-                <SummaryMetric label="Verified ER snapshots" value={summary.syncedCount.toLocaleString()} helper="Preserved follower denominator" />
-                <SummaryMetric label="Mature outcomes" value={summary.matureCount.toLocaleString()} helper="Eligible at the seven-day horizon" />
-                <SummaryMetric label="Mature median ER" value={formatPercent(summary.medianEr)} helper={`${summary.modeledCount} posts use supported formats`} />
+                <SummaryMetric label="Published posts" value={summary.count.toLocaleString()} helper="Recent Instagram posts" />
+                <SummaryMetric label="Engagement available" value={summary.syncedCount.toLocaleString()} helper="Posts with synchronized data" />
+                <SummaryMetric label="7-day results" value={summary.matureCount.toLocaleString()} helper="Ready to compare" />
+                <SummaryMetric label="Typical engagement" value={formatPercent(summary.medianEr)} helper={`${summary.modeledCount} comparable posts`} />
               </div>
             </div>
           )}
@@ -318,7 +318,7 @@ export default function InsightsPage() {
             <div role="status" className="flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/[0.04] p-4 text-sm sm:flex-row sm:items-center">
               <Link2 className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
               <p className="flex-1 leading-relaxed text-muted-foreground">
-                Choose the exact Instagram post represented by prediction <span className="font-mono text-xs text-foreground">{requestedPredictionId.slice(0, 8)}…</span>. Caption equality can identify a candidate, but only your confirmation creates the immutable media-ID link.
+                Select the Instagram post that matches this prediction. We will link it after you confirm.
               </p>
               <button type="button" onClick={() => setRequestedPredictionId(null)} className="min-h-10 rounded-lg px-3 font-semibold text-foreground hover:bg-surface-2">Dismiss</button>
             </div>
@@ -354,8 +354,8 @@ export default function InsightsPage() {
             <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
               <aside aria-label="Published posts" className="overflow-hidden rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]">
                 <div className="border-b border-border px-5 py-4">
-                  <h2 className="font-semibold">Choose a publication</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">Select a post to review.</p>
+                  <h2 className="font-semibold">Choose a post</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">Select an Instagram post to review.</p>
                 </div>
                 <div className="grid auto-cols-[minmax(260px,82vw)] grid-flow-col gap-2 overflow-x-auto p-3 lg:max-h-[720px] lg:auto-cols-auto lg:grid-flow-row lg:overflow-y-auto">
                   {posts.map((post) => (
@@ -411,20 +411,20 @@ function PostListItem({ post, active, onSelect }: { post: IgPost; active: boolea
             <media.icon aria-hidden="true" className="h-3.5 w-3.5" />{media.label}
           </span>
           {post.comparison_eligible && post.er !== null ? (
-            <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">Mature</span>
+            <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">7-day result</span>
           ) : !post.comparison_eligible ? (
             <span
               title={post.comparison_unavailable_reason || undefined}
               className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-muted-foreground"
             >
-              {post.comparison_unavailable_code === "immature" ? "Maturing" : "Not comparable"}
+              {post.comparison_unavailable_code === "immature" ? "Collecting results" : "Cannot compare"}
             </span>
           ) : null}
         </div>
         <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-foreground">{post.caption || "Post without caption"}</p>
         <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
           <time dateTime={post.timestamp}>{dateLabel}</time>
-          <span className="font-mono">{post.er === null ? "ER pending" : `ER ${formatPercent(post.er)}`}</span>
+          <span>{post.er === null ? "Engagement pending" : `Engagement ${formatPercent(post.er)}`}</span>
         </div>
       </div>
     </button>
@@ -528,7 +528,7 @@ function PostAnalysis({
           <div className="flex flex-wrap items-center gap-2">
             <MediaTypeChip post={post} />
             {post.comparison_eligible && post.er !== null && (
-              <span className="inline-flex min-h-7 items-center rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">Mature outcome</span>
+              <span className="inline-flex min-h-7 items-center rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">7-day result</span>
             )}
             {post.permalink && (
               <a
@@ -557,13 +557,13 @@ function PostAnalysis({
             {post.likes !== null ? <MetricCard label="Likes" value={post.likes} /> : <UnavailableMetric label="Likes" message="Not returned by Meta." />}
             {post.comments !== null ? <MetricCard label="Comments" value={post.comments} /> : <UnavailableMetric label="Comments" message="Not returned by Meta." />}
             {post.er !== null ? (
-              <MetricCard label="Synced ER" value={post.er} suffix="%" decimals={2} />
+              <MetricCard label="Engagement rate" value={post.er} suffix="%" decimals={2} />
             ) : (
-              <UnavailableMetric label="Synced ER" message="Awaiting verified sync." />
+              <UnavailableMetric label="Engagement rate" message="Waiting for an Instagram update." />
             )}
           </div>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Likes and comments may be live. Synced ER uses the follower snapshot preserved when this media was verified.
+            Likes and comments may still change. Engagement rate uses the follower count saved during synchronization.
           </p>
         </div>
       </div>
@@ -579,8 +579,8 @@ function PostAnalysis({
             <section className="rounded-2xl border border-border bg-surface p-5" aria-labelledby="prediction-trace-heading">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 id="prediction-trace-heading" className="font-semibold">Prediction trace</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">Connect the pre-publish decision to this exact media ID.</p>
+                  <h3 id="prediction-trace-heading" className="font-semibold">Before vs after</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">Compare the earlier prediction with this published post.</p>
                 </div>
                 <Link href={detail.prediction?.prediction_id ? `/history?prediction_id=${encodeURIComponent(detail.prediction.prediction_id)}` : "/history"} className="inline-flex min-h-10 items-center self-start rounded-lg px-2 text-sm font-semibold text-foreground hover:bg-surface-2">
                   Prediction history
@@ -592,18 +592,18 @@ function PostAnalysis({
                   {detail.prediction.linked && (
                     <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
                       <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      Verified media-ID link
+                      Instagram post linked
                     </span>
                   )}
-                  <span>{detail.prediction.confidence !== null ? `${Math.round(detail.prediction.confidence)}/100 raw class score` : "Raw class score unavailable"}</span>
-                  {detail.prediction.actual_er !== null && <span>Observed ER: <strong>{detail.prediction.actual_er.toFixed(2)}%</strong></span>}
+                  <span>{detail.prediction.confidence !== null ? `${Math.round(detail.prediction.confidence)}/100 prediction score` : "Prediction score unavailable"}</span>
+                  {detail.prediction.actual_er !== null && <span>Published engagement: <strong>{detail.prediction.actual_er.toFixed(2)}%</strong></span>}
                   {detail.prediction.model_version && <span className="font-mono text-xs text-muted-foreground">Model {detail.prediction.model_version}</span>}
                   <p className="w-full text-sm leading-relaxed text-muted-foreground">
                     {detail.prediction.linked
-                      ? "This outcome is attached through a user-confirmed immutable Instagram media ID."
+                      ? "This result is linked to the Instagram post you confirmed."
                       : detail.prediction.linked_elsewhere
-                        ? "This prediction already has an immutable link to another Instagram media ID, so it cannot be attached to this post."
-                      : "Operator-assisted candidate using the exact caption returned by Meta. Caption equality is not proof; verify the post before creating an immutable media-ID link."}
+                        ? "This prediction is already linked to another Instagram post."
+                      : "Possible match based on the caption. Check the post and publication date before linking."}
                   </p>
                   {!detail.prediction.linked &&
                     !detail.prediction.linked_elsewhere &&
@@ -615,7 +615,7 @@ function PostAnalysis({
                         onClick={() => setShowLinkDialog(true)}
                         className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
                       >
-                        Verify publication
+                        Link post
                       </button>
                     )}
                   {publicationLinkError && (
@@ -625,9 +625,9 @@ function PostAnalysis({
                   )}
                 </div>
               ) : detail.prediction_match_status === "ambiguous_duplicate_caption" ? (
-                <p className="mt-4 text-sm leading-relaxed text-muted-foreground">More than one prediction has this exact Meta-verified caption. No score is assigned automatically because caption equality is not sufficient publication evidence.</p>
+                <p className="mt-4 text-sm leading-relaxed text-muted-foreground">More than one prediction uses this caption. Choose the correct prediction before linking.</p>
               ) : (
-                <p className="mt-4 text-sm text-muted-foreground">No prediction candidate with this exact Meta-verified caption was found in your ledger.</p>
+                <p className="mt-4 text-sm text-muted-foreground">No prediction with this caption was found in your history.</p>
               )}
             </section>
 
@@ -641,14 +641,14 @@ function PostAnalysis({
               <div className="space-y-6 border-t border-border p-5">
                 {availableMetrics.length > 0 ? (
                   <section aria-labelledby="verified-metrics-heading">
-                    <h3 id="verified-metrics-heading" className="font-semibold">Verified Meta metrics</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">Lifetime fields appear only when Meta supports them for this media type.</p>
+                    <h3 id="verified-metrics-heading" className="font-semibold">Instagram metrics</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">Available metrics depend on the post format.</p>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                       {availableMetrics.map((metric) => <MetricCard key={metric.key} label={metric.label} value={detail.metrics[metric.key]} />)}
                     </div>
                   </section>
                 ) : (
-                  <p className="rounded-xl bg-surface-2/50 p-4 text-sm text-muted-foreground">Meta returned no additional lifetime metrics. Missing values were not replaced with zero or estimates.</p>
+                  <p className="rounded-xl bg-surface-2/50 p-4 text-sm text-muted-foreground">No additional Instagram metrics are available for this post.</p>
                 )}
 
                 {(unavailableLabels.length > 0 || detail.not_attributable_metrics.length > 0) && (
@@ -660,7 +660,7 @@ function PostAnalysis({
 
                 <InteractionBreakdown post={post} detail={detail} />
                 <div className="rounded-xl border border-border p-4 text-sm leading-relaxed text-muted-foreground">
-                  <strong className="text-foreground">Trend limitation.</strong> {detail.historical.recent_performance.reason}
+                  <strong className="text-foreground">Trend data unavailable.</strong> {detail.historical.recent_performance.reason}
                 </div>
                 <DetailProvenance post={post} provenance={detail.provenance} />
               </div>
@@ -668,8 +668,8 @@ function PostAnalysis({
 
             <div className="flex flex-col gap-3 rounded-2xl bg-primary p-5 text-primary-foreground sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="font-semibold">Use verified learning in the next decision</p>
-                <p className="mt-1 text-sm text-primary-foreground/75">Use the result as guidance, not a creative verdict.</p>
+                <p className="font-semibold">Use this result in your next post</p>
+                <p className="mt-1 text-sm text-primary-foreground/75">Treat it as guidance, not a guarantee.</p>
               </div>
               <Link href="/predict" className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-primary-foreground px-4 text-sm font-semibold text-primary">
                 Predict next draft
@@ -695,6 +695,7 @@ function PostAnalysis({
   );
 }
 
+// Verified publications expose continuous Observed ER without inventing an outcome tier.
 function OutcomeSummary({ post, detail }: { post: IgPost; detail: PostDetail }) {
   const brandMedian = detail.historical.brand_median_er;
   const ageDays = Math.max(0, Math.floor((Date.now() - new Date(post.timestamp).getTime()) / 86_400_000));
@@ -704,13 +705,13 @@ function OutcomeSummary({ post, detail }: { post: IgPost; detail: PostDetail }) 
       <section aria-labelledby="outcome-summary-title" className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.045] p-5">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-5 w-5" aria-hidden="true" />Seven-day outcome available</div>
-            <h3 id="outcome-summary-title" className="mt-3 text-3xl font-semibold tabular-nums tracking-tight">{post.er.toFixed(2)}% observed ER</h3>
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">Calculated from the verified likes, comments, and follower snapshot preserved by synchronization.</p>
+            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-5 w-5" aria-hidden="true" />7-day result ready</div>
+            <h3 id="outcome-summary-title" className="mt-3 text-3xl font-semibold tabular-nums tracking-tight">{post.er.toFixed(2)}% engagement rate</h3>
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">Calculated from synchronized likes, comments, and follower count.</p>
           </div>
           <div className="min-w-[220px] rounded-xl border border-border bg-surface p-4">
             <ComparisonCard
-              label={`Eligible brand history · n=${detail.historical.brand_baseline_posts}`}
+              label={`Comparable brand posts · ${detail.historical.brand_baseline_posts}`}
               current={post.er}
               baseline={brandMedian}
               unavailableMessage={detail.historical.brand_baseline_unavailable_reason || "No eligible brand-history baseline is available."}
@@ -728,8 +729,8 @@ function OutcomeSummary({ post, detail }: { post: IgPost; detail: PostDetail }) 
         <div className="flex items-start gap-3">
           <Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
           <div>
-            <h3 id="outcome-summary-title" className="font-semibold">Outcome still maturing</h3>
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Wait {remaining} more day{remaining === 1 ? "" : "s"} before treating this post as a comparable seven-day outcome. Live counters can still change.</p>
+            <h3 id="outcome-summary-title" className="font-semibold">Collecting results</h3>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">The 7-day result will be ready in {remaining} day{remaining === 1 ? "" : "s"}. Engagement can still change.</p>
             <div className="mt-3 h-1.5 max-w-sm overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-label="Publication maturity" aria-valuemin={0} aria-valuemax={7} aria-valuenow={Math.min(ageDays, 7)}><div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, (ageDays / 7) * 100)}%` }} /></div>
           </div>
         </div>
@@ -739,8 +740,8 @@ function OutcomeSummary({ post, detail }: { post: IgPost; detail: PostDetail }) 
 
   return (
     <section aria-labelledby="outcome-summary-title" className="rounded-2xl border border-border bg-surface-2/40 p-5">
-      <h3 id="outcome-summary-title" className="font-semibold">Comparable outcome unavailable</h3>
-      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{detail.historical.comparison_unavailable_reason || post.comparison_unavailable_reason || "Eligibility could not be verified."}</p>
+      <h3 id="outcome-summary-title" className="font-semibold">Not ready to compare</h3>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{detail.historical.comparison_unavailable_reason || post.comparison_unavailable_reason || "This post cannot be compared yet."}</p>
     </section>
   );
 }
@@ -775,21 +776,21 @@ function PublicationLinkDialog({ post, prediction, acknowledged, onAcknowledged,
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/75 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="publication-link-title" aria-describedby="publication-link-description" className="max-h-[95dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-border bg-surface shadow-[var(--shadow-elevated)] sm:max-h-[90dvh] sm:rounded-3xl">
         <div className="flex items-start justify-between gap-4 border-b border-border p-5 md:p-6">
-          <div><h2 id="publication-link-title" className="text-xl font-semibold tracking-tight">Verify this publication</h2><p id="publication-link-description" className="mt-1 text-sm leading-relaxed text-muted-foreground">Create one immutable link between the pre-publish prediction and this exact Instagram media ID.</p></div>
+          <div><h2 id="publication-link-title" className="text-xl font-semibold tracking-tight">Link Instagram post</h2><p id="publication-link-description" className="mt-1 text-sm leading-relaxed text-muted-foreground">Connect this prediction to the selected Instagram post.</p></div>
           <button type="button" onClick={onCancel} disabled={saving} aria-label="Close publication verification" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-surface-2 disabled:opacity-50"><X className="h-5 w-5" aria-hidden="true" /></button>
         </div>
         <div className="space-y-5 p-5 md:p-6">
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-border p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Prediction candidate</p><div className="mt-3 flex items-center gap-2"><TierBadge tier={prediction.tier} /><span className="text-sm">{prediction.confidence == null ? "Raw score unavailable" : `${Math.round(prediction.confidence)}/100 raw score`}</span></div><p className="mt-3 font-mono text-xs text-muted-foreground">ID {prediction.prediction_id}</p></div>
-            <div className="rounded-2xl border border-border p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Selected Instagram media</p><p className="mt-3 text-sm font-semibold">{mediaBadge(post).label} · {formatDate(post.timestamp)}</p><p className="mt-2 line-clamp-3 text-sm leading-relaxed text-muted-foreground">{post.caption || "Post without caption"}</p><p className="mt-3 font-mono text-xs text-muted-foreground">Media {post.id}</p></div>
+            <div className="rounded-2xl border border-border p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Prediction</p><div className="mt-3 flex items-center gap-2"><TierBadge tier={prediction.tier} /><span className="text-sm">{prediction.confidence == null ? "Score unavailable" : `${Math.round(prediction.confidence)}/100 score`}</span></div></div>
+            <div className="rounded-2xl border border-border p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Instagram post</p><p className="mt-3 text-sm font-semibold">{mediaBadge(post).label} · {formatDate(post.timestamp)}</p><p className="mt-2 line-clamp-3 text-sm leading-relaxed text-muted-foreground">{post.caption || "Post without caption"}</p></div>
           </div>
-          <div className="flex items-start gap-3 rounded-2xl border border-warning/25 bg-warning/[0.04] p-4 text-sm leading-relaxed text-muted-foreground"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden="true" /><p>Caption equality only surfaced this candidate. Confirm the identity from the selected media, publication date, and Instagram link before continuing.</p></div>
-          <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border p-4 hover:bg-surface-2/40"><input autoFocus type="checkbox" checked={acknowledged} onChange={(event) => onAcknowledged(event.target.checked)} className="mt-1 h-4 w-4 accent-current" /><span className="text-sm leading-relaxed"><strong className="block text-foreground">I verified this exact publication.</strong><span className="text-muted-foreground">I understand the media-ID link is immutable and will be used to attach the mature observed ER.</span></span></label>
+          <div className="flex items-start gap-3 rounded-2xl border border-warning/25 bg-warning/[0.04] p-4 text-sm leading-relaxed text-muted-foreground"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden="true" /><p>This match is based on the caption. Check the post and publication date before continuing.</p></div>
+          <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border p-4 hover:bg-surface-2/40"><input autoFocus type="checkbox" checked={acknowledged} onChange={(event) => onAcknowledged(event.target.checked)} className="mt-1 h-4 w-4 accent-current" /><span className="text-sm leading-relaxed"><strong className="block text-foreground">This is the correct Instagram post.</strong><span className="text-muted-foreground">Once linked, it cannot be changed.</span></span></label>
           {error && <p role="alert" className="rounded-xl border border-destructive/25 bg-destructive/[0.04] p-3 text-sm text-destructive">{error}</p>}
         </div>
         <div className="flex flex-col-reverse gap-2 border-t border-border p-4 sm:flex-row sm:justify-end">
           <button type="button" onClick={onCancel} disabled={saving} className="min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2 disabled:opacity-50">Cancel</button>
-          <button type="button" onClick={onConfirm} disabled={!acknowledged || saving} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{saving && <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />}{saving ? "Saving link…" : "Create verified link"}</button>
+          <button type="button" onClick={onConfirm} disabled={!acknowledged || saving} aria-label="Verify this publication and link it" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{saving && <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />}{saving ? "Linking…" : "Link post"}</button>
         </div>
       </div>
     </div>
@@ -838,8 +839,8 @@ function InteractionBreakdown({ post, detail }: { post: IgPost; detail: PostDeta
 
   return (
     <section aria-labelledby="interaction-breakdown-heading">
-      <h3 id="interaction-breakdown-heading" className="text-sm font-semibold">Known interaction mix</h3>
-      <p className="mt-1 text-xs text-muted-foreground">Breakdown of the returned likes, comments, saves, and shares; it is not a unique-person count.</p>
+      <h3 id="interaction-breakdown-heading" className="text-sm font-semibold">Interactions</h3>
+      <p className="mt-1 text-xs text-muted-foreground">Likes, comments, saves, and shares returned by Instagram.</p>
       <div className="mt-3 space-y-3 rounded-xl border border-border p-4">
         {items.map((item) => {
           const share = total > 0 ? (item.value / total) * 100 : 0;
@@ -871,7 +872,7 @@ function EvidenceSection({ post, detail }: { post: IgPost; detail: PostDetail })
       comparisonSentence(
         post.er,
         detail.historical.brand_median_er,
-        "the mature, model-eligible brand median (excluding this post)"
+        "comparable brand posts (excluding this post)"
       )
     );
   }
@@ -884,8 +885,8 @@ function EvidenceSection({ post, detail }: { post: IgPost; detail: PostDetail })
 
   return (
     <section className="rounded-xl border border-border bg-surface-2/30 p-5" aria-labelledby="observations-heading">
-      <h3 id="observations-heading" className="text-sm font-semibold">Calculated observations</h3>
-      <p className="mt-1 text-xs text-muted-foreground">Deterministic comparisons from verified values, not generative AI claims or causal recommendations.</p>
+      <h3 id="observations-heading" className="text-sm font-semibold">Key observations</h3>
+      <p className="mt-1 text-xs text-muted-foreground">Calculated from available Instagram data.</p>
       {observations.length > 0 ? (
         <ul className="mt-3 space-y-2 text-sm text-foreground">
           {observations.map((observation) => <li key={observation} className="flex gap-2"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />{observation}</li>)}
@@ -898,6 +899,7 @@ function EvidenceSection({ post, detail }: { post: IgPost; detail: PostDetail })
 }
 
 function ProvenanceNotice({ followers, provenance, latestSync: sync }: { followers: number | null; provenance: Provenance | null; latestSync: string | null }) {
+  // unequal-age cumulative ER is not presented as a recent trend.
   const fetched = provenance?.fetched_at ? formatDateTime(provenance.fetched_at) : "time unavailable";
   const storedOnly = provenance?.stored_only === true || provenance?.live_source !== "instagram_graph_api";
   return (
@@ -905,17 +907,17 @@ function ProvenanceNotice({ followers, provenance, latestSync: sync }: { followe
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Database aria-hidden="true" className={cn("h-5 w-5 shrink-0", storedOnly ? "text-warning" : "text-primary")} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-foreground">{storedOnly ? "Verified stored snapshot" : "Live Instagram source"}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{storedOnly ? `Graph was unavailable at ${fetched}; preserved synchronization records are shown.` : `Fetched from Instagram Graph at ${fetched}.`}</p>
+          <p className="text-sm font-semibold text-foreground">{storedOnly ? "Saved Instagram data" : "Live Instagram data"}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{storedOnly ? `Live data was unavailable at ${fetched}; the latest saved update is shown.` : `Updated from Instagram at ${fetched}.`}</p>
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span>{followers === null ? "Followers unavailable" : `${followers.toLocaleString()} followers`}</span>
-          <span>{sync ? `Latest sync ${formatDateTime(sync)}` : "Sync pending"}</span>
+          <span>{sync ? `Last updated ${formatDateTime(sync)}` : "Update pending"}</span>
         </div>
       </div>
       <details className="group mt-3 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
-        <summary className="cursor-pointer list-none font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40">How ER evidence is preserved</summary>
-        <p className="mt-2">ER uses synchronized likes plus comments divided by the follower snapshot preserved when the media was verified. Comparisons require mature, model-supported posts; unequal-age cumulative ER is not presented as a recent trend.</p>
+        <summary className="cursor-pointer list-none font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40">How engagement rate is calculated</summary>
+        <p className="mt-2">Engagement rate uses synchronized likes and comments divided by the saved follower count. Comparisons use supported posts that are at least 7 days old.</p>
         {provenance?.post_limit && <p className="mt-1">This view requests up to {provenance.post_limit} recent posts.</p>}
       </details>
     </div>
@@ -927,9 +929,8 @@ function DetailProvenance({ post, provenance }: { post: IgPost; provenance: Prov
     <footer className="flex items-start gap-2 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">
       <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
       <p>
-        Detailed metrics fetched from Instagram Graph{provenance.fetched_at ? ` at ${formatDateTime(provenance.fetched_at)}` : ""}.
-        {post.synced_at ? ` Historical ER snapshot captured ${formatDateTime(post.synced_at)}.` : " Historical ER snapshot is not yet available."}
-        {provenance.prediction_source ? " Prediction trace is scoped to the authenticated user's history." : ""}
+        Instagram metrics updated{provenance.fetched_at ? ` at ${formatDateTime(provenance.fetched_at)}` : ""}.
+        {post.synced_at ? ` Engagement rate saved ${formatDateTime(post.synced_at)}.` : " Saved engagement rate is not available yet."}
       </p>
     </footer>
   );

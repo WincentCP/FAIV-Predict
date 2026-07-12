@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { Panel, Label } from "./Panel";
 import { AiToolsAccordion } from "./AiToolsAccordion";
 import { BrandPatterns } from "./BrandPatterns";
+import { type CreativeReviewSnapshot } from "./ConceptAssistant";
 
 const FORMATS: ContentFormat[] = ["Reels", "Carousel", "Single Image"];
 
@@ -49,6 +50,8 @@ export function ComposeView(props: {
   submitting: boolean;
   tooLong: boolean;
   onAnalyze: () => void;
+  creativeReview: CreativeReviewSnapshot | null;
+  onCreativeReview: (review: CreativeReviewSnapshot) => void;
 }) {
   const {
     brandsList,
@@ -75,18 +78,20 @@ export function ComposeView(props: {
     submitting,
     tooLong,
     onAnalyze,
+    creativeReview,
+    onCreativeReview,
   } = props;
   const stats = analyzeCaption(caption);
 
   const readinessMessage = account?.active_model_scope === "none"
-    ? "A trained model is not available for this brand yet."
+    ? "Prediction is not ready for this brand yet."
     : !caption.trim()
-      ? "Write a caption to make the draft prediction-ready."
+      ? "Add a caption to estimate performance."
       : tooLong
         ? "Shorten the caption to Instagram’s 2,200-character limit."
         : !hasPostTime
-          ? "Ready for a provisional prediction. Add an hour later for a time-specific result."
-          : "Ready to predict from the selected brand model and draft inputs.";
+          ? "Ready. Add a time later for a more specific estimate."
+          : "Ready to estimate performance.";
 
   return (
     <motion.div
@@ -217,6 +222,17 @@ export function ComposeView(props: {
         </div>
       </Panel>
 
+      <AiToolsAccordion
+        visualConcept={visualConcept}
+        setVisualConcept={setVisualConcept}
+        caption={caption}
+        brandId={accountId}
+        format={contentFormat}
+        onReplaceCaption={setCaption}
+        reviewSnapshot={creativeReview}
+        onReviewComplete={onCreativeReview}
+      />
+
       <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
         <Panel title="Caption" subtitle="Write the caption you plan to publish." className="h-full">
             <div className="mb-2 flex items-end justify-between gap-3">
@@ -244,21 +260,15 @@ export function ComposeView(props: {
         <BrandPatterns brandId={accountId} brandName={account?.name} activeModelScope={account?.active_model_scope} compact />
       </div>
 
-      <AiToolsAccordion
-        visualConcept={visualConcept}
-        setVisualConcept={setVisualConcept}
-        caption={caption}
-        brandId={accountId}
-        format={contentFormat}
-        onReplaceCaption={setCaption}
-      />
-
       <section aria-label="Run prediction" className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-soft)] sm:flex-row sm:items-center sm:justify-between sm:p-5">
         <div className="min-w-0">
           <p className={cn("text-sm leading-relaxed", isFormValid && !tooLong ? "text-muted-foreground" : "font-medium text-warning")}>{readinessMessage}</p>
-          {submitting && <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-primary">Scoring the draft and supported alternatives…</p>}
-          {isPredictionStale && <p className="mt-1 text-xs font-medium text-warning">Inputs changed. Predict again to create a new version.</p>}
-          <p className="mt-1 text-xs text-muted-foreground">Decision support, not a guarantee of engagement or business results.</p>
+          {submitting && <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-primary">Comparing this draft with past posts…</p>}
+          {isPredictionStale && <p className="mt-1 text-xs font-medium text-warning">The draft changed. Update the estimate before using it.</p>}
+          <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+            <span className="rounded-full bg-primary/[0.08] px-2.5 py-1 font-medium text-primary">Uses caption, format, timing, and brand history</span>
+            <span className="rounded-full bg-surface-2 px-2.5 py-1 text-muted-foreground">Does not score finished visuals, audio, or live trends</span>
+          </div>
         </div>
         <button
           type="button"
@@ -268,7 +278,7 @@ export function ComposeView(props: {
           className="flex min-h-12 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto sm:min-w-56"
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          {submitting ? "Predicting…" : "Predict performance"}
+          {submitting ? "Estimating…" : "Get performance estimate"}
         </button>
       </section>
     </motion.div>

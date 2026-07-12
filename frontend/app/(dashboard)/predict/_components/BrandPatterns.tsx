@@ -41,12 +41,12 @@ function engagementRate(value: number): string {
 
 function signedPoints(value: number): string {
   const rounded = Math.abs(value).toFixed(Math.abs(value) >= 10 ? 1 : 2);
-  return `${value >= 0 ? "+" : "−"}${rounded} pp`;
+  return `${rounded} points ${value >= 0 ? "above" : "below"} the brand average`;
 }
 
 function evidenceLabel(level: BrandPatternEvidenceLevel): string {
-  if (level === "directional") return "Stronger signal";
-  if (level === "exploratory") return "Early signal";
+  if (level === "directional") return "Consistent pattern";
+  if (level === "exploratory") return "Early pattern";
   return "Limited";
 }
 
@@ -63,11 +63,11 @@ function PatternRow({ title, group }: { title: string; group: BrandPatternGroup 
         </span>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <span className="font-semibold tabular-nums text-foreground">Median ER {engagementRate(group.median_er)}</span>
+        <span className="font-semibold tabular-nums text-foreground">Typical engagement {engagementRate(group.median_er)}</span>
         <span aria-hidden>·</span>
-        <span>n={group.sample_size}</span>
+        <span>Based on {group.sample_size} posts</span>
         <span aria-hidden>·</span>
-        <span>{signedPoints(group.difference_from_brand_median_pp)} vs brand</span>
+        <span>{signedPoints(group.difference_from_brand_median_pp)}</span>
       </div>
     </article>
   );
@@ -133,8 +133,8 @@ export function BrandPatterns({
   return (
     <section aria-labelledby="brand-patterns-title" className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
       <div className="border-b border-border px-5 py-5 sm:px-6">
-        <h2 id="brand-patterns-title" className="text-base font-semibold text-foreground">Brand Performance Snapshot</h2>
-        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Patterns from verified posts—not causal preferences.</p>
+        <h2 id="brand-patterns-title" className="text-base font-semibold text-foreground">What has worked for this brand</h2>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Based on past Instagram posts.</p>
       </div>
 
       <div className="flex flex-1 flex-col space-y-4 p-5 sm:p-6">
@@ -162,20 +162,20 @@ export function BrandPatterns({
         {data && !loading && (
           <>
             <p className="text-xs font-semibold text-muted-foreground">
-              <span className="text-foreground">{data.evidence.eligible_posts} eligible posts</span>
+              <span className="text-foreground">{data.evidence.eligible_posts} comparable posts</span>
               <span className="mx-2" aria-hidden>·</span>
               <span className="capitalize">{data.freshness.status} data</span>
             </p>
 
             {activeModelScope === "cohort" && (
               <p className="rounded-xl border border-border bg-surface-2/40 p-3 text-sm leading-relaxed text-muted-foreground">
-                These patterns use {brandName || data.brand.name}&apos;s history. The score uses the shared {data.brand.niche} niche model.
+                These patterns use {brandName || data.brand.name}&apos;s posts. The performance estimate uses data from the {data.brand.niche} niche.
               </p>
             )}
 
             {data.status === "empty" || highlights.length === 0 ? (
               <p className="rounded-xl border border-dashed border-border p-3 text-sm leading-relaxed text-muted-foreground">
-                Not enough comparable history yet. A supported highlight needs {data.evidence.minimum_highlight_total} eligible posts overall and {data.evidence.minimum_group_samples} in each compared group.
+                More history is needed. Highlights appear after {data.evidence.minimum_highlight_total} comparable posts, with at least {data.evidence.minimum_group_samples} in each group.
               </p>
             ) : (
               <div className="grid gap-2 sm:grid-cols-2">
@@ -183,22 +183,22 @@ export function BrandPatterns({
                   <PatternRow key={`${item.dimension}-${item.key}`} title={DIMENSION_LABELS[item.dimension] || item.dimension} group={item} />
                 ))}
                 <p className="text-xs leading-relaxed text-muted-foreground sm:col-span-2">
-                  Higher historical medians are planning clues, not proof that a creative change will cause better engagement.
+                  Use these as planning clues, not guaranteed improvements.
                 </p>
               </div>
             )}
 
             <details className="group rounded-xl border border-border bg-surface-2/30">
               <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3.5 py-3 text-sm font-semibold text-foreground marker:hidden">
-                Data and limits
+                About this data
                 <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
               </summary>
               <div className="space-y-4 border-t border-border p-3.5">
                 <div className="space-y-1 text-sm leading-relaxed text-muted-foreground">
-                  <p>{data.evidence.eligible_posts} of {data.evidence.mature_verified_posts} mature verified posts use model-supported formats.</p>
+                  <p>{data.evidence.eligible_posts} of {data.evidence.mature_verified_posts} verified posts are comparable with the prediction model.</p>
                   {data.overall && (
                     <p>
-                      Brand median ER: <strong className="text-foreground">{engagementRate(data.overall.median_er)}</strong>. Observed ER IQR: {engagementRate(data.overall.q1_er)}–{engagementRate(data.overall.q3_er)}.
+                      Typical engagement rate: <strong className="text-foreground">{engagementRate(data.overall.median_er)}</strong>. Observed ER IQR: {engagementRate(data.overall.q1_er)}–{engagementRate(data.overall.q3_er)}.
                     </p>
                   )}
                   <p>
@@ -224,12 +224,12 @@ export function BrandPatterns({
                     ))}
                   </div>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    No live external trend or seasonal feed is connected. Put current campaign context in Creative Direction; it remains planning context and does not alter the ML score.
+                    No live external trend feed is connected. Add a sourced Current context to the Creative Brief; it guides feedback but does not change the performance estimate.
                   </p>
                 </div>
 
                 <Link href="/insights" className="inline-flex min-h-10 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline">
-                  View published results
+                  View results
                 </Link>
               </div>
             </details>

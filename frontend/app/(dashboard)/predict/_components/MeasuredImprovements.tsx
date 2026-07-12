@@ -1,6 +1,6 @@
 "use client";
 
-import { FlaskConical, ArrowRight, TrendingUp, Clock3 } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Panel } from "./Panel";
 
@@ -43,14 +43,14 @@ export function MeasuredImprovements({
 
   return (
     <Panel
-      title="Tested decisions"
-      subtitle="One input was changed at a time while the other inputs stayed fixed. Score movements are planning clues—not causal or guaranteed engagement uplift."
+      title="What to try"
+      subtitle="Quick score tests with one change at a time. Results are planning clues, not guaranteed improvements."
     >
       {note ? (
         <p className="rounded-xl border border-border bg-surface-2/50 p-4 text-sm leading-relaxed text-muted-foreground">{note}</p>
       ) : counterfactuals.length === 0 ? (
         <p className="rounded-xl border border-border bg-surface-2/50 p-4 text-sm leading-relaxed text-muted-foreground">
-          No supported single-feature scenario increased this draft&apos;s model score.
+          The available score tests did not find a stronger option for this draft.
         </p>
       ) : (
         <div className="space-y-3">
@@ -68,24 +68,20 @@ export function MeasuredImprovements({
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0 space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-muted-foreground">
-                        <FlaskConical className="h-2.5 w-2.5" />
-                        Simulation
-                      </span>
+                      <span className="inline-flex rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-muted-foreground">Score test</span>
                       {c.tier_changed && (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-                          <TrendingUp className="h-2.5 w-2.5" />
-                          Tier becomes {c.new_predicted_class}
+                        <span className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                          Expected level: {c.new_predicted_class}
                         </span>
                       )}
                     </div>
                     <p className="text-sm font-semibold text-foreground">{c.change}</p>
                     <p className="flex flex-wrap items-center gap-1.5 text-sm tabular-nums text-muted-foreground">
-                      Raw High score {c.from_prob_high}/100
+                      High score {c.from_prob_high}/100
                       <ArrowRight className="h-3 w-3" />
                       <span className="font-bold text-foreground">{c.to_prob_high}/100</span>
                       <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
-                        +{c.delta_high} raw points
+                        +{c.delta_high} points
                       </span>
                     </p>
                   </div>
@@ -108,8 +104,8 @@ export function MeasuredImprovements({
                       />
                     </button>
                   ) : (
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-1 text-xs font-semibold text-muted-foreground">
-                      <Clock3 className="h-3 w-3" /> Edit manually
+                    <span className="inline-flex shrink-0 rounded-full border border-border px-2 py-1 text-xs font-semibold text-muted-foreground">
+                      Edit manually
                     </span>
                   )}
                 </div>
@@ -119,9 +115,7 @@ export function MeasuredImprovements({
 
           {flat.length > 0 && (
             <p className="rounded-xl border border-border/60 bg-surface-2/30 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
-              No model-score increase from:{" "}
-              {flat.map((c) => c.change.toLowerCase()).join(" · ")}. This does not prove that the
-              change would help or hurt real engagement.
+              No higher score from {flat.map((c) => c.change.toLowerCase()).join(" · ")}. Real results may still differ.
             </p>
           )}
         </div>
