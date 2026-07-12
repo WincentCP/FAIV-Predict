@@ -2,6 +2,8 @@ import json
 import os
 import sys
 import datetime
+import logging
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -1256,14 +1258,24 @@ def test_instagram_media_fetch_paginates_until_configured_total(monkeypatch):
         def get(self, url, params):
             calls.append((url, dict(params)))
             if url.endswith("/ig-account/media"):
+                if params.get("after") == "cursor-1":
+                    return Response({
+                        "data": [{"id": str(index)} for index in range(100, 200)],
+                        "paging": {
+                            "next": "https://graph.facebook.com/v25.0/ig-account/media",
+                            "cursors": {"after": "cursor-2"},
+                        },
+                    })
                 return Response({
                     "data": [{"id": str(index)} for index in range(100)],
-                    "paging": {"next": "https://graph.invalid/page-2"},
+                    "paging": {
+                        # Reproduce Meta returning a next URL without query
+                        # credentials; the cursor remains authoritative.
+                        "next": "https://graph.facebook.com/v25.0/ig-account/media",
+                        "cursors": {"after": "cursor-1"},
+                    },
                 })
-            return Response({
-                "data": [{"id": str(index)} for index in range(100, 200)],
-                "paging": {"next": "https://graph.invalid/page-3"},
-            })
+            raise AssertionError(f"unexpected pagination URL: {url}")
 
     monkeypatch.setattr(main_module.httpx, "Client", Client)
     monkeypatch.setenv("IG_SYNC_POST_LIMIT", "150")
@@ -1275,7 +1287,10 @@ def test_instagram_media_fetch_paginates_until_configured_total(monkeypatch):
     assert len(calls) == 2
     assert calls[0][1]["limit"] == 100
     assert calls[0][1]["access_token"] == "secret"
-    assert calls[1][1] == {}
+    assert calls[1][0].endswith("/ig-account/media")
+    assert calls[1][1]["fields"] == calls[0][1]["fields"]
+    assert calls[1][1]["access_token"] == "secret"
+    assert calls[1][1]["after"] == "cursor-1"
 
 
 def test_instagram_media_fetch_exact_total_without_next_is_not_truncated(monkeypatch):
@@ -1331,6 +1346,46 @@ def test_invalid_instagram_sync_limit_fails_before_binding_or_graph_io(monkeypat
     assert result["status"] == "error"
     assert result["results"] == []
     assert "between 1 and 1000" in result["message"]
+
+
+def test_graph_http_failure_never_logs_access_token(monkeypatch, caplog):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+    secret = "must-not-appear-in-logs"
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setenv("IG_SYNC_POST_LIMIT", "500")
+    monkeypatch.setattr(main_module, "_bound_instagram_configs", lambda: [{
+        "brand_id": "d2850e10-2788-4833-be1b-cbbb782b68e9",
+        "name": "Safe test",
+        "niche": "Bakery",
+        "instagram_id": "ig-safe",
+        "access_token": secret,
+    }])
+
+    request = httpx.Request(
+        "GET",
+        f"https://graph.facebook.com/v25.0/ig-safe?access_token={secret}",
+    )
+    response = httpx.Response(403, request=request)
+
+    def rejected_profile(*args, **kwargs):
+        raise httpx.HTTPStatusError(
+            "forbidden",
+            request=request,
+            response=response,
+        )
+
+    monkeypatch.setattr(main_module, "_fetch_ig_profile", rejected_profile)
+    caplog.set_level(logging.INFO)
+
+    result = _sync_and_retrain_pipeline()
+
+    assert result["status"] == "partial"
+    assert result["results"][0]["sync"]["status"] == "failed"
+    assert "Graph API" in result["results"][0]["sync"]["error"]
+    assert secret not in caplog.text
+    assert logging.getLogger("httpx").level >= logging.WARNING
 
 
 def test_instagram_health_brand_scope_parser_distinguishes_operator_and_empty_scope():

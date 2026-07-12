@@ -5,6 +5,7 @@ import uuid
 import hashlib
 import datetime
 import logging
+from urllib.parse import parse_qs, urlparse
 from typing import Optional, Dict, Any, Literal
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header
 from dotenv import load_dotenv
@@ -39,6 +40,10 @@ UNKNOWN_TIME_SCENARIOS = tuple(range(24))
 # Configure Logging
 logger = logging.getLogger("main")
 logging.basicConfig(level=logging.INFO)
+# httpx INFO logs include complete query strings. Meta access tokens are query
+# parameters, so request logging must remain suppressed in this service.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 app = FastAPI(
     title="FAIV Predict ML Service",
@@ -852,7 +857,7 @@ def _fetch_ig_posts(
         _validate_instagram_sync_post_limit(limit)
     )
     url = f"https://graph.facebook.com/v25.0/{ig_id}/media"
-    params = {
+    base_params = {
         "fields": "caption,like_count,comments_count,media_type,timestamp",
         # Request bounded pages and follow Meta's opaque `next` URL until the
         # configured total is reached. Do not assume Meta accepts the total cap
@@ -860,6 +865,7 @@ def _fetch_ig_posts(
         "limit": min(resolved_limit, INSTAGRAM_GRAPH_PAGE_SIZE),
         "access_token": token,
     }
+    params = dict(base_params)
     posts = []
     history_truncated_by_limit = False
     with httpx.Client(timeout=30.0) as client:
@@ -869,16 +875,29 @@ def _fetch_ig_posts(
             res = r.json()
             page = res.get("data", [])
             posts.extend(page)
-            next_url = res.get("paging", {}).get("next")
+            paging = res.get("paging", {})
+            next_url = paging.get("next")
+            after = (paging.get("cursors") or {}).get("after")
+            if not after and next_url:
+                # Some Graph responses include the cursor only in `next`.
+                # Recover it without trusting that URL to retain credentials.
+                after_values = parse_qs(urlparse(str(next_url)).query).get("after")
+                after = after_values[-1] if after_values else None
+            has_next_page = bool(next_url or after)
             if len(posts) >= resolved_limit:
-                history_truncated_by_limit = bool(next_url) or (
+                history_truncated_by_limit = has_next_page or (
                     len(posts) > resolved_limit
                 )
                 break
-            url = next_url
-            params = {}
-            if not page or not url:
+            if not page or not has_next_page:
                 break
+            if not after:
+                raise ValueError(
+                    "Instagram pagination advertised another page without a usable cursor"
+                )
+            # Always call the known endpoint with the original fields/token and
+            # the opaque cursor. Meta's `next` URL is not assumed to retain auth.
+            params = {**base_params, "after": str(after)}
     return posts[:resolved_limit], history_truncated_by_limit
 
 def _get_brands_config() -> list[Dict[str, Any]]:
@@ -1631,6 +1650,28 @@ def _sync_and_retrain_pipeline():
                     "error": "Model training failed. Inspect the ML service logs for the cause.",
                 }
 
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Instagram synchronization failed for brand %s: Graph API HTTP %s",
+                brand_id,
+                exc.response.status_code,
+            )
+            brand_result["sync"]["status"] = "failed"
+            brand_result["sync"]["error"] = (
+                "Instagram Graph API rejected the synchronization request. "
+                "Inspect the token and app permissions."
+            )
+        except httpx.RequestError as exc:
+            logger.error(
+                "Instagram synchronization failed for brand %s: Graph request %s",
+                brand_id,
+                type(exc).__name__,
+            )
+            brand_result["sync"]["status"] = "failed"
+            brand_result["sync"]["error"] = (
+                "Instagram Graph API request failed or timed out. Retry after "
+                "checking connectivity."
+            )
         except Exception:
             logger.exception("Instagram synchronization failed for brand %s", brand_id)
             brand_result["sync"]["status"] = "failed"
