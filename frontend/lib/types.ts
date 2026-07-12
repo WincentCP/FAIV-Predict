@@ -47,24 +47,24 @@ export function normalizeBrandReference(value: string): string {
   return value.trim().toLowerCase().replace(/^@/, "").replace(/[\s_-]+/g, "");
 }
 
-// Tier metadata — HIGH = primary purple, AVERAGE = warning amber, LOW = muted destructive
+// Tier metadata. A tier is a model class, not a calibrated probability.
 export const TIER_META: Record<Tier, { label: string; color: string; bg: string; ring: string }> = {
   High: {
     label: "HIGH",
-    color: "text-[oklch(0.45_0.20_295)] dark:text-[oklch(0.85_0.20_295)]",
-    bg: "bg-[color-mix(in_oklab,var(--primary)_14%,transparent)]",
-    ring: "ring-[color-mix(in_oklab,var(--primary)_35%,transparent)]",
+    color: "text-primary",
+    bg: "bg-primary/10",
+    ring: "ring-primary/25",
   },
   Average: {
     label: "AVERAGE",
-    color: "text-[oklch(0.50_0.16_75)] dark:text-[oklch(0.85_0.16_75)]",
-    bg: "bg-[color-mix(in_oklab,var(--warning)_16%,transparent)]",
-    ring: "ring-[color-mix(in_oklab,var(--warning)_38%,transparent)]",
+    color: "text-amber-700 dark:text-amber-300",
+    bg: "bg-warning/10",
+    ring: "ring-warning/30",
   },
   Low: {
     label: "LOW",
-    color: "text-[oklch(0.48_0.18_22)] dark:text-[oklch(0.78_0.20_22)]",
-    bg: "bg-[color-mix(in_oklab,var(--destructive)_12%,transparent)]",
-    ring: "ring-[color-mix(in_oklab,var(--destructive)_30%,transparent)]",
+    color: "text-destructive",
+    bg: "bg-destructive/10",
+    ring: "ring-destructive/25",
   },
 };

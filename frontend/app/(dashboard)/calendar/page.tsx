@@ -6,6 +6,7 @@ import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { type ContentFormat, type Brand, type Tier, normalizeBrandReference } from "@/lib/types";
 import {
+  ArrowRight,
   UploadCloud,
   Download,
   ChevronLeft,
@@ -18,6 +19,11 @@ import {
   Loader2,
   AlertTriangle,
   CheckCircle2,
+  MoreHorizontal,
+  RefreshCw,
+  Sparkles,
+  Clock3,
+  Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -77,6 +83,8 @@ type CsvStage = {
   rows: string[][];
   mapping: Record<CsvField, number>; // header index per field, -1 = unmapped
 };
+
+type PlanFilter = "all" | "needs_prediction" | "stale" | "current" | "learning" | "observed";
 
 const CALENDAR_STATUSES = [
   "Need Shooting",
@@ -176,6 +184,7 @@ export default function CalendarPage() {
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
   const [brandsList, setBrandsList] = useState<Brand[]>([]);
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
+  const [planFilter, setPlanFilter] = useState<PlanFilter>("all");
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -212,7 +221,7 @@ export default function CalendarPage() {
       setEntries(mapped);
       setLoadError(null);
     } catch {
-      setLoadError("The Content Plan could not be loaded. Apply the current database migrations if this is the first production run.");
+      setLoadError("The Content Plan is temporarily unavailable. Your existing planning records have not been changed.");
     }
   }, []);
 
@@ -250,6 +259,34 @@ export default function CalendarPage() {
         return year === cursor.y && month === cursor.m + 1;
       }),
     [entries, cursor],
+  );
+
+  const planCounts = useMemo(() => ({
+    all: monthEntries.length,
+    needs_prediction: monthEntries.filter((entry) => !entry.prediction).length,
+    stale: monthEntries.filter((entry) => entry.prediction?.status === "stale" || entry.prediction?.status === "superseded").length,
+    current: monthEntries.filter((entry) => entry.prediction?.status === "current" || entry.prediction?.status === "provisional").length,
+    learning: monthEntries.filter((entry) => entry.publication && entry.publication.observed_er === null).length,
+    observed: monthEntries.filter((entry) => entry.publication?.observed_er !== null && entry.publication?.observed_er !== undefined).length,
+  }), [monthEntries]);
+
+  const matchesPlanFilter = useCallback((entry: CalendarEntry) => {
+    if (planFilter === "needs_prediction") return !entry.prediction;
+    if (planFilter === "stale") return entry.prediction?.status === "stale" || entry.prediction?.status === "superseded";
+    if (planFilter === "current") return entry.prediction?.status === "current" || entry.prediction?.status === "provisional";
+    if (planFilter === "learning") return Boolean(entry.publication && entry.publication.observed_er === null);
+    if (planFilter === "observed") return entry.publication?.observed_er !== null && entry.publication?.observed_er !== undefined;
+    return true;
+  }, [planFilter]);
+
+  const visibleMonthEntries = useMemo(
+    () => monthEntries.filter(matchesPlanFilter),
+    [monthEntries, matchesPlanFilter],
+  );
+
+  const visibleEntries = useMemo(
+    () => entries.filter(matchesPlanFilter),
+    [entries, matchesPlanFilter],
   );
 
   const grid = useMemo(() => buildMonthGrid(cursor.y, cursor.m), [cursor]);
@@ -600,9 +637,9 @@ export default function CalendarPage() {
   return (
     <div className="px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto">
       <SectionHeader
-        eyebrow="Content Planning"
-        title="Content Plan"
-        description="Plan a post, evaluate it with the current model, then connect its verified Instagram publication and observed outcome without losing the original prediction history."
+        eyebrow="Decision workflow"
+        title="Plan, evaluate, and learn"
+        description="Shape the creative direction, evaluate the planned post before publishing, then connect its verified Instagram outcome. Predictions support the decision; they do not replace it."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -618,39 +655,38 @@ export default function CalendarPage() {
                 ymd(cursor.y, cursor.m, Math.min(today.getDate(), new Date(cursor.y, cursor.m + 1, 0).getDate())),
                 brandsList[0],
               ))}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/95"
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-foreground px-4 text-sm font-bold text-background hover:opacity-90"
             >
               <Plus className="h-3.5 w-3.5" />
-              Add post
+              Plan content
             </button>
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={importReport?.running}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 disabled:opacity-60"
-            >
-              {importReport?.running ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <UploadCloud className="h-3.5 w-3.5" />
-              )}
-              Import CSV/XLSX
-            </button>
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              disabled={monthEntries.length === 0}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 disabled:opacity-60"
-            >
-              <Download className="h-3.5 w-3.5" />
-              CSV
-            </button>
-            <button type="button" onClick={handleExportXlsx} disabled={monthEntries.length === 0} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 disabled:opacity-60">
-              <Download className="h-3.5 w-3.5" /> XLSX
-            </button>
-            <button type="button" onClick={handleExportPdf} disabled={monthEntries.length === 0} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-semibold hover:bg-surface-2 disabled:opacity-60">
-              <Download className="h-3.5 w-3.5" /> PDF
-            </button>
+            <details className="group relative">
+              <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-xl border border-border-strong bg-surface px-4 text-sm font-semibold hover:bg-surface-2 [&::-webkit-details-marker]:hidden">
+                <MoreHorizontal className="h-4 w-4" />
+                Data tools
+              </summary>
+              <div className="absolute right-0 z-30 mt-2 w-52 overflow-hidden rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-elevated)]">
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={importReport?.running}
+                  className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-semibold hover:bg-surface-2 disabled:opacity-60"
+                >
+                  {importReport?.running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}
+                  Import CSV/XLSX
+                </button>
+                <div className="my-1 border-t border-border" />
+                <button type="button" onClick={handleExportCsv} disabled={monthEntries.length === 0} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-semibold hover:bg-surface-2 disabled:opacity-50">
+                  <Download className="h-3.5 w-3.5" /> Export CSV
+                </button>
+                <button type="button" onClick={handleExportXlsx} disabled={monthEntries.length === 0} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-semibold hover:bg-surface-2 disabled:opacity-50">
+                  <Download className="h-3.5 w-3.5" /> Export XLSX
+                </button>
+                <button type="button" onClick={handleExportPdf} disabled={monthEntries.length === 0} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-semibold hover:bg-surface-2 disabled:opacity-50">
+                  <Download className="h-3.5 w-3.5" /> Export PDF
+                </button>
+              </div>
+            </details>
           </div>
         }
       />
@@ -669,8 +705,45 @@ export default function CalendarPage() {
         </div>
       )}
 
+      <section aria-labelledby="plan-state-title" className="mt-6 rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-soft)]">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 id="plan-state-title" className="text-sm font-bold text-foreground">Decision state</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Filter this month by the next useful action.</p>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1 lg:pb-0" aria-label="Filter Content Plan by decision state">
+            {([
+              ["all", "All"],
+              ["needs_prediction", "Needs prediction"],
+              ["stale", "Re-evaluate"],
+              ["current", "Predicted"],
+              ["learning", "Awaiting outcome"],
+              ["observed", "Outcome observed"],
+            ] as Array<[PlanFilter, string]>).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setPlanFilter(id)}
+                aria-pressed={planFilter === id}
+                className={cn(
+                  "inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl border px-3 text-xs font-bold",
+                  planFilter === id
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border bg-surface text-muted-foreground hover:bg-surface-2 hover:text-foreground",
+                )}
+              >
+                {label}
+                <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] tabular-nums", planFilter === id ? "bg-background/15" : "bg-surface-2")}>{planCounts[id]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {importReport && (
         <div
+          role="status"
+          aria-live="polite"
           className={cn(
             "mt-6 rounded-xl border p-4 text-xs space-y-2",
             importReport.running
@@ -717,14 +790,18 @@ export default function CalendarPage() {
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-background/75 p-4 backdrop-blur-sm"
           onClick={() => setCsvStage(null)}
+          role="presentation"
         >
           <div
             className="relative w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden rounded-3xl border border-border bg-surface/95 backdrop-blur-2xl shadow-[var(--shadow-elevated)]"
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="import-review-title"
           >
             <div className="flex items-start justify-between border-b border-border p-5 shrink-0">
               <div>
-                <h3 className="font-display text-base font-bold text-foreground">Review spreadsheet import</h3>
+                <h3 id="import-review-title" className="font-display text-base font-bold text-foreground">Review spreadsheet import</h3>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {csvStage.fileName} · {csvStage.rows.length} data row{csvStage.rows.length === 1 ? "" : "s"} —
                   nothing is imported until you confirm.
@@ -854,7 +931,7 @@ export default function CalendarPage() {
               <button
                 onClick={runImport}
                 disabled={csvValidation.importable.length === 0}
-                className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95 disabled:opacity-50"
+                className="rounded-lg bg-foreground px-4 py-2 text-xs font-bold text-background hover:opacity-90 disabled:opacity-50"
               >
                 Import {csvValidation.importable.length} post
                 {csvValidation.importable.length === 1 ? "" : "s"}
@@ -865,7 +942,7 @@ export default function CalendarPage() {
       )}
 
       {/* Controls: month navigation + view switcher */}
-      <div className="mt-6 flex flex-col md:flex-row items-center justify-between gap-4 border border-border bg-surface/40 p-3 rounded-xl">
+      <div className="mt-4 flex flex-col md:flex-row items-center justify-between gap-4 border border-border bg-surface p-3 rounded-xl shadow-[var(--shadow-soft)]">
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
           <button
             type="button"
@@ -890,7 +967,7 @@ export default function CalendarPage() {
           >
             Today
           </button>
-          <div className="ml-2 font-display text-lg font-bold">
+          <div className="ml-2 font-display text-lg font-semibold">
             {MONTH_NAMES[cursor.m]} {cursor.y}
           </div>
         </div>
@@ -898,8 +975,8 @@ export default function CalendarPage() {
         <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 p-1 text-xs w-full md:w-auto justify-center">
           {(
             [
-              { id: "month", label: "Month", icon: CalendarIcon },
               { id: "list", label: "List", icon: List },
+              { id: "month", label: "Month", icon: CalendarIcon },
             ] as const
           ).map((v) => (
             <button
@@ -911,7 +988,7 @@ export default function CalendarPage() {
                 "flex-1 md:flex-none items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition active:scale-95",
                 v.id === "month" ? "hidden md:inline-flex" : "inline-flex",
                 view === v.id
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-foreground text-background"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -939,7 +1016,7 @@ export default function CalendarPage() {
             <div className="grid grid-cols-7">
               {grid.map((cell, idx) => {
                 const dateStr = ymd(cell.year, cell.month, cell.day);
-                const dayEntries = entries.filter((e) => e.date === dateStr);
+                const dayEntries = visibleEntries.filter((e) => e.date === dateStr);
                 const isToday =
                   cell.year === today.getFullYear() &&
                   cell.month === today.getMonth() &&
@@ -966,7 +1043,7 @@ export default function CalendarPage() {
                       <span
                         className={cn(
                           "grid h-6 w-6 place-items-center rounded-full text-xs font-extrabold tabular-nums",
-                          isToday ? "bg-primary text-primary-foreground font-semibold" : "text-foreground/80"
+                          isToday ? "bg-foreground text-background font-semibold" : "text-foreground/80"
                         )}
                       >
                         {cell.day}
@@ -1013,12 +1090,16 @@ export default function CalendarPage() {
                               {e.format}
                             </span>
                             {e.status && (
-                              <span className="truncate rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-bold text-primary">{e.status}</span>
+                              <span className="truncate rounded-full bg-surface-2 px-1.5 py-0.5 text-xs font-bold text-muted-foreground">{e.status}</span>
                             )}
                           </div>
                           {(e.prediction || e.publication) && (
                             <div className="flex flex-wrap gap-1 border-t border-border/40 pt-1.5 text-xs font-bold">
-                              {e.prediction && <span className="text-primary">Predicted {e.prediction.tier}</span>}
+                              {e.prediction && (
+                                <span className={getDecisionState(e).tone === "warning" ? "text-warning-foreground" : "text-primary"}>
+                                  {getDecisionState(e).label}
+                                </span>
+                              )}
                               {e.publication && e.publication.observed_er !== null && (
                                 <span className="text-emerald-700 dark:text-emerald-300">Observed ER {e.publication.observed_er.toFixed(2)}%</span>
                               )}
@@ -1041,69 +1122,80 @@ export default function CalendarPage() {
 
         {/* LIST VIEW */}
         {view === "list" && (
-          <section className="overflow-hidden rounded-xl border border-border bg-surface/30 shadow-[var(--shadow-soft)]">
-            <div className="space-y-3 p-3 md:hidden">
-              {monthEntries
+          <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
+            <div className="space-y-3 p-3 lg:hidden">
+              {visibleMonthEntries
                 .slice()
                 .sort((a, b) => (a.date + (a.time ?? "")).localeCompare(b.date + (b.time ?? "")))
-                .map((entry) => (
-                  <button
-                    type="button"
-                    key={entry.id}
-                    onClick={() => setEditing(entry)}
-                    className="w-full rounded-xl border border-border bg-surface p-4 text-left transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-bold text-foreground">{entry.brand}</div>
-                        <div className="mt-1 text-xs font-semibold text-muted-foreground">
-                          {formatDayLabel(entry.date)}{entry.time ? ` at ${entry.time}` : ""}
+                .map((entry) => {
+                  const decision = getDecisionState(entry);
+                  return (
+                    <article key={entry.id} className="overflow-hidden rounded-xl border border-border bg-surface">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(entry)}
+                        className="w-full p-4 text-left hover:bg-surface-2/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-bold text-foreground">{entry.title || entry.caption || "Untitled content idea"}</div>
+                            <div className="mt-1 text-xs font-semibold text-muted-foreground">
+                              {entry.brand} · {entry.format}
+                            </div>
+                          </div>
+                          <PlanStateBadge label={decision.label} tone={decision.tone} />
                         </div>
+                        <p className="mt-3 text-xs font-semibold text-muted-foreground">
+                          {formatDayLabel(entry.date)}{entry.time ? ` at ${entry.time}` : " · posting time optional"}
+                        </p>
+                        {entry.caption && entry.title && (
+                          <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{entry.caption}</p>
+                        )}
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          {entry.prediction && (
+                            <span className="rounded-full border border-border bg-surface-2 px-2 py-1 text-[11px] font-bold">Predicted {entry.prediction.tier}</span>
+                          )}
+                          {entry.publication?.observed_er != null && (
+                            <span className="text-[11px] font-bold text-success-foreground">Observed ER {entry.publication.observed_er.toFixed(2)}%</span>
+                          )}
+                          {entry.status && <span className="text-[11px] font-semibold text-muted-foreground">Production: {entry.status}</span>}
+                        </div>
+                      </button>
+                      <div className="flex items-center justify-between gap-3 border-t border-border bg-surface-2/35 px-4 py-2.5">
+                        <button type="button" onClick={() => setEditing(entry)} className="min-h-9 rounded-lg px-2 text-xs font-bold text-muted-foreground hover:bg-surface-2 hover:text-foreground">Edit plan</button>
+                        <Link href={decision.href(entry.id)} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-foreground px-3 text-xs font-bold text-background hover:opacity-90">
+                          {decision.action} <ArrowRight className="h-3.5 w-3.5" />
+                        </Link>
                       </div>
-                      <span className="rounded-lg border border-border bg-surface-2 px-2 py-1 text-xs font-semibold text-muted-foreground">
-                        {entry.format}
-                      </span>
-                    </div>
-                    {(entry.title || entry.caption) && (
-                      <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">
-                        {entry.title || entry.caption}
-                      </p>
-                    )}
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-muted-foreground">
-                      <span>{entry.status || "No workflow status"}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>{entry.source === "import" ? "Spreadsheet import" : "Created manually"}</span>
-                      {entry.prediction && <><span aria-hidden="true">·</span><span>Predicted {entry.prediction.tier}</span></>}
-                      {entry.publication && entry.publication.observed_er !== null && <><span aria-hidden="true">·</span><span>Observed ER {entry.publication.observed_er.toFixed(2)}%</span></>}
-                    </div>
-                  </button>
-                ))}
-              {monthEntries.length === 0 && (
-                <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-                  No planned content this month. Add an entry or import a CSV/XLSX content plan.
-                </div>
+                    </article>
+                  );
+                })}
+              {visibleMonthEntries.length === 0 && (
+                <PlanEmptyState filtered={monthEntries.length > 0} onAdd={() => setEditing(blankCalendarEntry(
+                  ymd(cursor.y, cursor.m, Math.min(today.getDate(), new Date(cursor.y, cursor.m + 1, 0).getDate())),
+                  brandsList[0],
+                ))} />
               )}
             </div>
-            <div className="hidden overflow-x-auto md:block">
-              <table className="w-full text-sm text-left">
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="w-full min-w-[980px] text-left text-sm">
+                <caption className="sr-only">Content decisions planned for {MONTH_NAMES[cursor.m]} {cursor.y}</caption>
                 <thead>
-                  <tr className="border-b border-border bg-surface-2/60 text-xs uppercase tracking-wider text-muted-foreground font-bold">
-                    <th className="px-6 py-4 font-semibold">Date</th>
-                    <th className="px-6 py-4 font-semibold">Time</th>
-                    <th className="px-6 py-4 font-semibold">Brand</th>
-                    <th className="px-6 py-4 font-semibold">Format</th>
-                    <th className="px-6 py-4 font-semibold">Caption Preview</th>
-                    <th className="px-6 py-4 font-semibold">PIC</th>
-                    <th className="px-6 py-4 font-semibold">Status</th>
-                    <th className="px-6 py-4 font-semibold">Origin</th>
+                  <tr className="border-b border-border bg-surface-2/55 text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+                    <th className="px-5 py-3.5 font-semibold">Content direction</th>
+                    <th className="px-5 py-3.5 font-semibold">Schedule</th>
+                    <th className="px-5 py-3.5 font-semibold">Decision</th>
+                    <th className="px-5 py-3.5 font-semibold">Learning outcome</th>
+                    <th className="px-5 py-3.5 font-semibold">Production</th>
                     <th className="px-6 py-4 font-semibold"><span className="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
-                  {monthEntries
+                  {visibleMonthEntries
                     .slice()
                     .sort((a, b) => (a.date + (a.time ?? "")).localeCompare(b.date + (b.time ?? "")))
                     .map((r) => {
+                      const decision = getDecisionState(r);
                       const [y, m, d] = r.date.split("-").map(Number);
                       const dateObj = new Date(y, m - 1, d);
                       const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short" });
@@ -1113,74 +1205,63 @@ export default function CalendarPage() {
                           key={r.id}
                           className="hover:bg-surface-2/40 transition-colors group/row"
                         >
-                          <td className="px-6 py-4 align-middle">
-                            <div className="flex items-center gap-3">
-                              <div className="flex flex-col items-center justify-center shrink-0 w-11 h-11 rounded-lg bg-surface-2 border border-border transition-colors group-hover/row:border-primary/30">
-                                <span className="text-xs uppercase font-extrabold text-muted-foreground/80 tracking-wider leading-none">
-                                  {weekday}
-                                </span>
-                                <span className="text-sm font-extrabold text-foreground leading-none mt-1">
-                                  {dateObj.getDate()}
-                                </span>
+                          <td className="max-w-[350px] px-5 py-4 align-middle">
+                            <div className="min-w-0">
+                              <button type="button" onClick={() => setEditing(r)} className="max-w-full truncate text-left text-sm font-bold text-foreground hover:text-primary hover:underline">
+                                {r.title || r.caption || "Untitled content idea"}
+                              </button>
+                              <p className="mt-1 truncate text-xs text-muted-foreground">{r.caption && r.title ? r.caption : "Add a caption or creative brief before evaluation."}</p>
+                              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+                                <span>{r.account}</span><span aria-hidden="true">·</span><span>{r.format}</span>
                               </div>
-                              <span className="text-xs font-bold text-foreground">
-                                {dateObj.toLocaleDateString("en-US", { month: "short", year: "numeric" })}
-                              </span>
                             </div>
                           </td>
-                          <td className="px-6 py-4 align-middle font-mono text-xs font-semibold">
-                            {r.time ?? "—"}
-                          </td>
-                          <td className="px-6 py-4 align-middle">
-                            <div className="max-w-[140px] truncate font-bold text-foreground" title={r.account}>
-                              {r.account}
+                          <td className="px-5 py-4 align-middle">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-lg border border-border bg-surface-2 transition-colors group-hover/row:border-primary/30">
+                                <span className="text-[10px] font-extrabold uppercase leading-none tracking-wide text-muted-foreground">{weekday}</span>
+                                <span className="mt-1 text-sm font-extrabold leading-none text-foreground">{dateObj.getDate()}</span>
+                              </div>
+                              <div className="text-xs">
+                                <p className="font-bold text-foreground">{dateObj.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</p>
+                                <p className="mt-1 font-semibold text-muted-foreground">{r.time || "Time optional"}</p>
+                              </div>
                             </div>
                           </td>
-                          <td className="px-6 py-4 align-middle">
-                            <span className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-muted-foreground font-mono font-semibold">
-                              {r.format}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 align-middle">
-                            <div className="max-w-[280px] truncate text-xs text-muted-foreground italic" title={r.caption}>
-                              &quot;{r.caption}&quot;
+                          <td className="px-5 py-4 align-middle">
+                            <div className="space-y-2">
+                              <PlanStateBadge label={decision.label} tone={decision.tone} />
+                              {r.prediction && <p className="text-[11px] font-semibold text-muted-foreground">Tier: <span className="font-bold text-foreground">{r.prediction.tier}</span></p>}
                             </div>
                           </td>
-                          <td className="px-6 py-4 align-middle text-xs font-semibold">
-                            {r.pic || "—"}
+                          <td className="px-5 py-4 align-middle text-xs">
+                            {r.publication ? (
+                              r.publication.observed_er !== null ? (
+                                <div><p className="font-bold text-success-foreground">Observed ER {r.publication.observed_er.toFixed(2)}%</p><p className="mt-1 text-[11px] text-muted-foreground">Mature verified result</p></div>
+                              ) : (
+                                <div><p className="inline-flex items-center gap-1.5 font-bold text-foreground"><Link2 className="h-3.5 w-3.5" /> Publication linked</p><p className="mt-1 text-[11px] text-muted-foreground">{r.publication.outcome_status === "pending_maturity" ? "Waiting until day 7" : "Awaiting synchronized outcome"}</p></div>
+                              )
+                            ) : <span className="text-muted-foreground">Not linked yet</span>}
                           </td>
-                          <td className="px-6 py-4 align-middle">
-                            {r.status ? (
-                              <span className="rounded-full border border-border bg-surface-2 px-2 py-1 text-xs font-bold">{r.status}</span>
-                            ) : "—"}
+                          <td className="px-5 py-4 align-middle text-xs">
+                            <p className="font-semibold text-foreground">{r.status || "Not specified"}</p>
+                            <p className="mt-1 text-[11px] text-muted-foreground">{r.pic ? `PIC: ${r.pic}` : "No PIC assigned"}</p>
                           </td>
-                          <td className="px-6 py-4 align-middle">
-                            <div className="space-y-1 text-xs font-semibold text-muted-foreground">
-                              <p>{r.source === "import" ? "Spreadsheet import" : "Created manually"}</p>
-                              {r.prediction && (
-                                <p className="text-foreground">Predicted {r.prediction.tier}</p>
-                              )}
-                              {r.publication && (
-                                <p className="text-foreground">
-                                  {r.publication.observed_er !== null
-                                    ? `Observed ER ${r.publication.observed_er.toFixed(2)}%`
-                                    : "Publication linked · outcome pending"}
-                                </p>
-                              )}
+                          <td className="px-5 py-4 align-middle text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button type="button" onClick={() => setEditing(r)} className="min-h-10 rounded-lg border border-border bg-surface px-3 text-xs font-bold text-foreground hover:bg-surface-2">Edit</button>
+                              <Link href={decision.href(r.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-foreground px-3 text-xs font-bold text-background hover:opacity-90">
+                                {decision.action} <ArrowRight className="h-3.5 w-3.5" />
+                              </Link>
                             </div>
-                          </td>
-                          <td className="px-6 py-4 align-middle text-right">
-                            <button type="button" onClick={() => setEditing(r)} className="h-9 rounded-lg border border-border bg-surface px-3 text-xs font-bold text-foreground hover:bg-surface-2">
-                              Edit
-                            </button>
                           </td>
                         </tr>
                       );
                     })}
-                  {monthEntries.length === 0 && (
+                  {visibleMonthEntries.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-6 py-10 text-center text-xs text-muted-foreground">
-                        No planned content this month. Add an entry or import a CSV/XLSX content plan.
+                      <td colSpan={6} className="px-6 py-10 text-center text-xs text-muted-foreground">
+                        {monthEntries.length > 0 ? "No entries match this decision-state filter." : "No content is planned this month yet."}
                       </td>
                     </tr>
                   )}
@@ -1204,6 +1285,86 @@ export default function CalendarPage() {
   );
 }
 
+type DecisionTone = "primary" | "warning" | "success" | "neutral";
+
+function getDecisionState(entry: CalendarEntry) {
+  if (!entry.prediction) {
+    return {
+      label: "Needs prediction",
+      tone: "primary" as DecisionTone,
+      action: "Evaluate",
+      href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
+    };
+  }
+  if (entry.prediction.status === "stale" || entry.prediction.status === "superseded") {
+    return {
+      label: entry.prediction.status === "stale" ? "Prediction stale" : "Prediction superseded",
+      tone: "warning" as DecisionTone,
+      action: "Re-evaluate",
+      href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
+    };
+  }
+  if (entry.publication?.observed_er != null) {
+    return {
+      label: "Outcome observed",
+      tone: "success" as DecisionTone,
+      action: "View evidence",
+      href: () => "/history",
+    };
+  }
+  if (entry.publication) {
+    return {
+      label: entry.publication.outcome_status === "pending_maturity" ? "Publication maturing" : "Awaiting outcome",
+      tone: "neutral" as DecisionTone,
+      action: "View evidence",
+      href: () => "/history",
+    };
+  }
+  if (entry.prediction.status === "provisional") {
+    return {
+      label: "Provisional · time optional",
+      tone: "neutral" as DecisionTone,
+      action: "Refine",
+      href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
+    };
+  }
+  return {
+    label: "Prediction current",
+    tone: "success" as DecisionTone,
+    action: "Review",
+    href: () => "/history",
+  };
+}
+
+function PlanStateBadge({ label, tone }: { label: string; tone: DecisionTone }) {
+  const tones: Record<DecisionTone, string> = {
+    primary: "border-primary/30 bg-primary/[0.07] text-primary",
+    warning: "border-warning/40 bg-warning/[0.09] text-warning-foreground",
+    success: "border-success/35 bg-success/[0.09] text-success-foreground",
+    neutral: "border-border bg-surface-2 text-muted-foreground",
+  };
+  return <span className={cn("inline-flex rounded-full border px-2 py-1 text-[11px] font-bold", tones[tone])}>{label}</span>;
+}
+
+function PlanEmptyState({ filtered, onAdd }: { filtered: boolean; onAdd: () => void }) {
+  return (
+    <div className="rounded-xl border border-dashed border-border p-8 text-center">
+      <span className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-surface-2 text-muted-foreground">
+        {filtered ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+      </span>
+      <h3 className="mt-3 text-sm font-bold text-foreground">{filtered ? "No matching decisions" : "Plan the first content idea"}</h3>
+      <p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+        {filtered ? "Choose another decision-state filter to see this month’s content." : "Capture the creative direction first, then evaluate it before publishing."}
+      </p>
+      {filtered ? null : (
+        <button type="button" onClick={onAdd} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg bg-foreground px-3 text-xs font-bold text-background hover:opacity-90">
+          <Plus className="h-3.5 w-3.5" /> Plan content
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Entry Modal — edits persist through /api/calendar
 // ---------------------------------------------------------------------------
@@ -1221,60 +1382,115 @@ function EntryModal({
   onDelete: () => void;
 }) {
   const [draft, setDraft] = useState<CalendarEntry>(initial);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
+    if (confirmDelete) cancelDeleteRef.current?.focus();
+  }, [confirmDelete]);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
       }
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary',
+        ));
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
   }, [onClose]);
 
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-background/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex justify-end bg-background/60 backdrop-blur-sm"
       onClick={onClose}
+      role="presentation"
     >
       <div
-        className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-border bg-surface shadow-md"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="plan-entry-title"
+        aria-describedby="plan-entry-description"
+        className="relative h-[100dvh] w-full max-w-xl overflow-y-auto border-l border-border bg-surface shadow-[var(--shadow-elevated)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between border-b border-border p-4">
+        <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-surface p-5 sm:p-6">
           <div>
-            <div className="text-xs font-bold uppercase tracking-wider text-primary">
-              {draft.id.startsWith("new:") ? "New Content Plan Entry" : "Edit Content Plan Entry"}
+            <div className="text-xs font-bold text-primary">
+              {draft.id.startsWith("new:") ? "New content decision" : getDecisionState(draft).label}
             </div>
-            <h3 className="mt-1 font-display text-sm font-bold">
-              {formatDayLabel(draft.date)} · {draft.account}
-            </h3>
+            <h2 id="plan-entry-title" className="mt-1 font-display text-xl font-semibold tracking-tight">
+              {draft.id.startsWith("new:") ? "Plan content" : "Edit planned content"}
+            </h2>
+            <p id="plan-entry-description" className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">Capture the creative and schedule context needed for a useful pre-publish decision.</p>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-surface-2 hover:text-foreground transition-colors"
-            aria-label="Close"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+            aria-label="Close content plan editor"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="grid gap-4 p-4 sm:grid-cols-2">
-          <ModalField label="Posting Date">
+        <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
+          <div className="sm:col-span-2">
+            <h3 className="text-sm font-bold text-foreground">Publishing plan</h3>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">Posting time is optional. Leaving it blank keeps the prediction provisional instead of inventing a precise hour.</p>
+          </div>
+          <ModalField label="Posting date">
             <input
               type="date"
+              required
               value={draft.date}
               onChange={(e) => setDraft({ ...draft, date: e.target.value })}
-              className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
+              className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
             />
           </ModalField>
 
-          <ModalField label="Posting Time">
-            <input type="time" value={draft.time || ""} onChange={(e) => setDraft({ ...draft, time: e.target.value || null })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary" />
+          <ModalField label="Posting time (optional)">
+            <input type="time" value={draft.time || ""} onChange={(e) => setDraft({ ...draft, time: e.target.value || null })} className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
           </ModalField>
 
-          <ModalField label="Brand">
+          {!draft.time && (
+            <p className="sm:col-span-2 inline-flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-xs font-semibold text-muted-foreground">
+              <Clock3 className="h-3.5 w-3.5" /> Time-specific influence will be omitted until a time is chosen.
+            </p>
+          )}
+
+          <div className="sm:col-span-2 mt-2 border-t border-border pt-5">
+            <h3 className="text-sm font-bold text-foreground">Creative direction</h3>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">The idea remains yours; these details give the prediction and recommendations useful context.</p>
+          </div>
+
+          <ModalField label="Brand workspace">
             <select
               value={draft.brand_id || ""}
               onChange={(e) => {
@@ -1289,54 +1505,60 @@ function EntryModal({
                   publication: brand?.id === draft.brand_id ? draft.publication : null,
                 });
               }}
-              className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
+              className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
             >
               <option value="">Unassigned</option>
               {brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
             </select>
           </ModalField>
 
-          <ModalField label="Content Type">
-            <select value={draft.format} onChange={(e) => setDraft({ ...draft, format: e.target.value as CalendarEntry["format"] })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary">
+          <ModalField label="Content format">
+            <select value={draft.format} onChange={(e) => setDraft({ ...draft, format: e.target.value as CalendarEntry["format"] })} className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15">
               <option value="Unspecified">Unspecified</option><option value="Reels">Reels</option><option value="Carousel">Carousel</option><option value="Single Image">Single Image</option>
             </select>
           </ModalField>
 
-          <ModalField label="Content Details">
+          <div className="sm:col-span-2"><ModalField label="Content idea or creative direction">
             <input
               type="text"
               value={draft.title}
               onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-              className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
-              placeholder="Optional label for this post"
-            />
-          </ModalField>
-
-          <ModalField label="Visual Reference">
-            <input type="text" value={draft.visualReference} onChange={(e) => setDraft({ ...draft, visualReference: e.target.value })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary" placeholder="URL or production reference" />
-          </ModalField>
-
-          <div className="sm:col-span-2"><ModalField label="Caption Text">
-            <textarea
-              value={draft.caption}
-              onChange={(e) => setDraft({ ...draft, caption: e.target.value })}
-              rows={4}
-              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs outline-none focus:border-primary"
+              className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+              placeholder="e.g. Customer transformation story with a direct hook"
             />
           </ModalField></div>
 
-          <ModalField label="Voice Over">
-            <select value={draft.voiceOver || ""} onChange={(e) => setDraft({ ...draft, voiceOver: (e.target.value || null) as CalendarEntry["voiceOver"] })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary">
+          <div className="sm:col-span-2"><ModalField label="Visual reference">
+            <input type="text" value={draft.visualReference} onChange={(e) => setDraft({ ...draft, visualReference: e.target.value })} className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" placeholder="Optional URL or production reference" />
+          </ModalField></div>
+
+          <div className="sm:col-span-2"><ModalField label="Caption draft">
+            <textarea
+              value={draft.caption}
+              onChange={(e) => setDraft({ ...draft, caption: e.target.value })}
+              rows={5}
+              className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm leading-6 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+              placeholder="Write or paste the caption you want to evaluate."
+            />
+          </ModalField></div>
+
+          <div className="sm:col-span-2 mt-2 border-t border-border pt-5">
+            <h3 className="text-sm font-bold text-foreground">Production details <span className="font-normal text-muted-foreground">(optional)</span></h3>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">These fields coordinate production. Marking “Posted” here is not verified Instagram publication evidence.</p>
+          </div>
+
+          <ModalField label="Voice over">
+            <select value={draft.voiceOver || ""} onChange={(e) => setDraft({ ...draft, voiceOver: (e.target.value || null) as CalendarEntry["voiceOver"] })} className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary">
               <option value="">Not specified</option><option value="Need">Need</option><option value="No Need">No Need</option><option value="Done">Done</option>
             </select>
           </ModalField>
 
-          <ModalField label="PIC">
-            <input type="text" value={draft.pic} onChange={(e) => setDraft({ ...draft, pic: e.target.value })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary" />
+          <ModalField label="Person in charge">
+            <input type="text" value={draft.pic} onChange={(e) => setDraft({ ...draft, pic: e.target.value })} className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary" />
           </ModalField>
 
-          <div className="sm:col-span-2"><ModalField label="Status">
-            <select value={draft.status || ""} onChange={(e) => setDraft({ ...draft, status: (e.target.value || null) as CalendarEntry["status"] })} className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary">
+          <div className="sm:col-span-2"><ModalField label="Production status">
+            <select value={draft.status || ""} onChange={(e) => setDraft({ ...draft, status: (e.target.value || null) as CalendarEntry["status"] })} className="min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-primary">
               <option value="">Not specified</option>
               {CALENDAR_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
             </select>
@@ -1344,8 +1566,11 @@ function EntryModal({
 
           {!draft.id.startsWith("new:") && (
             <div className="sm:col-span-2 rounded-xl border border-border bg-surface-2/40 p-4 text-xs">
-              <div className="font-bold text-foreground">Prediction &amp; publication evidence</div>
-              <p className="mt-1 leading-relaxed text-muted-foreground">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-bold text-foreground">Prediction &amp; publication evidence</div>
+                <PlanStateBadge label={getDecisionState(draft).label} tone={getDecisionState(draft).tone} />
+              </div>
+              <p className="mt-2 leading-5 text-muted-foreground">
                 {draft.prediction
                   ? `Linked prediction: ${draft.prediction.tier} · ${draft.prediction.status}.`
                   : "No prediction is linked yet."}
@@ -1355,36 +1580,51 @@ function EntryModal({
               </p>
               <Link
                 href={`/predict?plan_id=${encodeURIComponent(draft.id)}`}
-                className="mt-3 inline-flex min-h-9 items-center rounded-lg bg-primary px-3 font-bold text-primary-foreground hover:bg-primary/92"
+                className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-lg bg-foreground px-3 font-bold text-background hover:opacity-90"
               >
                 {draft.prediction ? "Re-evaluate in Predict" : "Evaluate in Predict"}
+                <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             </div>
           )}
 
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-border bg-surface-2/40 p-4">
-          {draft.id.startsWith("new:") ? <span /> : (
-            <button type="button" onClick={onDelete} className="text-xs font-semibold text-destructive hover:underline">Delete entry</button>
+        <div className="sticky bottom-0 border-t border-border bg-surface p-4 sm:px-6">
+          {confirmDelete ? (
+            <div role="alert" className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <p className="flex-1 text-sm leading-6 text-muted-foreground">
+                <strong className="text-foreground">Delete this planned content?</strong> Its immutable prediction history will remain available.
+              </p>
+              <div className="flex items-center gap-2">
+                <button ref={cancelDeleteRef} type="button" onClick={() => setConfirmDelete(false)} className="min-h-11 rounded-lg border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2">Keep plan</button>
+                <button type="button" onClick={onDelete} className="min-h-11 rounded-lg bg-destructive px-4 text-sm font-semibold text-destructive-foreground hover:bg-destructive/90">Delete plan</button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              {draft.id.startsWith("new:") ? <span /> : (
+                <button type="button" onClick={() => setConfirmDelete(true)} className="min-h-11 rounded-lg px-3 text-sm font-semibold text-destructive hover:bg-destructive/[0.06]">Delete plan</button>
+              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="min-h-11 rounded-lg border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSave(draft)}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-foreground px-4 text-sm font-semibold text-background hover:opacity-90"
+                >
+                  <Save className="h-4 w-4" />
+                  {draft.id.startsWith("new:") ? "Save plan" : "Save changes"}
+                </button>
+              </div>
+            </div>
           )}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-border bg-surface px-3.5 py-2 text-xs font-semibold hover:bg-surface-2 active:scale-95"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => onSave(draft)}
-              className="inline-flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95 active:scale-95"
-            >
-              <Save className="h-3.5 w-3.5" />
-              Save Changes
-            </button>
-          </div>
         </div>
       </div>
     </div>

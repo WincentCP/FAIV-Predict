@@ -27,11 +27,11 @@ export function DatePicker({ value, onChange, className, id, "aria-label": ariaL
           aria-label={ariaLabel}
           type="button"
           className={cn(
-            "group flex h-10 w-full items-center gap-2.5 rounded-lg border border-border bg-surface px-3 text-left text-xs outline-none transition-all hover:border-border-strong focus-visible:border-ring",
+            "group flex h-11 w-full items-center gap-2.5 rounded-[10px] border border-border-strong bg-surface px-3 text-left text-sm outline-none transition-[border-color,box-shadow] hover:border-foreground/30 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20",
             className
           )}
         >
-          <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+          <CalendarIcon className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
           <span className="font-semibold text-foreground/80 truncate">
             {format(value, "EEE, MMM d, yyyy")}
           </span>
@@ -40,7 +40,7 @@ export function DatePicker({ value, onChange, className, id, "aria-label": ariaL
       <PopoverContent
         align="start"
         sideOffset={6}
-        className="w-auto overflow-hidden rounded-2xl border border-border-strong p-0 shadow-md bg-surface z-50"
+        className="z-50 w-auto overflow-hidden rounded-2xl border border-border bg-surface p-0 shadow-[var(--shadow-elevated)]"
       >
         <Calendar
           mode="single"
@@ -79,7 +79,7 @@ export function TimePicker({ value, onChange, className, id, "aria-label": ariaL
           next.setHours(hour, 0, 0, 0);
           onChange(next);
         }}
-        className="h-10 w-full rounded-lg border border-border bg-surface px-3 pr-28 font-mono text-xs font-semibold text-foreground outline-none transition-colors hover:border-border-strong focus-visible:border-ring"
+        className="h-11 w-full rounded-[10px] border border-border-strong bg-surface px-3 pr-28 font-mono text-sm font-semibold text-foreground outline-none transition-[border-color,box-shadow] hover:border-foreground/30 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
       >
         {Array.from({ length: 24 }, (_, hour) => (
           <option key={hour} value={hour}>

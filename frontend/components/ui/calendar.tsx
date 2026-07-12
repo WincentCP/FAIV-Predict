@@ -25,7 +25,7 @@ function Calendar({
     <DayPicker
       showOutsideDays={showOutsideDays}
       className={cn(
-        "bg-background group/calendar p-4 [--cell-size:2.6rem] [[data-slot=card-content]_&]:bg-transparent [[data-slot=popover-content]_&]:bg-transparent",
+        "group/calendar bg-surface p-4 [--cell-size:2.75rem] [[data-slot=card-content]_&]:bg-transparent [[data-slot=popover-content]_&]:bg-transparent",
         String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
         String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,
         className,
@@ -76,7 +76,7 @@ function Calendar({
         table: "w-full border-collapse",
         weekdays: cn("flex gap-x-1.5", defaultClassNames.weekdays),
         weekday: cn(
-          "text-muted-foreground flex-1 select-none rounded-md text-[0.75rem] font-bold uppercase tracking-wider text-center w-[var(--cell-size)] h-6 flex items-center justify-center",
+          "text-muted-foreground flex-1 select-none rounded-md text-[0.72rem] font-semibold text-center w-[var(--cell-size)] h-6 flex items-center justify-center",
           defaultClassNames.weekday,
         ),
         week: cn("mt-3 flex w-full gap-x-1.5 justify-between", defaultClassNames.week),

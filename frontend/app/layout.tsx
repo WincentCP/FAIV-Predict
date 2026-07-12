@@ -1,21 +1,16 @@
 import type { Metadata } from "next";
-import { Manrope } from "next/font/google";
 import { MotionProvider } from "@/components/MotionProvider";
+import "@fontsource-variable/plus-jakarta-sans";
 import "./globals.css";
 
-const manrope = Manrope({
-  subsets: ["latin"],
-  variable: "--font-manrope",
-});
-
 export const metadata: Metadata = {
-  title: "FAIV Predict | Content performance tiers",
+  title: "FAIV Predict | Decide before you publish",
   description:
-    "Classify Instagram draft performance relative to each brand's verified history, inspect model evidence, and plan content.",
+    "Use verified Instagram history to evaluate drafts, understand likely performance, and improve content before publishing.",
   authors: [{ name: "FAIV" }],
   openGraph: {
-    title: "FAIV Predict | Content performance tiers",
-    description: "Classify Instagram draft performance relative to verified brand history.",
+    title: "FAIV Predict | Decide before you publish",
+    description: "Evaluate and improve Instagram content before publishing.",
     type: "website",
   },
   twitter: { card: "summary_large_image" },
@@ -33,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     } catch { document.documentElement.classList.add("light"); }
   })();`;
   return (
-    <html lang="en" className={manrope.variable} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: themeBootstrap }} /></head>
       <body>
         <MotionProvider>{children}</MotionProvider>

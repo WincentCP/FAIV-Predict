@@ -1,526 +1,674 @@
 "use client";
 
-import { fetchWithRetry } from "@/lib/fetch-retry";
-import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { SectionHeader } from "@/components/SectionHeader";
-import { TierBadge } from "@/components/TierBadge";
-import { type Brand } from "@/lib/types";
-import dynamic from "next/dynamic";
-
-const DashboardChart = dynamic(() => import("@/components/DashboardChart"), {
-  ssr: false,
-  loading: () => <div className="h-[260px] w-full motion-safe:animate-pulse bg-muted/40 rounded-xl" />,
-});
-
+import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowUpRight,
-  History,
-  AlertTriangle,
-  TrendingUp,
-  Activity,
-  Target,
-  BarChart3,
-  Users,
-  ShieldCheck,
-  Building2,
+  AlertCircle,
   ArrowRight,
+  BarChart3,
+  Building2,
+  CalendarDays,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  Instagram,
+  RefreshCw,
+  Sparkles,
 } from "lucide-react";
-import { motion, Variants } from "framer-motion";
+import { TierBadge } from "@/components/TierBadge";
+import { fetchWithRetry } from "@/lib/fetch-retry";
+import { type Brand, type Tier } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
+type DashboardSummary = {
+  totalPredictions: number;
+  staleCount: number;
+  provisionalCount: number;
+  observedCount: number;
+  recent: Array<{
+    id: string;
+    brand: string;
+    caption: string;
+    tier: Tier;
+    confidence: number | null;
+    when: string;
+  }>;
+};
 
-const KPI_DEFINITIONS = [
-  {
-    id: "predictions",
-    label: "Active Predictions",
-    value: "—",
-    sub: "Loading verified data",
-    colorClass: "text-success bg-success/10 border-success/20",
-    iconColor: "text-success",
-    glowColor: "hsl(var(--success) / 0.2)",
-    icon: Activity,
-  },
-  {
-    id: "connections",
-    label: "Instagram Connections",
-    value: "—",
-    sub: "Loading verified data",
-    colorClass: "text-chart-3 bg-chart-3/10 border-chart-3/20",
-    iconColor: "text-chart-3",
-    glowColor: "hsl(var(--chart-3) / 0.2)",
-    icon: Users,
-  },
-  {
-    id: "models",
-    label: "Available Models",
-    value: "—",
-    sub: "Loading verified data",
-    colorClass: "text-primary bg-primary/10 border-primary/20",
-    iconColor: "text-primary",
-    glowColor: "hsl(var(--primary) / 0.2)",
-    icon: ShieldCheck,
-  },
-  {
-    id: "attention",
-    label: "Predictions to Review",
-    value: "—",
-    sub: "Loading verified data",
-    colorClass: "text-warning bg-warning/10 border-warning/20",
-    iconColor: "text-warning",
-    glowColor: "hsl(var(--warning) / 0.2)",
-    icon: TrendingUp,
-  },
-];
+type PlanEntry = {
+  id: string;
+  posting_date: string;
+  posting_time: string | null;
+  content_type: string;
+  content_details: string | null;
+  caption: string | null;
+  brands?: { name?: string } | null;
+  prediction: {
+    id: string;
+    tier: Tier;
+    status: "current" | "provisional" | "stale" | "superseded";
+    time_known: boolean;
+  } | null;
+  publication: {
+    observed_er: number | null;
+    outcome_status: "observed" | "pending_maturity" | "awaiting_observation";
+  } | null;
+};
+
+type InstagramConnection = {
+  brand_id: string;
+  status: "connected" | "error" | "unreachable" | "unbound";
+  username?: string | null;
+};
+
+type DecisionTone = "primary" | "warning" | "success" | "neutral";
+
+const EMPTY_SUMMARY: DashboardSummary = {
+  totalPredictions: 0,
+  staleCount: 0,
+  provisionalCount: 0,
+  observedCount: 0,
+  recent: [],
+};
 
 export default function DashboardPage() {
-  const [brandsList, setBrandsList] = useState<Brand[]>([]);
-  const [isWorkspaceEmpty, setIsWorkspaceEmpty] = useState(false);
+  const [summary, setSummary] = useState<DashboardSummary>(EMPTY_SUMMARY);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [plans, setPlans] = useState<PlanEntry[]>([]);
+  const [connections, setConnections] = useState<InstagramConnection[]>([]);
+  const [connectionHealthAvailable, setConnectionHealthAvailable] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [dashboardLoaded, setDashboardLoaded] = useState(false);
-  const [accuracyTrend, setAccuracyTrend] = useState<{ label: string; accuracy: number; scope: string }[]>([]);
-  const [tierDistribution, setTierDistribution] = useState<Array<{
-    tier: "High" | "Average" | "Low";
-    count: number;
-    color: string;
-  }>>([]);
-
-  const personalCount = useMemo(() => {
-    return brandsList.filter((b) => b.active_model_scope === "personal").length;
-  }, [brandsList]);
-
-  const [kpis, setKpis] = useState(KPI_DEFINITIONS);
-  const [recentPredictions, setRecentPredictions] = useState<any[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    async function fetchDashboard() {
-      try {
-        const res = await fetchWithRetry("/api/dashboard");
-        if (!res.ok) {
-          setLoadError("Workspace metrics could not be loaded right now.");
-          return;
-        }
-        {
-          const data = await res.json();
-          setLoadError(null);
+    let cancelled = false;
 
-          setKpis((prev) =>
-            prev.map((kpi) => {
-              if (kpi.id === "predictions" && data.totalPredictions !== undefined) {
-                return { ...kpi, value: data.totalPredictions.toLocaleString(), sub: data.totalPredictions === 0 ? "No predictions recorded" : "Authenticated workspace only" };
-              }
-              if (kpi.id === "models" && data.totalModels !== undefined) {
-                return { ...kpi, value: data.totalModels.toString(), sub: data.totalModels === 0 ? "No models available" : "Latest account and cohort scopes" };
-              }
-              if (kpi.id === "attention") {
-                const review = Number(data.staleCount || 0) + Number(data.provisionalCount || 0);
-                return {
-                  ...kpi,
-                  value: review.toString(),
-                  sub: `${data.observedCount || 0} linked mature outcome${data.observedCount === 1 ? "" : "s"}`,
-                };
-              }
-              return kpi;
-            })
-          );
+    async function loadDecisionWorkspace() {
+      setLoading(true);
+      const errors: string[] = [];
 
-          if (data.highCount !== undefined) {
-            setTierDistribution([
-              { tier: "High" as const, count: data.highCount, color: "hsl(var(--primary))" },
-              { tier: "Average" as const, count: data.avgCount, color: "hsl(var(--warning))" },
-              { tier: "Low" as const, count: data.lowCount, color: "hsl(var(--foreground) / 0.35)" },
-            ]);
-          }
+      const [dashboardResult, brandsResult, planResult, connectionResult] = await Promise.allSettled([
+        fetchWithRetry("/api/dashboard", { cache: "no-store" }),
+        fetchWithRetry("/api/brands", { cache: "no-store" }),
+        fetchWithRetry("/api/calendar", { cache: "no-store" }),
+        fetchWithRetry("/api/instagram-health", { cache: "no-store" }, 1),
+      ]);
 
-          if (data.accuracyTrend && data.accuracyTrend.length > 0) {
-            setAccuracyTrend(data.accuracyTrend);
-          }
+      if (cancelled) return;
 
-          if (data.recent && data.recent.length > 0) {
-            const mappedRecent = data.recent.map((r: any) => ({
-              id: r.id,
-              account: r.brand || "Unknown Brand",
-              caption: r.caption,
-              tier: r.tier as any,
-              confidence: r.confidence ?? null,
-              when: new Date(r.when).toLocaleDateString()
-            }));
-            setRecentPredictions(mappedRecent);
-          }
-        }
-      } catch (err) {
-        console.warn("Could not fetch dashboard metrics aggregates:", err);
-        setLoadError("Workspace metrics could not be loaded right now.");
-      } finally {
-        setDashboardLoaded(true);
+      if (dashboardResult.status === "fulfilled" && dashboardResult.value.ok) {
+        const data = await dashboardResult.value.json();
+        setSummary({
+          totalPredictions: Number(data.totalPredictions || 0),
+          staleCount: Number(data.staleCount || 0),
+          provisionalCount: Number(data.provisionalCount || 0),
+          observedCount: Number(data.observedCount || 0),
+          recent: Array.isArray(data.recent)
+            ? data.recent.map((item: any) => ({
+                id: String(item.id),
+                brand: String(item.brand || "Unknown brand"),
+                caption: String(item.caption || "Untitled draft"),
+                tier: normalizeTier(item.tier),
+                confidence: typeof item.confidence === "number" ? item.confidence : null,
+                when: String(item.when || ""),
+              }))
+            : [],
+        });
+      } else {
+        errors.push("prediction activity");
       }
+
+      if (brandsResult.status === "fulfilled" && brandsResult.value.ok) {
+        const data = await brandsResult.value.json();
+        setBrands(Array.isArray(data) ? data : []);
+      } else {
+        errors.push("brand readiness");
+      }
+
+      if (planResult.status === "fulfilled" && planResult.value.ok) {
+        const data = await planResult.value.json();
+        setPlans(Array.isArray(data) ? data : []);
+      } else {
+        errors.push("content plan");
+      }
+
+      if (connectionResult.status === "fulfilled" && connectionResult.value.ok) {
+        const data = await connectionResult.value.json();
+        setConnections(Array.isArray(data?.connections) ? data.connections : []);
+        setConnectionHealthAvailable(true);
+      } else {
+        setConnectionHealthAvailable(false);
+        errors.push("Instagram connection status");
+      }
+
+      setLoadError(
+        errors.length > 0
+          ? `Some workspace data is temporarily unavailable: ${errors.join(", ")}.`
+          : null,
+      );
+      setLoading(false);
     }
 
-    async function fetchBrands() {
-      try {
-        const res = await fetchWithRetry("/api/brands");
-        if (res.ok) {
-          const data = await res.json();
-          setBrandsList(data || []);
-          setIsWorkspaceEmpty((data || []).length === 0);
-        } else {
-          setIsWorkspaceEmpty(false);
-          setLoadError((current) => current || "Brand workspaces could not be loaded right now.");
-        }
-      } catch (err) {
-        console.warn("Could not fetch brands on dashboard mount:", err);
-        setIsWorkspaceEmpty(false);
-        setLoadError((current) => current || "Brand workspaces could not be loaded right now.");
-      }
-    }
+    void loadDecisionWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
 
-    async function fetchConnections() {
-      try {
-        const res = await fetchWithRetry("/api/instagram-health", { cache: "no-store" }, 1);
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !Array.isArray(data?.connections)) return;
-        const connected = data.connections.filter((item: any) => item?.status === "connected").length;
-        setKpis((prev) => prev.map((kpi) => kpi.id === "connections"
-          ? { ...kpi, value: connected.toString(), sub: `${data.connections.length - connected} need setup or attention` }
-          : kpi));
-      } catch {
-        // The connection card remains unavailable without replacing it with a fabricated zero.
-      }
-    }
+  const today = useMemo(() => toLocalDateKey(new Date()), []);
+  const upcomingPlans = useMemo(
+    () =>
+      plans
+        .filter((entry) => entry.posting_date >= today)
+        .sort((a, b) => planSortKey(a).localeCompare(planSortKey(b)))
+        .slice(0, 5),
+    [plans, today],
+  );
 
-    fetchDashboard();
-    fetchBrands();
-    fetchConnections();
-  }, []);
+  const needsPrediction = useMemo(
+    () => plans.filter((entry) => !entry.prediction).length,
+    [plans],
+  );
+  const stalePlans = useMemo(
+    () => plans.filter((entry) => entry.prediction?.status === "stale").length,
+    [plans],
+  );
+  const awaitingOutcome = useMemo(
+    () => plans.filter((entry) => entry.publication && entry.publication.observed_er == null).length,
+    [plans],
+  );
+  const connectedCount = useMemo(
+    () => connections.filter((connection) => connection.status === "connected").length,
+    [connections],
+  );
+  const connectionIssues = connectionHealthAvailable ? Math.max(brands.length - connectedCount, 0) : 0;
 
-  const containerVariants: Variants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.04,
-      },
+  const decisionCards: Array<{
+    label: string;
+    value: number;
+    detail: string;
+    href: string;
+    action: string;
+    icon: typeof Sparkles;
+    tone: DecisionTone;
+  }> = [
+    {
+      label: "Ready to evaluate",
+      value: needsPrediction,
+      detail: needsPrediction === 1 ? "planned post has no prediction" : "planned posts have no prediction",
+      href: "/calendar",
+      action: "Review plan",
+      icon: Sparkles,
+      tone: "primary",
     },
-  };
-
-  const itemVariants: Variants = {
-    hidden: { opacity: 0, y: 8 },
-    show: { opacity: 1, y: 0, transition: { duration: 0.22, ease: [0.2, 0, 0, 1] } },
-  };
+    {
+      label: "Needs re-evaluation",
+      value: stalePlans,
+      detail: stalePlans === 1 ? "prediction changed after its inputs" : "predictions changed after their inputs",
+      href: "/calendar",
+      action: "Review changes",
+      icon: RefreshCw,
+      tone: "warning",
+    },
+    {
+      label: "Awaiting learning",
+      value: awaitingOutcome,
+      detail: awaitingOutcome === 1 ? "linked post is waiting for an outcome" : "linked posts are waiting for outcomes",
+      href: "/insights",
+      action: "Open insights",
+      icon: Clock3,
+      tone: "neutral",
+    },
+    {
+      label: "Observed outcomes",
+      value: summary.observedCount,
+      detail: "mature results available for comparison",
+      href: "/history",
+      action: "View evidence",
+      icon: CheckCircle2,
+      tone: "success",
+    },
+  ];
 
   return (
-    <motion.div 
-      variants={containerVariants}
-      initial="hidden"
-      animate="show"
-      className="px-5 py-6 md:px-10 md:py-8 space-y-6 max-w-7xl mx-auto"
-    >
-      {/* First-run guidance: shown only when the workspace has no brands yet */}
-      {isWorkspaceEmpty && (
-        <motion.section
-          variants={itemVariants}
-          className="flex flex-col gap-4 rounded-2xl border border-primary/25 bg-primary/[0.04] p-5 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-              <Building2 className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-foreground">Set up your workspace</div>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Create a planning workspace, then verify its Instagram connection and serving model before predicting.
-              </p>
-            </div>
-          </div>
-          <Link
-            href="/niches"
-            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground transition-all hover:bg-primary/90 active:scale-[0.98]"
-          >
-            Create workspace
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
-        </motion.section>
-      )}
-
-      {/* Compact workspace header */}
-      <motion.section
-        variants={itemVariants}
-        className="rounded-2xl border border-border-strong bg-surface p-6 shadow-[var(--shadow-soft)] md:p-8"
-      >
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+    <div className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 md:px-8 md:py-8 xl:px-10">
+      <header className="overflow-hidden rounded-[1.4rem] border border-border bg-surface shadow-[var(--shadow-soft)]">
+        <div className="grid gap-7 p-6 md:p-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+          <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 text-xs font-bold text-primary">
-              <Building2 className="h-4 w-4" />
-              Workspace overview
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10">
+                <Sparkles className="h-3.5 w-3.5" />
+              </span>
+              Content decision workspace
             </div>
-            <h1 className="mt-3 font-display text-2xl font-extrabold tracking-tight text-foreground md:text-3xl">
-              Make the next post a stronger decision.
+            <h1 className="mt-4 font-display text-3xl font-semibold tracking-[-0.035em] text-foreground md:text-4xl">
+              Decide what to publish next.
             </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-              Review verified workspace activity, then analyze a real draft with the latest available model.
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground md:text-[15px]">
+              Use verified brand history to evaluate a real content idea before publishing, then learn from the result without replacing creative judgment.
             </p>
           </div>
-          <Link
-            href="/predict"
-            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/92 active:scale-[0.98]"
-          >
-            <Activity className="h-4 w-4" />
-            Analyze a post
-            <ArrowUpRight className="h-4 w-4" />
-          </Link>
+          <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
+            <Link
+              href="/calendar"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border-strong bg-surface px-4 text-sm font-semibold text-foreground hover:bg-surface-2"
+            >
+              <CalendarDays className="h-4 w-4" />
+              Plan content
+            </Link>
+            <Link
+              href="/predict"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-5 text-sm font-bold text-background shadow-[var(--shadow-soft)] hover:opacity-90"
+            >
+              Evaluate a draft
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
-        <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border pt-4 text-xs font-semibold text-muted-foreground">
-          <span>{brandsList.length} registered brand{brandsList.length === 1 ? "" : "s"}</span>
-          <span>{personalCount} personal model{personalCount === 1 ? "" : "s"}</span>
-          {loadError && (
-            <span role="alert" className="inline-flex items-center gap-1.5 text-destructive">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              {loadError}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border bg-surface-2/45 px-6 py-3 text-xs font-semibold text-muted-foreground md:px-8">
+          <span>{brands.length} brand workspace{brands.length === 1 ? "" : "s"}</span>
+          <span>{connectionHealthAvailable ? `${connectedCount} verified Instagram connection${connectedCount === 1 ? "" : "s"}` : "Instagram connection status unavailable"}</span>
+          <span>{summary.totalPredictions} active prediction{summary.totalPredictions === 1 ? "" : "s"}</span>
+          {summary.provisionalCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 text-warning-foreground">
+              <Clock3 className="h-3.5 w-3.5" />
+              {summary.provisionalCount} provisional without a confirmed posting time
             </span>
           )}
         </div>
-      </motion.section>
+      </header>
 
-      {/* KPIs */}
-      <motion.section 
-        variants={itemVariants}
-        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
-      >
-        {kpis.map((kpi) => {
-          const KpiIcon = kpi.icon;
-          return (
-            <motion.div
-              key={kpi.id}
-              className="relative overflow-hidden rounded-2xl border border-border bg-surface p-5 shadow-[var(--shadow-soft)]"
-            >
-              <div className="relative">
-                <div className="flex items-start justify-between gap-2">
-                  <div className={`grid h-10 w-10 place-items-center rounded-xl ${kpi.colorClass} shadow-sm`}>
-                    <KpiIcon className="h-5 w-5" />
-                  </div>
-                </div>
-                <div className="mt-5 font-display text-3xl font-extrabold tabular-nums tracking-tight">
-                  {dashboardLoaded ? kpi.value : <span className="block h-8 w-20 motion-safe:animate-pulse rounded-lg bg-surface-2" aria-label="Loading metric" />}
-                </div>
-                <div className="mt-1.5 text-xs font-bold text-muted-foreground">{kpi.label}</div>
-                <div className="mt-1 text-xs font-medium text-muted-foreground">{kpi.sub}</div>
-              </div>
-            </motion.div>
-          );
-        })}
-      </motion.section>
-
-      {/* Charts row */}
-      <motion.section 
-        variants={itemVariants}
-        className="grid gap-5 lg:grid-cols-[1.6fr_1fr]"
-      >
-        <div className="rounded-2xl border border-border bg-surface/70 p-6 backdrop-blur-xl shadow-sm">
-          <SectionHeader
-            eyebrow="Research Evidence"
-            title={<span className="text-2xl font-bold">Model Evaluation Evidence</span>}
-            description={accuracyTrend.length > 0 ? `Latest ${accuracyTrend.length} owned model runs. Each bar is a separate scope, not a continuous trend.` : "No model training data available yet."}
-          />
-          <div className="mt-6 h-[260px]">
-            {accuracyTrend.length > 0 ? (
-              <DashboardChart data={accuracyTrend} />
-            ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/65 text-center">
-                <BarChart3 className="h-5 w-5 text-muted-foreground" />
-                <p className="text-xs font-semibold text-muted-foreground">No training sessions yet</p>
-                <p className="text-xs text-muted-foreground">Accuracy appears after the scheduled training pipeline registers an evaluated model.</p>
-              </div>
-            )}
-          </div>
+      {loadError && (
+        <div role="alert" className="flex flex-col gap-3 rounded-xl border border-warning/35 bg-warning/[0.06] p-4 sm:flex-row sm:items-center">
+          <AlertCircle className="h-4 w-4 shrink-0 text-warning-foreground" />
+          <p className="flex-1 text-sm font-medium text-foreground">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => setRefreshKey((value) => value + 1)}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-bold hover:bg-surface-2"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Try again
+          </button>
         </div>
+      )}
 
-        {/* Right Column: Recent Forecasts */}
-        <div className="rounded-2xl border border-border bg-surface/70 backdrop-blur-xl p-6 shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-border/60 pb-4 mb-4">
-              <div>
-                <div className="inline-flex items-center gap-1.5 text-xs font-bold text-primary">
-                  <History className="h-3.5 w-3.5" />
-                  Recent activity
-                </div>
-                <h3 className="mt-2 font-display text-base font-bold">
-                  Recent Predictions
-                </h3>
-              </div>
-              <Link href="/history" className="text-xs font-bold text-primary hover:text-primary-glow hover:underline">
-                View all →
-              </Link>
+      {brands.length === 0 && !loading && (
+        <section className="flex flex-col gap-4 rounded-2xl border border-primary/25 bg-primary/[0.045] p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+              <Building2 className="h-5 w-5" />
+            </span>
+            <div>
+              <h2 className="text-sm font-bold">Start with a brand workspace</h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Register the brand context, verify its Instagram connection, and confirm an available model before evaluating content.</p>
             </div>
-            <ul className="divide-y divide-border/60">
-              {recentPredictions.length === 0 ? (
-                <li className="py-10 text-center">
-                  <p className="text-sm font-semibold text-muted-foreground">No predictions yet</p>
-                  <p className="text-xs text-muted-foreground/60 mt-1">Make your first prediction to see it here.</p>
-                </li>
-              ) : (
-                recentPredictions.map((r) => (
-                  <li
-                    key={r.id}
-                    className="group flex flex-col justify-between py-3 transition-all duration-300"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-foreground truncate">{r.account}</span>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground/80 line-clamp-1 italic">
-                          &quot;{r.caption}&quot;
-                        </p>
-                        <div className="mt-1 text-xs font-medium text-muted-foreground/50">{r.when}</div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1.5">
-                        <TierBadge tier={r.tier} />
-                        {r.confidence != null && (
-                          <div className="flex items-center gap-1 text-xs font-bold">
-                            <span className="font-mono text-foreground">{r.confidence}/100</span>
-                            <span className="text-xs text-muted-foreground/60 font-medium">raw class score</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                ))
-              )}
-            </ul>
           </div>
-        </div>
-      </motion.section>
+          <Link href="/niches" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-xs font-bold text-background hover:opacity-90">
+            Set up a brand
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </section>
+      )}
 
-      {/* Hierarchy panel — AI status per brand */}
-      <motion.section 
-        variants={itemVariants}
-        className="rounded-2xl border border-border bg-surface/70 p-6 backdrop-blur-xl shadow-sm"
-      >
-        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <section aria-labelledby="attention-title">
+        <div className="mb-3 flex items-end justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklab,hsl(var(--primary))_30%,transparent)] bg-[color-mix(in_oklab,hsl(var(--primary))_8%,transparent)] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-primary">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Model Readiness
-            </div>
-            <h3 className="mt-3 font-display text-lg font-bold">
-              Per-Account AI Status
-            </h3>
-            <p className="mt-1.5 text-xs font-medium text-muted-foreground/80">
-              A personal model activates only after successful training on at least 200 verified posts. Until then, the brand uses its shared industry-cohort model.
-            </p>
+            <h2 id="attention-title" className="font-display text-xl font-semibold tracking-tight">What needs attention</h2>
+            <p className="mt-1 text-sm text-muted-foreground">A practical queue for moving planned content toward a verified learning outcome.</p>
           </div>
-          <Link href="/niches" className="shrink-0 text-xs font-bold text-primary hover:text-primary-glow hover:underline">
-            Manage brands →
+          <Link href="/calendar" className="hidden items-center gap-1 text-xs font-bold text-primary hover:underline sm:inline-flex">
+            Open Content Plan <ChevronRight className="h-3.5 w-3.5" />
           </Link>
         </div>
-        <ul className="grid gap-4 sm:grid-cols-2">
-          {brandsList.length === 0 ? (
-            <li className="col-span-2 text-center py-10 border border-dashed border-border rounded-2xl bg-surface-2/30 text-xs text-muted-foreground">
-              No brand workspaces registered. Click &quot;Manage brands&quot; above to add your first brand.
-            </li>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {decisionCards.map((card) => (
+            <DecisionCard key={card.label} {...card} loading={loading} />
+          ))}
+        </div>
+      </section>
+
+      <section className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+        <section aria-labelledby="upcoming-title" className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
+          <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4 md:px-6">
+            <div>
+              <h2 id="upcoming-title" className="font-display text-lg font-semibold">Upcoming content decisions</h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">The next planned posts, prioritized by schedule.</p>
+            </div>
+            <Link href="/calendar" className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-bold text-primary hover:bg-primary/[0.06]">
+              View plan <ChevronRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+          {loading ? (
+            <LoadingRows />
+          ) : upcomingPlans.length === 0 ? (
+            <EmptyPanel
+              icon={CalendarDays}
+              title="Nothing planned yet"
+              description="Add a content idea so its creative direction can be evaluated before publishing."
+              href="/calendar"
+              action="Plan the first post"
+            />
           ) : (
-            brandsList.slice(0, 6).map((b) => {
-              const stage = b.active_model_scope === "personal"
-                ? "Personal"
-                : b.active_model_scope === "cohort"
-                  ? "Cohort"
-                  : "No model";
-              const followers = typeof b.followers === "number" ? b.followers : null;
-              return (
-                <li
-                  key={b.id}
-                  className="rounded-2xl border border-border/88 bg-surface p-4 transition-colors duration-200 hover:border-primary/20 text-left"
-                >
+            <ul className="divide-y divide-border/70">
+              {upcomingPlans.map((entry) => {
+                const decision = getPlanDecision(entry);
+                return (
+                  <li key={entry.id} className="group px-5 py-4 transition-colors hover:bg-surface-2/45 md:px-6">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <div className="flex min-w-0 flex-1 items-start gap-3">
+                        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-border bg-surface-2 text-center">
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{formatMonth(entry.posting_date)}</span>
+                          <span className="text-sm font-extrabold leading-none">{formatDay(entry.posting_date)}</span>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="truncate text-sm font-bold text-foreground">{entry.content_details || entry.caption || "Untitled content idea"}</span>
+                            <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">{entry.content_type || "Unspecified"}</span>
+                          </div>
+                          <p className="mt-1 truncate text-xs text-muted-foreground">
+                            {entry.brands?.name || "Unassigned brand"} · {formatSchedule(entry.posting_date, entry.posting_time)}
+                          </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <DecisionBadge label={decision.label} tone={decision.tone} />
+                            {entry.prediction && <TierBadge tier={normalizeTier(entry.prediction.tier)} />}
+                            {entry.publication?.observed_er != null && (
+                              <span className="text-[11px] font-bold text-success-foreground">Observed ER {entry.publication.observed_er.toFixed(2)}%</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <Link
+                        href={decision.href(entry.id)}
+                        className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3 text-xs font-bold text-background hover:opacity-90"
+                      >
+                        {decision.action}
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <section aria-labelledby="recent-title" className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
+          <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+            <div>
+              <h2 id="recent-title" className="font-display text-lg font-semibold">Recent decisions</h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Latest classified drafts in this workspace.</p>
+            </div>
+            <Link href="/history" className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-bold text-primary hover:bg-primary/[0.06]">
+              History <ChevronRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+          {loading ? (
+            <LoadingRows count={3} />
+          ) : summary.recent.length === 0 ? (
+            <EmptyPanel
+              icon={BarChart3}
+              title="No predictions yet"
+              description="Evaluate a draft to create the first versioned decision record."
+              href="/predict"
+              action="Evaluate a draft"
+            />
+          ) : (
+            <ul className="divide-y divide-border/70 px-5">
+              {summary.recent.slice(0, 4).map((prediction) => (
+                <li key={prediction.id} className="py-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate font-display text-sm font-bold text-foreground">{b.name}</div>
-                      <div className="mt-1 text-xs font-semibold text-muted-foreground">{b.niche} cohort</div>
+                      <p className="text-xs font-bold text-foreground">{prediction.brand}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{prediction.caption}</p>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-extrabold uppercase tracking-wider ring-1 ring-inset ${
-                        stage === "Personal"
-                          ? "bg-[color-mix(in_oklab,hsl(var(--accent-lime))_18%,transparent)] text-[oklch(0.40_0.18_130)] dark:text-[oklch(0.85_0.20_130)] ring-[color-mix(in_oklab,hsl(var(--accent-lime))_45%,transparent)]"
-                          : stage === "Cohort"
-                            ? "bg-[color-mix(in_oklab,hsl(var(--primary))_12%,transparent)] text-primary ring-[color-mix(in_oklab,hsl(var(--primary))_35%,transparent)]"
-                            : "bg-warning/10 text-warning-foreground ring-warning/30"
-                      }`}
-                    >
-                      {stage}
-                    </span>
+                    <TierBadge tier={prediction.tier} />
                   </div>
-                  <div className="mt-4 flex items-center justify-between text-xs font-bold">
-                    <span className="text-muted-foreground/80">
-                      {followers === null ? "Followers not synced" : <><span className="font-mono tabular-nums text-foreground">{followers.toLocaleString()}</span> followers</>}
-                    </span>
-                    <span className="inline-flex items-center gap-1.5 font-mono text-muted-foreground/80">
-                      {stage === "Personal"
-                        ? "Personal model active"
-                        : stage === "Cohort"
-                          ? "Cohort model available"
-                          : "Train a cohort model"}
-                    </span>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold text-muted-foreground">
+                    <span>{formatDateTime(prediction.when)}</span>
+                    {prediction.confidence != null && <span>{prediction.confidence}/100 raw class score</span>}
                   </div>
                 </li>
-              );
-            })
+              ))}
+            </ul>
           )}
-        </ul>
-      </motion.section>
+        </section>
+      </section>
 
-      {/* Tier distribution */}
-      <motion.section 
-        variants={itemVariants}
-        className="block"
-      >
-
-        {/* Tier Distribution Chart */}
-        <div className="rounded-2xl border border-border bg-surface/70 p-6 backdrop-blur-xl shadow-sm flex flex-col justify-between">
+      <section aria-labelledby="readiness-title" className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
+        <div className="flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between md:px-6">
           <div>
-            <SectionHeader
-              eyebrow="Authenticated history"
-              title={<span className="text-2xl font-bold">Current Prediction Tier Mix</span>}
-              description="Distribution of current prediction results. This describes analyzed drafts, not verified business success."
-            />
+            <h2 id="readiness-title" className="font-display text-lg font-semibold">Brand readiness</h2>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">Connection and serving-model status for each content context.</p>
           </div>
-          <div className="mt-4 space-y-5">
-            {!dashboardLoaded ? (
-              [1, 2, 3].map((item) => <div key={item} className="h-12 motion-safe:animate-pulse rounded-xl bg-surface-2" />)
-            ) : tierDistribution.reduce((sum, item) => sum + item.count, 0) === 0 ? (
-              <div className="rounded-xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">
-                No prediction results yet.
-              </div>
-            ) : tierDistribution.map((d) => {
-              const max = Math.max(...tierDistribution.map((x) => x.count), 1);
-              const pct = d.count > 0 ? (d.count / max) * 100 : 0;
-              return (
-                <div key={d.tier} className="space-y-2">
-                  <div className="flex items-center justify-between text-xs font-bold">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ background: d.color, boxShadow: `0 0 10px ${d.color}` }}
-                      />
-                      <span className="uppercase tracking-wider">{d.tier}</span>
-                    </div>
-                    <span className="font-mono text-muted-foreground">{d.count}</span>
-                  </div>
-                  <div className="h-3 overflow-hidden rounded-full bg-surface-3/60 border border-border/20 shadow-inner">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${pct}%` }}
-                      transition={{ duration: 1.2, ease: "easeOut" }}
-                      className="h-full rounded-full"
-                      style={{
-                        background: `linear-gradient(90deg, ${d.color}, color-mix(in oklab, ${d.color} 75%, transparent))`,
-                        boxShadow: `0 0 12px color-mix(in oklab, ${d.color} 25%, transparent)`,
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+          <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-muted-foreground">
+            {connectionIssues > 0 && <span className="text-warning-foreground">{connectionIssues} connection{connectionIssues === 1 ? "" : "s"} need attention</span>}
+            <Link href="/niches" className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 font-bold text-primary hover:bg-primary/[0.06]">
+              Manage brands <ChevronRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
         </div>
-      </motion.section>
-    </motion.div>
+        {loading ? (
+          <LoadingRows count={2} />
+        ) : brands.length === 0 ? (
+          <div className="p-6 text-sm text-muted-foreground">Create a brand workspace to see readiness here.</div>
+        ) : (
+          <ul className="grid divide-y divide-border/70 sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-3">
+            {brands.slice(0, 6).map((brand) => {
+              const connection = connections.find((item) => item.brand_id === brand.id);
+              const connected = connection?.status === "connected";
+              const modelLabel = brand.active_model_scope === "personal"
+                ? "Personal model"
+                : brand.active_model_scope === "cohort"
+                  ? "Cohort model"
+                  : "No serving model";
+              return (
+                <li key={brand.id} className="flex items-center gap-3 border-border/70 p-5 sm:border-r sm:[&:nth-child(2n)]:border-r-0 lg:[&:nth-child(2n)]:border-r lg:[&:nth-child(3n)]:border-r-0">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted-foreground">
+                    <Instagram className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-foreground">{brand.name}</p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{brand.niche} · {modelLabel}</p>
+                  </div>
+                  <span className={cn(
+                    "inline-flex shrink-0 items-center gap-1.5 text-[11px] font-bold",
+                    !connectionHealthAvailable ? "text-muted-foreground" : connected ? "text-success-foreground" : "text-warning-foreground",
+                  )}>
+                    <span className={cn("h-1.5 w-1.5 rounded-full", !connectionHealthAvailable ? "bg-muted-foreground" : connected ? "bg-success" : "bg-warning")} />
+                    {!connectionHealthAvailable ? "Unavailable" : connected ? "Connected" : "Check setup"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    </div>
   );
+}
+
+function DecisionCard({
+  label,
+  value,
+  detail,
+  href,
+  action,
+  icon: Icon,
+  tone,
+  loading,
+}: {
+  label: string;
+  value: number;
+  detail: string;
+  href: string;
+  action: string;
+  icon: typeof Sparkles;
+  tone: DecisionTone;
+  loading: boolean;
+}) {
+  const tones: Record<DecisionTone, string> = {
+    primary: "bg-primary/10 text-primary",
+    warning: "bg-warning/15 text-warning-foreground",
+    success: "bg-success/15 text-success-foreground",
+    neutral: "bg-surface-2 text-muted-foreground",
+  };
+
+  return (
+    <Link href={href} className="group rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-soft)] hover:-translate-y-px hover:border-primary/20 hover:shadow-[var(--shadow-elevated)]">
+      <div className="flex items-start justify-between gap-3">
+        <span className={cn("grid h-9 w-9 place-items-center rounded-xl", tones[tone])}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+      </div>
+      {loading ? (
+        <div className="mt-4 h-8 w-14 motion-safe:animate-pulse rounded-lg bg-surface-2" aria-label={`Loading ${label}`} />
+      ) : (
+        <div className="mt-4 text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
+      )}
+      <h3 className="mt-1 text-sm font-bold text-foreground">{label}</h3>
+      <p className="mt-1 min-h-8 text-xs leading-4 text-muted-foreground">{detail}</p>
+      <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-primary">{action}</span>
+    </Link>
+  );
+}
+
+function DecisionBadge({ label, tone }: { label: string; tone: DecisionTone }) {
+  const toneClass: Record<DecisionTone, string> = {
+    primary: "border-primary/25 bg-primary/[0.07] text-primary",
+    warning: "border-warning/40 bg-warning/[0.08] text-warning-foreground",
+    success: "border-success/35 bg-success/[0.08] text-success-foreground",
+    neutral: "border-border bg-surface-2 text-muted-foreground",
+  };
+  return <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-bold", toneClass[tone])}>{label}</span>;
+}
+
+function LoadingRows({ count = 4 }: { count?: number }) {
+  return (
+    <div className="divide-y divide-border/70" aria-label="Loading workspace decisions">
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 px-5 py-4 md:px-6">
+          <div className="h-11 w-11 motion-safe:animate-pulse rounded-xl bg-surface-2" />
+          <div className="flex-1 space-y-2">
+            <div className="h-3 w-1/2 motion-safe:animate-pulse rounded bg-surface-2" />
+            <div className="h-2.5 w-1/3 motion-safe:animate-pulse rounded bg-surface-2" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EmptyPanel({
+  icon: Icon,
+  title,
+  description,
+  href,
+  action,
+}: {
+  icon: typeof CalendarDays;
+  title: string;
+  description: string;
+  href: string;
+  action: string;
+}) {
+  return (
+    <div className="flex flex-col items-center px-6 py-10 text-center">
+      <span className="grid h-11 w-11 place-items-center rounded-xl bg-surface-2 text-muted-foreground"><Icon className="h-5 w-5" /></span>
+      <h3 className="mt-3 text-sm font-bold">{title}</h3>
+      <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">{description}</p>
+      <Link href={href} className="mt-4 inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-bold hover:bg-surface-2">
+        {action} <ArrowRight className="h-3.5 w-3.5" />
+      </Link>
+    </div>
+  );
+}
+
+function getPlanDecision(entry: PlanEntry) {
+  if (!entry.prediction) {
+    return {
+      label: "Needs prediction",
+      action: "Evaluate",
+      tone: "primary" as const,
+      href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
+    };
+  }
+  if (entry.prediction.status === "stale" || entry.prediction.status === "superseded") {
+    return {
+      label: entry.prediction.status === "stale" ? "Prediction stale" : "Prediction superseded",
+      action: "Re-evaluate",
+      tone: "warning" as const,
+      href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
+    };
+  }
+  if (entry.publication?.observed_er != null) {
+    return {
+      label: "Outcome observed",
+      action: "View evidence",
+      tone: "success" as const,
+      href: () => "/history",
+    };
+  }
+  if (entry.publication) {
+    return {
+      label: entry.publication.outcome_status === "pending_maturity" ? "Publication maturing" : "Awaiting outcome",
+      action: "View evidence",
+      tone: "neutral" as const,
+      href: () => "/history",
+    };
+  }
+  if (entry.prediction.status === "provisional") {
+    return {
+      label: "Provisional prediction",
+      action: "Refine",
+      tone: "neutral" as const,
+      href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
+    };
+  }
+  return {
+    label: "Prediction current",
+    action: "View prediction",
+    tone: "success" as const,
+    href: () => "/history",
+  };
+}
+
+function normalizeTier(value: unknown): Tier {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "high") return "High";
+  if (normalized === "low") return "Low";
+  return "Average";
+}
+
+function planSortKey(entry: PlanEntry) {
+  return `${entry.posting_date}T${entry.posting_time || "23:59"}`;
+}
+
+function toLocalDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function formatMonth(value: string) {
+  const [, month] = value.split("-").map(Number);
+  return new Intl.DateTimeFormat("en", { month: "short" }).format(new Date(2020, month - 1, 1));
+}
+
+function formatDay(value: string) {
+  return String(Number(value.split("-")[2] || 0));
+}
+
+function formatSchedule(dateValue: string, timeValue: string | null) {
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const formatted = new Intl.DateTimeFormat("en", { weekday: "short", day: "numeric", month: "short" }).format(date);
+  return timeValue ? `${formatted} at ${String(timeValue).slice(0, 5)}` : `${formatted} · time optional`;
+}
+
+function formatDateTime(value: string) {
+  if (!value) return "Date unavailable";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date unavailable";
+  return new Intl.DateTimeFormat("en", { day: "numeric", month: "short", year: "numeric" }).format(date);
 }

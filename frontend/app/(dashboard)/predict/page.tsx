@@ -2,8 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { format as formatDate } from "date-fns";
-import { AnimatePresence, motion } from "framer-motion";
-import { Loader2 } from "lucide-react";
+import { AnimatePresence } from "framer-motion";
 import { fetchWithRetry } from "@/lib/fetch-retry";
 import { analyzeCaption, CAPTION_MAX } from "@/components/CaptionIntel";
 import { type WhyReason } from "@/components/WhyThisScore";
@@ -112,6 +111,14 @@ export default function PredictPage() {
     );
   }, [predictionSnapshot, caption, contentFormat, scheduledAt, hasPostTime, accountId]);
 
+  // Creative direction is deliberately outside the model contract. Changing
+  // it does not invalidate the numerical prediction, but the result should be
+  // transparent that its unmeasured planning context has changed.
+  const isCreativeBriefChanged = useMemo(
+    () => Boolean(predictionSnapshot && predictionSnapshot.visualConcept !== visualConcept),
+    [predictionSnapshot, visualConcept]
+  );
+
   const stats = useMemo(() => analyzeCaption(caption), [caption]);
   const tooLong = stats.charCount > CAPTION_MAX;
 
@@ -181,7 +188,7 @@ export default function PredictPage() {
     setOptimizationsApplied(false);
     setPlanSaveState("idle");
     setPlanSaveMessage(null);
-  }, [caption, contentFormat, scheduledAt, hasPostTime, accountId]);
+  }, [caption, contentFormat, scheduledAt, hasPostTime, accountId, visualConcept]);
 
   const persistContentPlan = async (predictionId: string): Promise<boolean> => {
     if (!account) return false;
@@ -343,24 +350,6 @@ export default function PredictPage() {
       setScheduledAt(d);
       setHasPostTime(true);
     }
-    let nextCaption = caption;
-    if (appliedRecs.has_cta && !stats.hasCTA) {
-      nextCaption += "\n\nShare this with someone who needs it!";
-    }
-    if (appliedRecs.hashtag_count && stats.hashtags.length < 3) {
-      nextCaption += "\n#explore #community #tips";
-    } else if (appliedRecs.hashtag_count && stats.hashtags.length > 8) {
-      let hashtagIndex = 0;
-      nextCaption = nextCaption
-        .replace(/#\w+/g, (tag) => {
-          hashtagIndex += 1;
-          return hashtagIndex <= 5 ? tag : "";
-        })
-        .replace(/[ \t]{2,}/g, " ")
-        .replace(/[ \t]+\n/g, "\n")
-        .trimEnd();
-    }
-    setCaption(nextCaption);
     setOptimizationsApplied(true);
     setView("compose");
   };
@@ -468,46 +457,23 @@ export default function PredictPage() {
   }, [featureImportances, predictionSnapshot, caption, scheduledAt, hasPostTime]);
 
   return (
-    <div className="relative px-4 py-6 md:px-8 md:py-8 max-w-[1200px] mx-auto min-h-screen">
+    <div className="relative mx-auto min-h-screen max-w-[1480px] px-4 py-6 md:px-8 md:py-8">
       {/* Header + view switch */}
-      <div className="flex flex-col items-center justify-between gap-4 border-b border-border/60 pb-6 mb-8 md:flex-row md:items-end">
+      <div className="mb-8 flex flex-col justify-between gap-5 border-b border-border/60 pb-6 md:flex-row md:items-end">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground md:text-3xl">
-            Analyze Post Performance
+          <p className="mb-2 text-xs font-semibold text-primary">Predict workspace</p>
+          <h1 className="font-display text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
+            Make the next post a better decision
           </h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Draft, score, and optimize a post before publishing.
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground md:text-base">
+            Use verified brand history to plan a draft, predict its performance tier, and test supported improvements before publishing.
           </p>
         </div>
         <ViewSwitch view={view} onChange={setView} insightsEnabled={prediction !== null} />
       </div>
 
       <AnimatePresence mode="wait">
-        {submitting ? (
-          <motion.div
-            key="loading"
-            initial={{ opacity: 0, scale: 0.97 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.97 }}
-            transition={{ duration: 0.2 }}
-            className="flex flex-col items-center gap-4 py-14 px-8 border border-border bg-surface/80 backdrop-blur-xl rounded-3xl max-w-md mx-auto shadow-[var(--shadow-elevated)] text-center"
-          >
-            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-primary/10 text-primary">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </span>
-            <div>
-              <h3 className="text-base font-bold font-display text-foreground">Running classification…</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Scoring your draft and measuring what-if improvements with the{" "}
-                {account?.active_model_scope === "personal"
-                  ? "personal"
-                  : account?.active_model_scope === "cohort"
-                    ? "cohort"
-                    : "available"} model.
-              </p>
-            </div>
-          </motion.div>
-        ) : view === "compose" ? (
+        {view === "compose" ? (
           <ComposeView
             brandsList={brandsList}
             brandsError={brandsError}
@@ -539,6 +505,7 @@ export default function PredictPage() {
             <InsightsView
               prediction={prediction}
               isPredictionStale={isPredictionStale}
+              isCreativeBriefChanged={isCreativeBriefChanged}
               brandName={predictionSnapshot?.brandName ?? undefined}
               scheduledAt={predictionScheduledAt}
               hasPostTime={predictionSnapshot?.postHour != null}

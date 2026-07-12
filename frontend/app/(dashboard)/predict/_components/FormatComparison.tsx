@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarRange } from "lucide-react";
+import { LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type ContentFormat } from "@/lib/types";
 import { Panel } from "./Panel";
@@ -30,11 +30,11 @@ export function FormatComparison({
 
   return (
     <Panel
-      title="Format Comparison"
+      title="Compare formats"
       subtitle="A one-feature model sensitivity check. These raw class scores are not calibrated probabilities or guaranteed performance changes."
     >
       <div className="mb-4 flex items-start gap-2 rounded-xl border border-border/60 bg-surface-2/40 p-3 text-xs text-muted-foreground">
-        <CalendarRange className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+        <LayoutGrid className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
         <span>Display-only comparison. Changing format can affect production scope, approvals, and budget.</span>
       </div>
       <div className="grid gap-3 sm:grid-cols-3">

@@ -57,7 +57,7 @@ const META: Record<MaturityState, {
     description: "Predictions continue using the available niche model until a separately trained personal model becomes active. The models are selected, not blended.",
   },
   personal: {
-    label: "Personal Model Active",
+    label: "Personal model active",
     short: "Personalized",
     Icon: CheckCircle2,
     tone: "text-[oklch(0.40_0.18_130)] dark:text-[oklch(0.85_0.20_130)]",
@@ -112,7 +112,7 @@ export function ModelMaturity({
   }
 
   return (
-    <div className={cn("rounded-xl border border-border bg-surface p-4", className)}>
+    <div className={cn("rounded-2xl border border-border bg-surface p-4", className)}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <span className={cn("grid h-8 w-8 place-items-center rounded-lg ring-1 ring-inset", m.bg, m.ring, m.tone)}>
@@ -125,7 +125,7 @@ export function ModelMaturity({
                 <span className={cn("h-1.5 w-1.5 rounded-full", m.dot)} />
               </span>
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className="mt-0.5 text-xs text-muted-foreground">
               <span className="font-mono tabular-nums text-foreground">{samples}</span>
               <span>/{target} eligible posts</span>
               <span className="mx-1.5 text-muted-foreground/50">·</span>
@@ -139,28 +139,24 @@ export function ModelMaturity({
         />
       </div>
 
-      <div className="mt-3 flex h-1.5 gap-0.5 overflow-hidden rounded-full bg-surface-3" aria-hidden>
-        {Array.from({ length: 20 }).map((_, i) => {
-          const fill = pct / 5;
-          const filled = i < Math.floor(fill);
-          const partial = i === Math.floor(fill) ? fill - Math.floor(fill) : 0;
-          const colorClass = state === "personal" ? "bg-accent-lime" : state === "learning" ? "bg-primary" : "bg-warning";
-
-          return (
-            <div key={i} className="relative flex-1 overflow-hidden">
-              <motion.div
-                initial={{ scaleX: 0 }}
-                animate={{ scaleX: filled ? 1 : partial }}
-                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1], delay: i * 0.012 }}
-                style={{ transformOrigin: "left" }}
-                className={cn("h-full w-full", colorClass)}
-              />
-            </div>
-          );
-        })}
+      <div
+        className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-3"
+        role="progressbar"
+        aria-label="Eligible history toward personal model threshold"
+        aria-valuemin={0}
+        aria-valuemax={target}
+        aria-valuenow={Math.min(samples, target)}
+      >
+        <motion.div
+          initial={{ scaleX: 0 }}
+          animate={{ scaleX: pct / 100 }}
+          transition={{ duration: 0.28, ease: [0.2, 0, 0, 1] }}
+          style={{ transformOrigin: "left" }}
+          className={cn("h-full w-full", state === "personal" ? "bg-success" : state === "learning" ? "bg-primary" : "bg-warning")}
+        />
       </div>
 
-      <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
+      <p className="mt-2.5 text-sm leading-6 text-muted-foreground">{description}</p>
       <p className="mt-1 text-xs text-muted-foreground/80">
         Training-eligible post count is a maturity indicator; model activation also requires successful training and evaluation.
       </p>

@@ -13,9 +13,12 @@ import { type Tier, type Brand } from "@/lib/types";
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   BarChart3,
   Bookmark,
   CalendarDays,
+  CheckCircle2,
+  Clock3,
   Database,
   ExternalLink,
   Film,
@@ -30,6 +33,8 @@ import {
   TrendingUp,
   Users,
   Eye,
+  Link2,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -145,6 +150,7 @@ export default function InsightsPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [postsError, setPostsError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [requestedPredictionId, setRequestedPredictionId] = useState<string | null>(null);
   const postsRequest = useRef<AbortController | null>(null);
   const detailRequest = useRef<AbortController | null>(null);
 
@@ -161,8 +167,11 @@ export default function InsightsPage() {
       setBrands(loadedBrands);
       setBrandId((current) => {
         if (current && loadedBrands.some((brand) => brand.id === current)) return current;
+        const requestedBrand = new URLSearchParams(window.location.search).get("brand_id");
+        if (requestedBrand && loadedBrands.some((brand) => brand.id === requestedBrand)) return requestedBrand;
         return loadedBrands[0]?.id ?? null;
       });
+      setRequestedPredictionId(new URLSearchParams(window.location.search).get("prediction_id"));
     } catch (error: unknown) {
       setBrandsError(errorMessage(error, "Brand accounts could not be loaded."));
     } finally {
@@ -198,7 +207,8 @@ export default function InsightsPage() {
       setPosts(data.posts);
       setFollowers(typeof data.followers === "number" ? data.followers : null);
       setPostProvenance(data.provenance ?? null);
-      setSelected(data.posts[0] ?? null);
+      const requestedMedia = new URLSearchParams(window.location.search).get("media_id");
+      setSelected(data.posts.find((post: IgPost) => post.id === requestedMedia) ?? data.posts[0] ?? null);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
       setPostsError(errorMessage(error, "Published post data is unavailable."));
@@ -251,16 +261,17 @@ export default function InsightsPage() {
 
   const summary = useMemo(() => {
     if (!posts?.length) return null;
-    const ers = posts
+    const matureErs = posts
+      .filter((post) => post.comparison_eligible)
       .map((post) => post.er)
       .filter((value): value is number => typeof value === "number")
       .sort((a, b) => a - b);
     return {
       count: posts.length,
-      syncedCount: ers.length,
-      medianEr: median(ers),
-      avgLikes: averageKnown(posts.map((post) => post.likes)),
-      avgComments: averageKnown(posts.map((post) => post.comments)),
+      syncedCount: posts.filter((post) => post.er !== null).length,
+      matureCount: matureErs.length,
+      medianEr: median(matureErs),
+      modeledCount: posts.filter((post) => mediaBadge(post).modeled).length,
     };
   }, [posts]);
 
@@ -278,11 +289,11 @@ export default function InsightsPage() {
   ) : undefined;
 
   return (
-    <div className="mx-auto min-h-dvh max-w-[1500px] space-y-6 px-4 py-6 md:px-8 md:py-8">
+    <div className="mx-auto min-h-dvh max-w-[1500px] space-y-7 px-4 py-6 md:px-8 md:py-8">
       <SectionHeader
-        eyebrow="Insights"
-        title="Published Content Analytics"
-        description="Inspect verified Instagram performance, compare synced outcomes with brand history, and trace predictions without fabricated metrics."
+        eyebrow="Verified learning"
+        title="Published Results"
+        description="Connect planned decisions to the exact Instagram publication, then learn from mature outcomes without replacing creative judgment."
         actions={brandSelector}
       />
 
@@ -304,11 +315,23 @@ export default function InsightsPage() {
       {!brandsLoading && !brandsError && brands.length > 0 && (
         <>
           {summary && (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Loaded post summary">
-              <SummaryMetric label="Latest posts loaded" value={summary.count.toLocaleString()} helper={`${summary.syncedCount} with verified ER`} />
-              <SummaryMetric label="Loaded-post median synced ER" value={formatPercent(summary.medianEr)} helper="Descriptive only · mixed post ages" />
-              <SummaryMetric label="Live average likes" value={formatRounded(summary.avgLikes)} helper="Instagram Graph API" />
-              <SummaryMetric label="Live average comments" value={formatRounded(summary.avgComments)} helper="Instagram Graph API" />
+            <div className="overflow-hidden rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]" aria-label="Published result summary">
+              <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
+                <SummaryMetric label="Published posts" value={summary.count.toLocaleString()} helper="Latest accessible Instagram media" />
+                <SummaryMetric label="Verified ER snapshots" value={summary.syncedCount.toLocaleString()} helper="Preserved follower denominator" />
+                <SummaryMetric label="Mature outcomes" value={summary.matureCount.toLocaleString()} helper="Eligible at the seven-day horizon" />
+                <SummaryMetric label="Mature median ER" value={formatPercent(summary.medianEr)} helper={`${summary.modeledCount} posts use supported formats`} />
+              </div>
+            </div>
+          )}
+
+          {requestedPredictionId && (
+            <div role="status" className="flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/[0.04] p-4 text-sm sm:flex-row sm:items-center">
+              <Link2 className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+              <p className="flex-1 leading-relaxed text-muted-foreground">
+                Choose the exact Instagram post represented by prediction <span className="font-mono text-xs text-foreground">{requestedPredictionId.slice(0, 8)}…</span>. Caption equality can identify a candidate, but only your confirmation creates the immutable media-ID link.
+              </p>
+              <button type="button" onClick={() => setRequestedPredictionId(null)} className="min-h-10 rounded-lg px-3 font-semibold text-foreground hover:bg-surface-2">Dismiss</button>
             </div>
           )}
 
@@ -340,11 +363,11 @@ export default function InsightsPage() {
           )}
 
           {posts && posts.length > 0 && (
-            <div className="grid gap-5 lg:grid-cols-[340px_minmax(0,1fr)]">
-              <aside aria-label="Published posts" className="overflow-hidden rounded-2xl border border-border bg-surface">
-                <div className="border-b border-border px-4 py-3">
-                  <h2 className="text-sm font-semibold">Published posts</h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Choose a post to inspect verified metrics.</p>
+            <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
+              <aside aria-label="Published posts" className="overflow-hidden rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]">
+                <div className="border-b border-border px-5 py-4">
+                  <h2 className="font-semibold">Choose a publication</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">Review one verified post at a time.</p>
                 </div>
                 <div className="grid auto-cols-[minmax(260px,82vw)] grid-flow-col gap-2 overflow-x-auto p-3 lg:max-h-[720px] lg:auto-cols-auto lg:grid-flow-row lg:overflow-y-auto">
                   {posts.map((post) => (
@@ -389,7 +412,7 @@ function PostListItem({ post, active, onSelect }: { post: IgPost; active: boolea
       className={cn(
         "flex w-full gap-3 rounded-xl border p-3 text-left outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary/40 active:translate-y-px",
         active
-          ? "border-primary bg-primary/[0.06]"
+          ? "border-foreground bg-foreground/[0.04] shadow-sm"
           : "border-transparent hover:border-border hover:bg-surface-2/60"
       )}
     >
@@ -399,21 +422,21 @@ function PostListItem({ post, active, onSelect }: { post: IgPost; active: boolea
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
             <media.icon aria-hidden="true" className="h-3.5 w-3.5" />{media.label}
           </span>
-          {post.tier ? (
-            <TierBadge tier={post.tier} className="origin-right scale-95" />
-          ) : !post.comparison_eligible && post.er !== null ? (
+          {post.comparison_eligible && post.er !== null ? (
+            <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">Mature</span>
+          ) : !post.comparison_eligible ? (
             <span
               title={post.comparison_unavailable_reason || undefined}
               className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-muted-foreground"
             >
-              Not comparable
+              {post.comparison_unavailable_code === "immature" ? "Maturing" : "Not comparable"}
             </span>
           ) : null}
         </div>
         <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-foreground">{post.caption || "Post without caption"}</p>
         <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
           <time dateTime={post.timestamp}>{dateLabel}</time>
-          <span className="font-mono">ER {formatPercent(post.er)}</span>
+          <span className="font-mono">{post.er === null ? "ER pending" : `ER ${formatPercent(post.er)}`}</span>
         </div>
       </div>
     </button>
@@ -437,9 +460,11 @@ function PostAnalysis({
 }) {
   const [linkingPublication, setLinkingPublication] = useState(false);
   const [publicationLinkError, setPublicationLinkError] = useState<string | null>(null);
+  const [showLinkDialog, setShowLinkDialog] = useState(false);
+  const [linkAcknowledged, setLinkAcknowledged] = useState(false);
+  const linkButtonRef = useRef<HTMLButtonElement>(null);
   const media = mediaBadge(post);
   const preview = post.media_type === "VIDEO" ? post.thumbnail_url || post.media_url : post.media_url;
-  const brandMedian = detail?.historical?.brand_median_er;
   const availableMetrics = METRICS.filter((metric) => detail?.metrics?.[metric.key] !== undefined);
   const unavailableLabels = detail?.unavailable_metrics
     .map((metric) => METRIC_LABELS[metric])
@@ -448,15 +473,28 @@ function PostAnalysis({
   useEffect(() => {
     setLinkingPublication(false);
     setPublicationLinkError(null);
+    setShowLinkDialog(false);
+    setLinkAcknowledged(false);
   }, [post.id]);
+
+  useEffect(() => {
+    if (!showLinkDialog) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !linkingPublication) setShowLinkDialog(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [linkingPublication, showLinkDialog]);
 
   const confirmPublicationLink = async () => {
     const predictionId = detail?.prediction?.prediction_id;
-    if (!predictionId || linkingPublication) return;
-    const confirmed = window.confirm(
-      "Confirm that this exact Instagram post is the content represented by the prediction. This stores an immutable media-ID link; caption similarity alone is not proof."
-    );
-    if (!confirmed) return;
+    if (!predictionId || linkingPublication || !linkAcknowledged) return;
+    let linked = false;
     setLinkingPublication(true);
     setPublicationLinkError(null);
     try {
@@ -472,31 +510,44 @@ function PostAnalysis({
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.message || "Publication link could not be saved.");
       await onLinked?.();
+      linked = true;
+      setShowLinkDialog(false);
+      setLinkAcknowledged(false);
     } catch (caught: unknown) {
       setPublicationLinkError(
         caught instanceof Error ? caught.message : "Publication link could not be saved."
       );
     } finally {
       setLinkingPublication(false);
+      if (linked) window.requestAnimationFrame(() => linkButtonRef.current?.focus());
     }
   };
 
+  const closeLinkDialog = () => {
+    if (linkingPublication) return;
+    setShowLinkDialog(false);
+    setLinkAcknowledged(false);
+    window.requestAnimationFrame(() => linkButtonRef.current?.focus());
+  };
+
   return (
-    <article className="overflow-hidden rounded-2xl border border-border bg-surface">
-      <div className="grid border-b border-border md:grid-cols-[minmax(260px,0.8fr)_1.2fr]">
-        <div className="min-h-[280px] md:min-h-[360px]">
+    <article className="relative overflow-hidden rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]">
+      <div className="grid border-b border-border md:grid-cols-[minmax(260px,0.75fr)_1.25fr]">
+        <div className="min-h-[260px] md:min-h-[340px]">
           <MediaPreview post={post} src={preview} />
         </div>
-        <div className="space-y-5 p-5 md:p-6">
+        <div className="space-y-5 p-5 md:p-7">
           <div className="flex flex-wrap items-center gap-2">
             <MediaTypeChip post={post} />
-            {post.tier && <TierBadge tier={post.tier} />}
+            {post.comparison_eligible && post.er !== null && (
+              <span className="inline-flex min-h-7 items-center rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">Mature outcome</span>
+            )}
             {post.permalink && (
               <a
                 href={post.permalink}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-primary outline-none transition-colors hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40"
+                className="ml-auto inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-semibold text-foreground outline-none transition-colors hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 Open Instagram <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
                 <span className="sr-only"> (opens in a new tab)</span>
@@ -504,15 +555,15 @@ function PostAnalysis({
             )}
           </div>
           <div>
-            <h2 className="font-display text-xl font-semibold">Post performance</h2>
-            <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-              <CalendarDays aria-hidden="true" className="h-3.5 w-3.5" />
+            <h2 className="text-2xl font-semibold tracking-tight">Published content</h2>
+            <p className="mt-1.5 inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+              <CalendarDays aria-hidden="true" className="h-4 w-4" />
               Published <time dateTime={post.timestamp}>{formatDateTime(post.timestamp)}</time>
             </p>
           </div>
           <div>
-            <h3 className="text-xs font-semibold text-foreground">Caption</h3>
-            <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{post.caption || "No caption supplied."}</p>
+            <h3 className="text-sm font-semibold text-foreground">Caption</h3>
+            <p className="mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{post.caption || "No caption supplied."}</p>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {post.likes !== null ? <MetricCard label="Likes" value={post.likes} icon={Heart} /> : <UnavailableMetric label="Likes" message="Not returned by Meta." />}
@@ -524,95 +575,42 @@ function PostAnalysis({
             )}
           </div>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Likes and comments are fetched live. ER and tier use the follower snapshot preserved at the verified sync shown below.
+            Likes and comments may be live. Synced ER uses the follower snapshot preserved when this media was verified.
           </p>
         </div>
       </div>
 
-      <div className="space-y-6 p-5 md:p-6" aria-busy={loading}>
+      <div className="space-y-6 p-5 md:p-7" aria-busy={loading}>
         {loading && <DetailSkeleton />}
         {error && <ErrorState title="Detailed metrics unavailable" message={error} onRetry={onRetry} compact />}
 
         {detail && !loading && (
           <>
-            {availableMetrics.length > 0 ? (
-              <section aria-labelledby="verified-metrics-heading">
-                <h3 id="verified-metrics-heading" className="text-sm font-semibold">Verified Meta metrics</h3>
-                <p className="mt-1 text-xs text-muted-foreground">Lifetime fields appear only when Meta supports them for this media type.</p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {availableMetrics.map((metric) => (
-                    <MetricCard key={metric.key} label={metric.label} value={detail.metrics[metric.key]} icon={metric.icon} />
-                  ))}
-                </div>
-              </section>
-            ) : (
-              <p className="rounded-xl border border-border bg-surface-2/40 p-4 text-sm text-muted-foreground">
-                Meta returned no additional lifetime metrics for this media type. No values were filled with zero or estimates.
-              </p>
-            )}
+            <OutcomeSummary post={post} detail={detail} />
 
-            {(unavailableLabels.length > 0 || detail.not_attributable_metrics.length > 0) && (
-              <div className="flex items-start gap-2 rounded-xl border border-border bg-surface-2/30 p-4 text-xs leading-relaxed text-muted-foreground">
-                <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-                <p>
-                  {unavailableLabels.length > 0 && <>Not returned for this post: {unavailableLabels.join(", ")}. </>}
-                  {detail.not_attributable_metrics.length > 0 && <>Profile visits and follows are account-level actions, so they are not attributed to this organic post.</>}
-                </p>
+            <section className="rounded-2xl border border-border bg-surface p-5" aria-labelledby="prediction-trace-heading">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 id="prediction-trace-heading" className="font-semibold">Prediction trace</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">Connect the pre-publish decision to this exact media ID.</p>
+                </div>
+                <Link href={detail.prediction?.prediction_id ? `/history?prediction_id=${encodeURIComponent(detail.prediction.prediction_id)}` : "/history"} className="inline-flex min-h-10 items-center gap-1.5 self-start rounded-lg px-2 text-sm font-semibold text-foreground hover:bg-surface-2">
+                  Prediction ledger <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
               </div>
-            )}
-
-            <InteractionBreakdown post={post} detail={detail} />
-
-            <section aria-labelledby="comparison-heading">
-              <h3 id="comparison-heading" className="text-sm font-semibold">Historical comparison</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                The baseline uses other mature, model-supported, verified brand posts and preserved follower snapshots.
-              </p>
-              {detail.historical.comparison_eligible && post.er !== null ? (
-                <div className="mt-3 max-w-xl">
-                  <ComparisonCard
-                    label={`Eligible brand history · n=${detail.historical.brand_baseline_posts}`}
-                    current={post.er}
-                    baseline={brandMedian}
-                    unavailableMessage={
-                      detail.historical.brand_baseline_unavailable_reason ||
-                      "No eligible brand-history baseline is available."
-                    }
-                  />
-                </div>
-              ) : (
-                <div className="mt-3 flex items-start gap-2 rounded-xl border border-border bg-surface-2/30 p-4 text-sm text-muted-foreground">
-                  <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-                  <p>
-                    Brand-history comparison unavailable. {detail.historical.comparison_unavailable_reason || post.comparison_unavailable_reason || "Eligibility could not be verified."}
-                  </p>
-                </div>
-              )}
-              <div className="mt-3 flex items-start gap-2 rounded-xl border border-warning/25 bg-warning/[0.03] p-4 text-xs leading-relaxed text-muted-foreground">
-                <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-                <p>
-                  <strong className="text-foreground">Recent performance trend unavailable.</strong>{" "}
-                  {detail.historical.recent_performance.reason}
-                </p>
-              </div>
-            </section>
-
-            <EvidenceSection post={post} detail={detail} />
-
-            <section className="rounded-xl border border-border p-5" aria-labelledby="prediction-trace-heading">
-              <h3 id="prediction-trace-heading" className="text-sm font-semibold">Prediction trace</h3>
               {detail.prediction ? (
-                <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+                <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
                   <TierBadge tier={detail.prediction.tier} />
                   {detail.prediction.linked && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                    <span className="inline-flex min-h-7 items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
                       Verified media-ID link
                     </span>
                   )}
-                  <span>{detail.prediction.confidence !== null ? `${Math.round(detail.prediction.confidence)}/100 raw score` : "Raw score unavailable"}</span>
+                  <span>{detail.prediction.confidence !== null ? `${Math.round(detail.prediction.confidence)}/100 raw class score` : "Raw class score unavailable"}</span>
                   {detail.prediction.actual_er !== null && <span>Observed ER: <strong>{detail.prediction.actual_er.toFixed(2)}%</strong></span>}
                   {detail.prediction.model_version && <span className="font-mono text-xs text-muted-foreground">Model {detail.prediction.model_version}</span>}
-                  <p className="w-full text-xs leading-relaxed text-muted-foreground">
+                  <p className="w-full text-sm leading-relaxed text-muted-foreground">
                     {detail.prediction.linked
                       ? "This outcome is attached through a user-confirmed immutable Instagram media ID."
                       : detail.prediction.linked_elsewhere
@@ -624,12 +622,13 @@ function PostAnalysis({
                     detail.prediction.prediction_id &&
                     detail.prediction_match_status === "unique_verified_caption" && (
                       <button
+                        ref={linkButtonRef}
                         type="button"
-                        onClick={confirmPublicationLink}
-                        disabled={linkingPublication}
-                        className="inline-flex min-h-10 items-center justify-center rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/92 disabled:opacity-50"
+                        onClick={() => setShowLinkDialog(true)}
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-semibold text-background"
                       >
-                        {linkingPublication ? "Saving verified link…" : "Confirm this publication"}
+                        <Link2 className="h-4 w-4" aria-hidden="true" />
+                        Verify publication
                       </button>
                     )}
                   {publicationLinkError && (
@@ -639,17 +638,175 @@ function PostAnalysis({
                   )}
                 </div>
               ) : detail.prediction_match_status === "ambiguous_duplicate_caption" ? (
-                <p className="mt-2 text-sm text-muted-foreground">More than one prediction has this exact Meta-verified caption, so no score is assigned to the post without an immutable media-ID link.</p>
+                <p className="mt-4 text-sm leading-relaxed text-muted-foreground">More than one prediction has this exact Meta-verified caption. No score is assigned automatically because caption equality is not sufficient publication evidence.</p>
               ) : (
-                <p className="mt-2 text-sm text-muted-foreground">No prediction with the exact Meta-verified caption was found in this user&apos;s history.</p>
+                <p className="mt-4 text-sm text-muted-foreground">No prediction candidate with this exact Meta-verified caption was found in your ledger.</p>
               )}
             </section>
 
-            <DetailProvenance post={post} provenance={detail.provenance} />
+            <EvidenceSection post={post} detail={detail} />
+
+            <details className="group rounded-2xl border border-border bg-surface">
+              <summary className="flex min-h-14 cursor-pointer list-none items-center gap-2 px-5 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">
+                <BarChart3 className="h-5 w-5 text-primary" aria-hidden="true" />
+                Detailed metrics and methodology
+                <span className="ml-auto text-sm font-normal text-muted-foreground group-open:hidden">{availableMetrics.length} additional metrics</span>
+              </summary>
+              <div className="space-y-6 border-t border-border p-5">
+                {availableMetrics.length > 0 ? (
+                  <section aria-labelledby="verified-metrics-heading">
+                    <h3 id="verified-metrics-heading" className="font-semibold">Verified Meta metrics</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">Lifetime fields appear only when Meta supports them for this media type.</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      {availableMetrics.map((metric) => <MetricCard key={metric.key} label={metric.label} value={detail.metrics[metric.key]} icon={metric.icon} />)}
+                    </div>
+                  </section>
+                ) : (
+                  <p className="rounded-xl bg-surface-2/50 p-4 text-sm text-muted-foreground">Meta returned no additional lifetime metrics. Missing values were not replaced with zero or estimates.</p>
+                )}
+
+                {(unavailableLabels.length > 0 || detail.not_attributable_metrics.length > 0) && (
+                  <div className="flex items-start gap-2 rounded-xl bg-surface-2/50 p-4 text-sm leading-relaxed text-muted-foreground">
+                    <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+                    <p>{unavailableLabels.length > 0 && <>Not returned: {unavailableLabels.join(", ")}. </>}{detail.not_attributable_metrics.length > 0 && <>Profile visits and follows are account-level actions and are not attributed to this post.</>}</p>
+                  </div>
+                )}
+
+                <InteractionBreakdown post={post} detail={detail} />
+                <div className="rounded-xl border border-border p-4 text-sm leading-relaxed text-muted-foreground">
+                  <strong className="text-foreground">Trend limitation.</strong> {detail.historical.recent_performance.reason}
+                </div>
+                <DetailProvenance post={post} provenance={detail.provenance} />
+              </div>
+            </details>
+
+            <div className="flex flex-col gap-3 rounded-2xl bg-foreground p-5 text-background sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-semibold">Use verified learning in the next decision</p>
+                <p className="mt-1 text-sm text-background/70">Treat this result as evidence, not a substitute for creative judgment.</p>
+              </div>
+              <Link href="/predict" className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-background px-4 text-sm font-semibold text-foreground">
+                Predict next draft <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </div>
           </>
         )}
       </div>
+
+      {showLinkDialog && detail?.prediction?.prediction_id && (
+        <PublicationLinkDialog
+          post={post}
+          prediction={detail.prediction}
+          acknowledged={linkAcknowledged}
+          onAcknowledged={setLinkAcknowledged}
+          saving={linkingPublication}
+          error={publicationLinkError}
+          onCancel={closeLinkDialog}
+          onConfirm={confirmPublicationLink}
+        />
+      )}
     </article>
+  );
+}
+
+function OutcomeSummary({ post, detail }: { post: IgPost; detail: PostDetail }) {
+  const brandMedian = detail.historical.brand_median_er;
+  const ageDays = Math.max(0, Math.floor((Date.now() - new Date(post.timestamp).getTime()) / 86_400_000));
+
+  if (detail.historical.comparison_eligible && post.er !== null) {
+    return (
+      <section aria-labelledby="outcome-summary-title" className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.045] p-5">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-5 w-5" aria-hidden="true" />Seven-day outcome available</div>
+            <h3 id="outcome-summary-title" className="mt-3 text-3xl font-semibold tabular-nums tracking-tight">{post.er.toFixed(2)}% observed ER</h3>
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">Calculated from the verified likes, comments, and follower snapshot preserved by synchronization.</p>
+          </div>
+          <div className="min-w-[220px] rounded-xl border border-border bg-surface p-4">
+            <ComparisonCard
+              label={`Eligible brand history · n=${detail.historical.brand_baseline_posts}`}
+              current={post.er}
+              baseline={brandMedian}
+              unavailableMessage={detail.historical.brand_baseline_unavailable_reason || "No eligible brand-history baseline is available."}
+            />
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (post.comparison_unavailable_code === "immature") {
+    const remaining = Math.max(1, 7 - ageDays);
+    return (
+      <section aria-labelledby="outcome-summary-title" className="rounded-2xl border border-primary/20 bg-primary/[0.04] p-5">
+        <div className="flex items-start gap-3">
+          <Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+          <div>
+            <h3 id="outcome-summary-title" className="font-semibold">Outcome still maturing</h3>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Wait {remaining} more day{remaining === 1 ? "" : "s"} before treating this post as a comparable seven-day outcome. Live counters can still change.</p>
+            <div className="mt-3 h-1.5 max-w-sm overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-label="Publication maturity" aria-valuemin={0} aria-valuemax={7} aria-valuenow={Math.min(ageDays, 7)}><div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, (ageDays / 7) * 100)}%` }} /></div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section aria-labelledby="outcome-summary-title" className="rounded-2xl border border-border bg-surface-2/40 p-5">
+      <h3 id="outcome-summary-title" className="font-semibold">Comparable outcome unavailable</h3>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{detail.historical.comparison_unavailable_reason || post.comparison_unavailable_reason || "Eligibility could not be verified."}</p>
+    </section>
+  );
+}
+
+function PublicationLinkDialog({ post, prediction, acknowledged, onAcknowledged, saving, error, onCancel, onConfirm }: {
+  post: IgPost;
+  prediction: NonNullable<PostDetail["prediction"]>;
+  acknowledged: boolean;
+  onAcknowledged: (value: boolean) => void;
+  saving: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), [href]'));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    dialog.addEventListener("keydown", onKeyDown);
+    return () => dialog.removeEventListener("keydown", onKeyDown);
+  }, []);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/75 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="publication-link-title" aria-describedby="publication-link-description" className="max-h-[95dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-border bg-surface shadow-[var(--shadow-elevated)] sm:max-h-[90dvh] sm:rounded-3xl">
+        <div className="flex items-start justify-between gap-4 border-b border-border p-5 md:p-6">
+          <div><h2 id="publication-link-title" className="text-xl font-semibold tracking-tight">Verify this publication</h2><p id="publication-link-description" className="mt-1 text-sm leading-relaxed text-muted-foreground">Create one immutable link between the pre-publish prediction and this exact Instagram media ID.</p></div>
+          <button type="button" onClick={onCancel} disabled={saving} aria-label="Close publication verification" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-surface-2 disabled:opacity-50"><X className="h-5 w-5" aria-hidden="true" /></button>
+        </div>
+        <div className="space-y-5 p-5 md:p-6">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-border p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Prediction candidate</p><div className="mt-3 flex items-center gap-2"><TierBadge tier={prediction.tier} /><span className="text-sm">{prediction.confidence == null ? "Raw score unavailable" : `${Math.round(prediction.confidence)}/100 raw score`}</span></div><p className="mt-3 font-mono text-xs text-muted-foreground">ID {prediction.prediction_id}</p></div>
+            <div className="rounded-2xl border border-border p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Selected Instagram media</p><p className="mt-3 text-sm font-semibold">{mediaBadge(post).label} · {formatDate(post.timestamp)}</p><p className="mt-2 line-clamp-3 text-sm leading-relaxed text-muted-foreground">{post.caption || "Post without caption"}</p><p className="mt-3 font-mono text-xs text-muted-foreground">Media {post.id}</p></div>
+          </div>
+          <div className="flex items-start gap-3 rounded-2xl border border-warning/25 bg-warning/[0.04] p-4 text-sm leading-relaxed text-muted-foreground"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden="true" /><p>Caption equality only surfaced this candidate. Confirm the identity from the selected media, publication date, and Instagram link before continuing.</p></div>
+          <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border p-4 hover:bg-surface-2/40"><input autoFocus type="checkbox" checked={acknowledged} onChange={(event) => onAcknowledged(event.target.checked)} className="mt-1 h-4 w-4 accent-current" /><span className="text-sm leading-relaxed"><strong className="block text-foreground">I verified this exact publication.</strong><span className="text-muted-foreground">I understand the media-ID link is immutable and will be used to attach the mature observed ER.</span></span></label>
+          {error && <p role="alert" className="rounded-xl border border-destructive/25 bg-destructive/[0.04] p-3 text-sm text-destructive">{error}</p>}
+        </div>
+        <div className="flex flex-col-reverse gap-2 border-t border-border p-4 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onCancel} disabled={saving} className="min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2 disabled:opacity-50">Cancel</button>
+          <button type="button" onClick={onConfirm} disabled={!acknowledged || saving} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-semibold text-background disabled:opacity-50">{saving ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Link2 className="h-4 w-4" aria-hidden="true" />}{saving ? "Saving immutable link…" : "Create verified link"}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -756,16 +913,23 @@ function ProvenanceNotice({ followers, provenance, latestSync: sync }: { followe
   const fetched = provenance?.fetched_at ? formatDateTime(provenance.fetched_at) : "time unavailable";
   const storedOnly = provenance?.stored_only === true || provenance?.live_source !== "instagram_graph_api";
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-start">
-      <Database aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-      <div className="min-w-0 flex-1 leading-relaxed">
-        <p><strong className="text-foreground">Data origin:</strong> {storedOnly
-          ? `Instagram Graph was unavailable at ${fetched}; this list uses the latest verified records preserved by synchronization. Live previews and current per-post counters may be unavailable.`
-          : `previews, captions, likes, comments, and the current account follower count were fetched live from Instagram Graph at ${fetched}.`}</p>
-        <p className="mt-1">ER is synced likes plus comments divided by the follower snapshot preserved when that media was first verified. Tiers and brand-history comparisons require mature, model-supported posts{sync ? ` from sync records updated as recently as ${formatDateTime(sync)}` : " and remain unavailable until a sync completes"}. Recent performance is not inferred from unequal-age cumulative ER.</p>
-        {provenance?.post_limit && <p className="mt-1">This view requests up to {provenance.post_limit} of the account&apos;s latest posts.</p>}
+    <div className={cn("rounded-2xl border p-4", storedOnly ? "border-warning/25 bg-warning/[0.035]" : "border-border bg-surface")}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <Database aria-hidden="true" className={cn("h-5 w-5 shrink-0", storedOnly ? "text-warning" : "text-primary")} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-foreground">{storedOnly ? "Verified stored snapshot" : "Live Instagram source"}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{storedOnly ? `Graph was unavailable at ${fetched}; preserved synchronization records are shown.` : `Fetched from Instagram Graph at ${fetched}.`}</p>
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span>{followers === null ? "Followers unavailable" : `${followers.toLocaleString()} followers`}</span>
+          <span>{sync ? `Latest sync ${formatDateTime(sync)}` : "Sync pending"}</span>
+        </div>
       </div>
-      <span className="shrink-0 font-mono text-foreground">{followers === null ? "Followers unavailable" : `${followers.toLocaleString()} current followers`}</span>
+      <details className="group mt-3 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
+        <summary className="cursor-pointer list-none font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40">How ER evidence is preserved</summary>
+        <p className="mt-2">ER uses synchronized likes plus comments divided by the follower snapshot preserved when the media was verified. Comparisons require mature, model-supported posts; unequal-age cumulative ER is not presented as a recent trend.</p>
+        {provenance?.post_limit && <p className="mt-1">This view requests up to {provenance.post_limit} recent posts.</p>}
+      </details>
     </div>
   );
 }
@@ -785,10 +949,10 @@ function DetailProvenance({ post, provenance }: { post: IgPost; provenance: Prov
 
 function SummaryMetric({ label, value, helper }: { label: string; value: string; helper: string }) {
   return (
-    <div className="rounded-xl border border-border bg-surface p-4">
-      <p className="text-xs font-semibold text-muted-foreground">{label}</p>
-      <p className="mt-2 font-display text-2xl font-semibold tabular-nums">{value}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{helper}</p>
+    <div className="min-h-32 bg-surface p-5">
+      <p className="text-sm font-medium text-muted-foreground">{label}</p>
+      <p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight">{value}</p>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{helper}</p>
     </div>
   );
 }
@@ -886,26 +1050,17 @@ function DetailSkeleton() {
   );
 }
 
-const primaryButtonClass = "inline-flex min-h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition-transform duration-150 hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary/40 active:translate-y-px";
+const primaryButtonClass = "inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-foreground px-4 text-sm font-semibold text-background outline-none transition-transform duration-150 hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary/40 active:translate-y-px";
 const secondaryButtonClass = "inline-flex min-h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-foreground outline-none transition-colors duration-150 hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-primary/40 active:translate-y-px";
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-function averageKnown(values: Array<number | null>): number | null {
-  const known = values.filter((value): value is number => typeof value === "number");
-  return known.length > 0 ? known.reduce((sum, value) => sum + value, 0) / known.length : null;
-}
-
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const middle = Math.floor(values.length / 2);
   return values.length % 2 === 0 ? (values[middle - 1] + values[middle]) / 2 : values[middle];
-}
-
-function formatRounded(value: number | null): string {
-  return value === null ? "Unavailable" : Math.round(value).toLocaleString();
 }
 
 function formatPercent(value: number | null): string {

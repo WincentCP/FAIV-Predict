@@ -104,8 +104,8 @@ export function ConceptAssistant({
 
   return (
     <div>
-      <Label htmlFor="visual-concept">Creative Brief / Visual Concept</Label>
-      <div className="rounded-xl border border-border bg-surface transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 overflow-hidden shadow-inner">
+      <Label htmlFor="visual-concept">Describe the direction</Label>
+      <div className="overflow-hidden rounded-xl border border-border bg-surface transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/15">
         <textarea
           id="visual-concept"
           aria-describedby="visual-concept-help"
@@ -113,13 +113,13 @@ export function ConceptAssistant({
           onChange={(event) => setVisualConcept(event.target.value)}
           rows={5}
           maxLength={4000}
-          className="w-full resize-none bg-transparent p-4 text-xs font-mono leading-relaxed outline-none placeholder:text-muted-foreground/45 text-foreground/90"
-          placeholder={`Describe your content pillar, visual or video style, opening hook, storytelling flow, shots, dialogue, CTA, and campaign/season/trend context.\nExample: Educational Reel · close-up product demo · 2-second problem hook · before/after story · Ramadan campaign.`}
+          className="w-full resize-y bg-transparent p-4 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 sm:text-sm"
+          placeholder={`Content pillar, visual style, opening hook, story flow, shots, CTA, campaign or seasonal context…\nExample: Educational Reel · close-up demo · two-second problem hook · before/after story · Ramadan campaign.`}
         />
       </div>
       <div className="mt-2 flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
-        <p id="visual-concept-help" className="max-w-xl text-xs leading-relaxed text-muted-foreground">
-          This is user-supplied planning context for AI guidance. It is not a Random Forest input and is not presented as a historically measured audience preference.
+        <p id="visual-concept-help" className="max-w-xl text-sm leading-relaxed text-muted-foreground">
+          This user-supplied context can guide the optional AI review. It does not change the Random Forest score and is not treated as a measured audience preference.
         </p>
         <button
           type="button"
@@ -132,29 +132,30 @@ export function ConceptAssistant({
                 ? "Write at least a short concept first"
                 : undefined
           }
-          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-bold text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50 active:scale-[0.98]"
+          className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-sm font-semibold text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50"
+          aria-busy={conceptState === "loading"}
         >
           {conceptState === "loading" ? (
             <>
-              <Loader2 className="h-3 w-3 animate-spin" /> Reading concept…
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Reviewing…
             </>
           ) : (
             <>
-              <Sparkles className="h-3 w-3 text-primary" />
-              {conceptState === "done" ? "Analyze Again" : "Analyze Concept"}
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              {conceptState === "done" ? "Review again" : "Review direction"}
             </>
           )}
         </button>
       </div>
 
       {conceptState === "error" && (
-        <div role="alert" className="mt-2 rounded-lg border border-warning/30 bg-warning/[0.03] px-3 py-2 text-xs text-muted-foreground">
+        <div role="alert" className="mt-3 rounded-lg border border-warning/30 bg-warning/[0.03] px-3 py-2 text-sm text-muted-foreground">
           {conceptError}
         </div>
       )}
 
       {conceptState === "done" && conceptAnalysis && (
-        <div className={cn("mt-3 rounded-xl border border-border bg-surface-2/50 p-4 space-y-3", isStale && "opacity-75")}>
+        <div className={cn("mt-4 space-y-3 rounded-xl border border-border bg-surface-2/50 p-4", isStale && "opacity-75")}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-primary">
               <Sparkles className="h-3 w-3" /> AI Creative Review
@@ -169,7 +170,7 @@ export function ConceptAssistant({
               The brief, caption, brand, or format changed. Analyze again before relying on this review.
             </div>
           )}
-          <p className="text-xs leading-relaxed text-muted-foreground">
+          <p className="text-sm leading-relaxed text-muted-foreground">
             Creative guidance is a planning hypothesis, not part of the ML score. It does not use audience demographics or a live external trend feed.
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -188,19 +189,19 @@ export function ConceptAssistant({
             />
           </div>
           {conceptAnalysis.hook && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               <span className="font-bold text-foreground">Hook:</span> &quot;{conceptAnalysis.hook}&quot;
             </p>
           )}
           {(conceptAnalysis.strengths.length > 0 || conceptAnalysis.suggestions.length > 0) && (
             <ul className="space-y-1">
               {conceptAnalysis.strengths.map((strength, index) => (
-                <li key={`s${index}`} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <li key={`s${index}`} className="flex items-start gap-1.5 text-sm leading-relaxed text-muted-foreground">
                   <Check className="mt-px h-3 w-3 shrink-0 text-emerald-500" /> {strength}
                 </li>
               ))}
               {conceptAnalysis.suggestions.map((suggestion, index) => (
-                <li key={`i${index}`} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <li key={`i${index}`} className="flex items-start gap-1.5 text-sm leading-relaxed text-muted-foreground">
                   <ArrowRight className="mt-px h-3 w-3 shrink-0 text-primary" /> {suggestion}
                 </li>
               ))}

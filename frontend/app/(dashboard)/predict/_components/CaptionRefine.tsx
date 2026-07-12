@@ -90,7 +90,7 @@ export function CaptionRefine({
   return (
     <div className="space-y-3">
       <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-        <p className="text-xs leading-relaxed text-muted-foreground">
+        <p className="text-sm leading-relaxed text-muted-foreground">
           Refine the current caption using the brief and safe historical context. Applying it changes a model input, so run a new prediction.
         </p>
         <button
@@ -104,7 +104,7 @@ export function CaptionRefine({
                 ? "Write a caption first. AI refinement rewrites your draft instead of starting from scratch."
                 : undefined
           }
-          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground shadow-sm transition-colors duration-200 hover:bg-primary/95 disabled:opacity-50 active:scale-[0.98]"
+          className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground shadow-sm transition-colors duration-200 hover:bg-primary/90 disabled:opacity-50"
           aria-busy={aiState === "loading"}
         >
           {aiState === "loading" ? (
@@ -145,9 +145,9 @@ export function CaptionRefine({
                     onClick={() => onReplaceCaption(suggestedCaption)}
                     disabled={isStale}
                     title={isStale ? "Inputs changed; refine again before replacing the draft" : undefined}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-primary/20 bg-primary/10 px-2.5 py-1.5 text-xs font-bold text-primary transition-colors duration-200 hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-45"
+                    className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 text-sm font-semibold text-primary transition-colors duration-200 hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-45"
                   >
-                    Replace Draft Caption
+                    Use this caption
                   </button>
                 )}
               </div>
@@ -161,7 +161,7 @@ export function CaptionRefine({
             <div className="min-h-[60px] whitespace-pre-wrap rounded-xl border border-border bg-surface p-4 text-sm font-medium leading-relaxed text-foreground/90 shadow-inner">
               {suggestedCaption}
             </div>
-            <p className="text-xs leading-relaxed text-muted-foreground">
+            <p className="text-sm leading-relaxed text-muted-foreground">
               This is AI writing guidance, not a predicted audience preference or a live trend recommendation.
             </p>
           </motion.div>
@@ -178,7 +178,7 @@ export function CaptionRefine({
             className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/[0.02] p-4 text-left"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-            <p className="text-xs leading-relaxed text-muted-foreground">{aiMessage}</p>
+            <p className="text-sm leading-relaxed text-muted-foreground">{aiMessage}</p>
           </motion.div>
         )}
       </AnimatePresence>

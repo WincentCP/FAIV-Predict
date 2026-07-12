@@ -1,6 +1,6 @@
 "use client";
 
-import { Cpu, Check, Database, Tag, AlertTriangle } from "lucide-react";
+import { Cpu, Database, Tag, AlertTriangle, ChevronDown, FlaskConical } from "lucide-react";
 
 const OOD_LABELS: Record<string, string> = {
   post_hour: "Posting time",
@@ -41,125 +41,130 @@ export function TrustStrip({
   modelVersion: string | null;
   outOfRange: string[];
 }) {
+  const scopeLabel = isPersonalModel ? "Personal brand model" : "Shared niche model";
+  const scientificLabel = evaluationStatus === "validated"
+    ? "Validated for thesis use"
+    : evaluationStatus === "exploratory"
+      ? "Exploratory evidence"
+      : "Status unavailable";
+
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-surface/50 p-4 text-xs font-bold backdrop-blur">
-      <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-        Scored by:
-      </span>
-      <Chip icon={<Cpu className="h-3 w-3" />}>
-        {isPersonalModel ? "Personal model (this brand's own history)" : "Niche model (shared industry patterns)"}
-      </Chip>
-      {trainedSamples !== null && (
-        <Chip icon={<Database className="h-3 w-3" />}>
-          trained on {trainedSamples} real posts
-        </Chip>
+    <section aria-labelledby="prediction-evidence-title" className="rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
+      {(outOfRange.length > 0 || (trainedSamples !== null && trainedSamples < 50) || heldOutClassesComplete === false) && (
+        <div className="space-y-2 border-b border-border p-4">
+          {trainedSamples !== null && trainedSamples < 50 && (
+            <WarningLine>Limited training set: fewer than 50 eligible posts. Treat this score as exploratory.</WarningLine>
+          )}
+          {heldOutClassesComplete === false && (
+            <WarningLine>The chronological holdout is missing at least one performance tier.</WarningLine>
+          )}
+          {outOfRange.map((feature) => (
+            <WarningLine key={feature}>{OOD_LABELS[feature] || feature} is outside the model&apos;s training range.</WarningLine>
+          ))}
+        </div>
       )}
-      {trainedSamples !== null && trainedSamples < 50 && (
-        <WarningChip>
-          limited training set — under 50 posts; treat scores as exploratory
-        </WarningChip>
-      )}
-      {outOfRange.map((feature) => (
-        <WarningChip key={feature}>
-          {OOD_LABELS[feature] || feature} is outside anything this model trained on
-        </WarningChip>
-      ))}
-      {(modelAccuracy !== null || testSamples !== null) && (
-        <Chip
-          icon={<Check className="h-3 w-3" />}
-          title="Held-out evaluation uses the newest chronological 20% of eligible posts"
-        >
-          holdout: {modelAccuracy !== null ? `${formatMetric(modelAccuracy)}% accuracy` : "accuracy unavailable"}
-          {testSamples !== null ? ` · n=${testSamples}` : ""}
-        </Chip>
-      )}
-      {modelMacroF1 !== null && (
-        <Chip
-          icon={<Check className="h-3 w-3" />}
-          title="Macro-F1 gives Low, Average, and High tiers equal weight, regardless of how frequent each tier is"
-        >
-          macro-F1 {formatMetric(modelMacroF1)}%
-        </Chip>
-      )}
-      {modelBalancedAccuracy !== null && (
-        <Chip
-          icon={<Check className="h-3 w-3" />}
-          title="Balanced accuracy is the average recall across the three engagement tiers"
-        >
-          balanced accuracy {formatMetric(modelBalancedAccuracy)}%
-        </Chip>
-      )}
-      {accuracyGainOverBaseline !== null && (
-        <Chip
-          icon={<Check className="h-3 w-3" />}
-          title={
-            baselineAccuracy !== null
-              ? `Compared with a majority-class baseline accuracy of ${formatMetric(baselineAccuracy)}%`
-              : "Compared with the majority-class baseline"
-          }
-        >
-          {accuracyGainOverBaseline >= 0 ? "+" : ""}{formatMetric(accuracyGainOverBaseline)} pp vs majority baseline
-        </Chip>
-      )}
-      {heldOutClassesComplete === true && (
-        <Chip icon={<Check className="h-3 w-3" />} title="Low, Average, and High all occur in the chronological holdout">
-          all 3 tiers represented in holdout
-        </Chip>
-      )}
-      {heldOutClassesComplete === false && (
-        <WarningChip>
-          holdout is missing at least one tier; evaluation is exploratory
-        </WarningChip>
-      )}
-      {evaluationStatus === "validated" && (
-        <Chip icon={<Check className="h-3 w-3" />} title="This model passed the configured thesis scientific gate">
-          scientific gate passed
-        </Chip>
-      )}
-      {evaluationStatus === "exploratory" && heldOutClassesComplete !== false && (
-        <WarningChip>
-          evaluation is exploratory; do not treat this score as established accuracy
-        </WarningChip>
-      )}
-      {modelVersion && (
-        <Chip icon={<Tag className="h-3 w-3" />} title="Models retrain automatically every week on freshly synced posts">
-          v{modelVersion}
-        </Chip>
-      )}
+
+      <details className="group">
+        <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 marker:hidden">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 id="prediction-evidence-title" className="text-sm font-semibold text-foreground">Model evidence</h3>
+              <span className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+                {scientificLabel}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {scopeLabel}{trainedSamples !== null ? ` · ${trainedSamples} training posts` : ""}{testSamples !== null ? ` · ${testSamples} holdout posts` : ""}
+            </p>
+          </div>
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+        </summary>
+
+        <div className="border-t border-border px-5 py-5">
+          <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
+            These are chronological holdout metrics for the saved model artifact. They describe model evaluation—not the certainty of this individual post and not guaranteed business outcomes.
+          </p>
+
+          <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <EvidenceItem icon={<Cpu className="h-4 w-4" />} label="Model scope" value={scopeLabel} />
+            <EvidenceItem
+              icon={<Database className="h-4 w-4" />}
+              label="Training evidence"
+              value={trainedSamples !== null ? `${trainedSamples} eligible posts` : "Unavailable"}
+            />
+            <EvidenceItem
+              icon={<FlaskConical className="h-4 w-4" />}
+              label="Chronological holdout"
+              value={testSamples !== null ? `${testSamples} posts` : "Unavailable"}
+            />
+            <EvidenceItem
+              icon={<Tag className="h-4 w-4" />}
+              label="Artifact version"
+              value={modelVersion ? `v${modelVersion}` : "Unavailable"}
+            />
+          </dl>
+
+          <div className="mt-4 grid gap-x-8 gap-y-3 border-t border-border pt-4 text-sm sm:grid-cols-2">
+            <Metric label="Accuracy" value={modelAccuracy} />
+            <Metric label="Macro F1" value={modelMacroF1} />
+            <Metric label="Balanced accuracy" value={modelBalancedAccuracy} />
+            <Metric
+              label="Gain vs majority baseline"
+              value={accuracyGainOverBaseline}
+              suffix=" pp"
+              signed
+              title={baselineAccuracy !== null ? `Majority baseline: ${formatMetric(baselineAccuracy)}%` : undefined}
+            />
+          </div>
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function EvidenceItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-surface-2/50 p-3">
+      <div className="flex items-center gap-2 text-muted-foreground">{icon}<dt className="text-xs font-semibold">{label}</dt></div>
+      <dd className="mt-2 text-sm font-semibold text-foreground">{value}</dd>
     </div>
   );
 }
 
-function formatMetric(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-function WarningChip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-700 dark:text-amber-300">
-      <AlertTriangle className="h-3 w-3" />
-      {children}
-    </span>
-  );
-}
-
-function Chip({
-  icon,
-  children,
+function Metric({
+  label,
+  value,
+  suffix = "%",
+  signed = false,
   title,
 }: {
-  icon: React.ReactNode;
-  children: React.ReactNode;
+  label: string;
+  value: number | null;
+  suffix?: string;
+  signed?: boolean;
   title?: string;
 }) {
   return (
-    <span
-      title={title}
-      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1 text-muted-foreground"
-    >
-      {icon}
-      {children}
-    </span>
+    <div className="flex items-center justify-between gap-3" title={title}>
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-semibold tabular-nums text-foreground">
+        {value === null ? "Unavailable" : `${signed && value >= 0 ? "+" : ""}${formatMetric(value)}${suffix}`}
+      </span>
+    </div>
   );
+}
+
+function WarningLine({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 text-sm leading-relaxed text-warning">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+/* Kept local so evidence formatting remains consistent across the disclosure. */
+function formatMetric(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 

@@ -16,23 +16,22 @@ export function SectionHeader({
   className,
 }: SectionHeaderProps) {
   return (
-    <div className={cn("flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between", className)}>
-      <div className="space-y-2.5">
+    <header className={cn("flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between", className)}>
+      <div className="max-w-3xl">
         {eyebrow && (
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklab,var(--primary)_30%,transparent)] bg-[color-mix(in_oklab,var(--primary)_8%,transparent)] px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-primary">
-            <span className="h-1 w-1 rounded-full bg-primary" />
+          <div className="mb-2 text-xs font-semibold text-primary">
             {eyebrow}
           </div>
         )}
-        <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+        <h1 className="font-display text-[1.75rem] font-semibold leading-tight tracking-[-0.035em] sm:text-[2rem]">
           {title}
         </h1>
         {description && (
-          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-[15px]">{description}</p>
         )}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-    </div>
+    </header>
   );
 }
 
