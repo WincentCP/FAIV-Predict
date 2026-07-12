@@ -27,7 +27,6 @@ def main() -> int:
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     training_source = (ROOT / "ml-service" / "app" / "train_pipeline.py").read_text(encoding="utf-8")
     inference_source = (ROOT / "ml-service" / "app" / "main.py").read_text(encoding="utf-8")
-    usability_analyzer = (ROOT / "scripts" / "analyze_usability.py").read_text(encoding="utf-8")
     powershell_preflight = (ROOT / "scripts" / "thesis_preflight.ps1").read_text(encoding="utf-8")
 
     require(workflow.get("active") is False, "workflow template must import inactive")
@@ -156,16 +155,7 @@ def main() -> int:
         and "evaluation_status" in powershell_preflight,
         "runtime preflight must require v2 evidence and disclose scientific status",
     )
-    require(
-        "def sus_score" in usability_analyzer
-        and "CSV has no participant rows" in usability_analyzer,
-        "usability analyzer must calculate SUS and reject fabricated empty evidence",
-    )
-    for private_evidence_path in (
-        "docs/FINAL_MODEL_EVIDENCE.md",
-        "docs/FINAL_USABILITY_EVIDENCE.md",
-        "docs/usability_responses.csv",
-    ):
+    for private_evidence_path in ("docs/FINAL_MODEL_EVIDENCE.md",):
         require(
             private_evidence_path in gitignore,
             f"private evidence path is not ignored: {private_evidence_path}",
@@ -177,9 +167,6 @@ def main() -> int:
         "docs/THESIS_ML_METHOD.md",
         "docs/DATA_PROVENANCE.md",
         "docs/PRODUCTION_READINESS.md",
-        "docs/THESIS_USABILITY_EVALUATION.md",
-        "docs/usability_responses.template.csv",
-        "scripts/analyze_usability.py",
     ):
         require((ROOT / required_path).is_file(), f"missing required document: {required_path}")
 

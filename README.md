@@ -146,7 +146,7 @@ After a final retraining run, export the actual model evidence without exposing 
 docker compose exec -T ml-service python -m app.thesis_evidence --format markdown
 ```
 
-The academic method, acceptance criteria, recorded verification evidence, demonstration sequence, and real-participant study protocol are maintained in [`docs/THESIS_ML_METHOD.md`](./docs/THESIS_ML_METHOD.md), [`docs/THESIS_TEST_REPORT.md`](./docs/THESIS_TEST_REPORT.md), [`docs/THESIS_DEMO_RUNBOOK.md`](./docs/THESIS_DEMO_RUNBOOK.md), and [`docs/THESIS_USABILITY_EVALUATION.md`](./docs/THESIS_USABILITY_EVALUATION.md). `scripts/analyze_usability.py` converts genuine anonymized U01–U06/SEQ/SUS response rows into a private thesis evidence report and refuses an empty participant file.
+The academic method, acceptance criteria, recorded verification evidence, and demonstration sequence are maintained in [`docs/THESIS_ML_METHOD.md`](./docs/THESIS_ML_METHOD.md), [`docs/THESIS_TEST_REPORT.md`](./docs/THESIS_TEST_REPORT.md), and [`docs/THESIS_DEMO_RUNBOOK.md`](./docs/THESIS_DEMO_RUNBOOK.md).
 
 ---
 

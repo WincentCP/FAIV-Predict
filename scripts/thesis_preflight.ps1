@@ -173,12 +173,6 @@ if (Test-Path ".env") {
     Write-Fail "Repository-root .env is missing"
 }
 
-if (Test-Path "docs/FINAL_USABILITY_EVIDENCE.md") {
-    Write-Pass "final usability evidence file exists"
-} else {
-    Write-Host "WARN final usability evidence is pending real participant sessions" -ForegroundColor Yellow
-}
-
 Write-Host ""
 if ($Failures.Count -gt 0) {
     Write-Host "$($Failures.Count) preflight check(s) failed." -ForegroundColor Red
@@ -187,5 +181,4 @@ if ($Failures.Count -gt 0) {
 
 Write-Host "All automated thesis-machine preflight checks passed." -ForegroundColor Green
 Write-Host "Complete and record the manual A01-A12 scenarios in docs/THESIS_TEST_REPORT.md."
-Write-Host "Collect real U01-U06 responses and generate docs/FINAL_USABILITY_EVIDENCE.md; never fabricate participant data."
 exit 0

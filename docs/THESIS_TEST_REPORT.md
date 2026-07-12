@@ -9,11 +9,9 @@ Scope: academic ML evidence, API behavior, secure automation template, documenta
 The repository contains the controls and evidence-generation paths required for a bachelor-thesis prototype. Final empirical model values and the complete UI demonstration must be regenerated once after deploying this revision because those results depend on the operator's private Supabase data and authenticated local browser session.
 
 Passing automated tests establishes software behavior; it does not, by itself,
-establish predictive validity or usability. Predictive validity is assessed from
-the exported model evidence below, while usability is assessed using
-`docs/THESIS_USABILITY_EVALUATION.md` and the generated
-`docs/FINAL_USABILITY_EVIDENCE.md`. Blank result cells are intentional and must
-never be replaced with estimated or invented values.
+establish predictive validity. Predictive validity is assessed from the exported
+model evidence below. Blank result cells are intentional and must never be
+replaced with estimated or invented values.
 
 Enterprise-scale queues, global high availability, public Instagram publishing, multi-region recovery, SSO, and formal SLA controls are explicitly outside this thesis acceptance scope.
 
@@ -153,7 +151,5 @@ The bachelor-thesis implementation is considered complete when:
 4. acceptance scenarios A01–A12 are recorded;
 5. final model evidence is interpreted and every model is explicitly classified
    as `validated` or `exploratory`;
-6. the usability protocol has been executed and its raw observations, issues,
-   and limitations are recorded without fabricated participants or scores;
-7. the database, n8n volume, `.env`, and `N8N_ENCRYPTION_KEY` have a private backup;
-8. the thesis describes enterprise-only findings as limitations/future work rather than implemented capabilities.
+6. the database, n8n volume, `.env`, and `N8N_ENCRYPTION_KEY` have a private backup;
+7. the thesis describes enterprise-only findings as limitations/future work rather than implemented capabilities.

@@ -15,7 +15,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: python scripts/verify_thesis_readiness.py
-      - run: python -m py_compile scripts/analyze_usability.py
       - run: bash -n scripts/verify_env.sh
       - name: Validate Docker Compose interpolation and service graph
         env:

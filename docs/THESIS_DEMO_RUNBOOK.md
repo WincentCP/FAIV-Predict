@@ -51,19 +51,6 @@ not a fixed-horizon metric snapshot.
 11. Review every exported model's `scientific_gate` and `evaluation_status`.
     Present a missing test class or zero class recall as `exploratory`, even if
     the artifact passed the separate operational promotion gate.
-12. Complete the usability study in
-    `docs/THESIS_USABILITY_EVALUATION.md` before reporting any usability score.
-    Do not create placeholder participants or estimated SUS values.
-13. Generate the anonymized usability summary from real response rows:
-
-    ```powershell
-    python .\scripts\analyze_usability.py .\docs\usability_responses.csv `
-      --minimum-participants 5 `
-      --output .\docs\FINAL_USABILITY_EVIDENCE.md
-    ```
-
-    Keep the raw response CSV private and review the generated report before
-    using it in the thesis.
 
 ## Private backup
 
@@ -189,21 +176,6 @@ Interpret evidence in this order:
 Do not lead with accuracy alone. If evidence is `exploratory`, say so directly
 and frame the demonstrated contribution as a traceable decision-support
 artifact rather than proof of generalized predictive accuracy.
-
-### 8. Usability evidence
-
-Show `FINAL_USABILITY_EVIDENCE.md` together with the protocol and anonymized
-issue summary from `THESIS_USABILITY_EVALUATION.md`:
-
-- participant count and relevant experience mix;
-- task completion and moderator assistance;
-- whether participants correctly understood raw score, provisional, and stale
-  states;
-- SEQ/SUS descriptive results;
-- usability issues found, changes made, and retest evidence.
-
-State the actual small-sample limitation. Do not claim population-level
-usability significance.
 
 ## Failure demonstrations
 
