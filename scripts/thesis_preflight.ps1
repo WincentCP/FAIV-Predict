@@ -96,7 +96,14 @@ if (-not $SkipModelEvidence) {
         $EvidenceOutput = & docker compose exec -T ml-service python -m app.thesis_evidence --format json
         if ($LASTEXITCODE -ne 0) { throw "model evidence exporter failed" }
         $EvidenceJson = $EvidenceOutput -join [Environment]::NewLine
-        $Models = @($EvidenceJson | ConvertFrom-Json)
+        # Windows PowerShell 5.1 can preserve a top-level JSON array as one
+        # nested System.Object[]. Enumerate it explicitly so each loop item is
+        # one model object on both Windows PowerShell 5.1 and PowerShell 7.
+        $ParsedEvidence = ConvertFrom-Json -InputObject $EvidenceJson
+        $Models = @()
+        foreach ($ParsedModel in $ParsedEvidence) {
+            $Models += $ParsedModel
+        }
         if ($Models.Count -eq 0) { throw "no trained models found" }
         foreach ($Model in $Models) {
             $Metrics = $Model.metrics
@@ -111,7 +118,13 @@ if (-not $SkipModelEvidence) {
                 throw "model $Scope did not pass the majority-baseline promotion gate"
             }
             foreach ($ClassName in @("LOW", "AVERAGE", "HIGH")) {
-                if ([int]$Metrics.train_class_distribution.$ClassName -le 0) {
+                $ClassProperty = $Metrics.train_class_distribution.PSObject.Properties[$ClassName]
+                $ClassCount = 0
+                if (
+                    $null -eq $ClassProperty -or
+                    -not [int]::TryParse([string]$ClassProperty.Value, [ref]$ClassCount) -or
+                    $ClassCount -le 0
+                ) {
                     throw "model $Scope training split is missing class $ClassName"
                 }
             }

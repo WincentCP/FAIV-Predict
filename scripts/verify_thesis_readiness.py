@@ -137,6 +137,11 @@ def main() -> int:
         re.search(r"\$[A-Za-z_][A-Za-z0-9_]*:", powershell_preflight) is None,
         "PowerShell variables immediately followed by ':' must use ${Variable} syntax",
     )
+    require(
+        "foreach ($ParsedModel in $ParsedEvidence)" in powershell_preflight
+        and "[int]$Metrics.train_class_distribution" not in powershell_preflight,
+        "PowerShell 5.1 model evidence arrays must be flattened before class validation",
+    )
 
     for required_path in (
         "docs/THESIS_TEST_REPORT.md",
