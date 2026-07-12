@@ -108,11 +108,19 @@ if (-not $SkipModelEvidence) {
         foreach ($Model in $Models) {
             $Metrics = $Model.metrics
             $Scope = if ($Model.brand_name) { $Model.brand_name } elseif ($Model.niche) { $Model.niche } else { $Model.brand_id }
-            if ($Metrics.evaluation_contract -ne "faiv-thesis-v1") {
-                throw "model $Scope was trained before faiv-thesis-v1; execute sync/retrain again"
+            if ($Metrics.evaluation_contract -ne "faiv-thesis-v2") {
+                throw "model $Scope was trained before faiv-thesis-v2; execute sync/retrain again"
             }
-            if (-not $Metrics.dataset.dataset_sha256 -or -not $Metrics.candidate.confusion_matrix) {
-                throw "model $Scope is missing dataset or confusion-matrix evidence"
+            if (
+                -not $Metrics.dataset.dataset_sha256 -or
+                -not $Metrics.candidate.confusion_matrix -or
+                $null -eq $Metrics.candidate.balanced_accuracy -or
+                $null -eq $Metrics.candidate.ordinal_mae -or
+                -not $Metrics.comparators.logistic_regression -or
+                -not $Metrics.temporal_evaluation.summary -or
+                -not $Metrics.scientific_gate
+            ) {
+                throw "model $Scope is missing v2 statistical or comparison evidence"
             }
             if ($Metrics.promotion_gate.passed -ne $true -or $Metrics.accuracy_gain_over_baseline -le 0) {
                 throw "model $Scope did not pass the majority-baseline promotion gate"
@@ -134,7 +142,14 @@ if (-not $SkipModelEvidence) {
             if (@($Metrics.promotion_gate.warnings).Count -gt 0) {
                 Write-Host "WARN model ${Scope}: $($Metrics.promotion_gate.warnings -join ', ')" -ForegroundColor Yellow
             }
-            Write-Pass "model evidence is complete for $Scope (version $($Model.version))"
+            if ($Metrics.evaluation_status -notin @("validated", "exploratory")) {
+                throw "model $Scope has no valid scientific evaluation status"
+            }
+            if ($Metrics.evaluation_status -eq "exploratory") {
+                $Reasons = @($Metrics.scientific_gate.failure_reasons) -join ", "
+                Write-Host "WARN model ${Scope} is scientifically exploratory: $Reasons" -ForegroundColor Yellow
+            }
+            Write-Pass "model evidence is complete for $Scope (version $($Model.version), status $($Metrics.evaluation_status))"
         }
     } catch {
         Write-Fail "Final model evidence is incomplete: $($_.Exception.Message)"
@@ -158,6 +173,12 @@ if (Test-Path ".env") {
     Write-Fail "Repository-root .env is missing"
 }
 
+if (Test-Path "docs/FINAL_USABILITY_EVIDENCE.md") {
+    Write-Pass "final usability evidence file exists"
+} else {
+    Write-Host "WARN final usability evidence is pending real participant sessions" -ForegroundColor Yellow
+}
+
 Write-Host ""
 if ($Failures.Count -gt 0) {
     Write-Host "$($Failures.Count) preflight check(s) failed." -ForegroundColor Red
@@ -166,4 +187,5 @@ if ($Failures.Count -gt 0) {
 
 Write-Host "All automated thesis-machine preflight checks passed." -ForegroundColor Green
 Write-Host "Complete and record the manual A01-A12 scenarios in docs/THESIS_TEST_REPORT.md."
+Write-Host "Collect real U01-U06 responses and generate docs/FINAL_USABILITY_EVIDENCE.md; never fabricate participant data."
 exit 0

@@ -24,8 +24,10 @@ def main() -> int:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     n8n_readme = (ROOT / "n8n" / "README.md").read_text(encoding="utf-8")
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     training_source = (ROOT / "ml-service" / "app" / "train_pipeline.py").read_text(encoding="utf-8")
     inference_source = (ROOT / "ml-service" / "app" / "main.py").read_text(encoding="utf-8")
+    usability_analyzer = (ROOT / "scripts" / "analyze_usability.py").read_text(encoding="utf-8")
     powershell_preflight = (ROOT / "scripts" / "thesis_preflight.ps1").read_text(encoding="utf-8")
 
     require(workflow.get("active") is False, "workflow template must import inactive")
@@ -121,6 +123,13 @@ def main() -> int:
     for required_training_contract in (
         "MIN_POST_AGE_DAYS = 7",
         '"promotion_gate"',
+        '"scientific_gate"',
+        '"evaluation_status"',
+        '"temporal_evaluation"',
+        '"comparators"',
+        '"balanced_accuracy"',
+        '"ordinal_mae"',
+        '"faiv-thesis-v2"',
         '"post_hour_support"',
         "ModelQualityError",
         '"runtime"',
@@ -142,6 +151,25 @@ def main() -> int:
         and "[int]$Metrics.train_class_distribution" not in powershell_preflight,
         "PowerShell 5.1 model evidence arrays must be flattened before class validation",
     )
+    require(
+        'evaluation_contract -ne "faiv-thesis-v2"' in powershell_preflight
+        and "evaluation_status" in powershell_preflight,
+        "runtime preflight must require v2 evidence and disclose scientific status",
+    )
+    require(
+        "def sus_score" in usability_analyzer
+        and "CSV has no participant rows" in usability_analyzer,
+        "usability analyzer must calculate SUS and reject fabricated empty evidence",
+    )
+    for private_evidence_path in (
+        "docs/FINAL_MODEL_EVIDENCE.md",
+        "docs/FINAL_USABILITY_EVIDENCE.md",
+        "docs/usability_responses.csv",
+    ):
+        require(
+            private_evidence_path in gitignore,
+            f"private evidence path is not ignored: {private_evidence_path}",
+        )
 
     for required_path in (
         "docs/THESIS_TEST_REPORT.md",
@@ -149,6 +177,9 @@ def main() -> int:
         "docs/THESIS_ML_METHOD.md",
         "docs/DATA_PROVENANCE.md",
         "docs/PRODUCTION_READINESS.md",
+        "docs/THESIS_USABILITY_EVALUATION.md",
+        "docs/usability_responses.template.csv",
+        "scripts/analyze_usability.py",
     ):
         require((ROOT / required_path).is_file(), f"missing required document: {required_path}")
 

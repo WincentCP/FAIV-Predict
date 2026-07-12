@@ -128,13 +128,14 @@ def format_markdown(rows: Iterable[Dict[str, Any]]) -> str:
         "",
         "Generated from the latest application-append-only `models.metrics` records. Raw captions and secrets are excluded.",
         "",
-        "| Scope | Version | Train/Test | Accuracy | Macro F1 | Baseline accuracy | Gain | Dataset SHA-256 |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Scope | Version | Scientific status | Train/Test | Accuracy | Macro F1 | Balanced accuracy | Dummy accuracy | Logistic accuracy | Accuracy gain | Ordinal MAE | QWK | Dataset SHA-256 |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in rows:
         metrics = _metrics(row)
         candidate = metrics.get("candidate") or {}
         baseline = metrics.get("baseline") or {}
+        logistic = ((metrics.get("comparators") or {}).get("logistic_regression") or {})
         dataset = metrics.get("dataset") or {}
         runtime = metrics.get("runtime") or {}
         scope = row.get("brand_name") or row.get("niche") or row.get("brand_id") or "unknown"
@@ -142,15 +143,20 @@ def format_markdown(rows: Iterable[Dict[str, Any]]) -> str:
         if len(dataset_hash) == 64:
             dataset_hash = f"`{dataset_hash}`"
         lines.append(
-            "| {scope} | {version} | {train}/{test} | {accuracy} | {macro_f1} | {baseline} | {gain} | {dataset_hash} |".format(
+            "| {scope} | {version} | {status} | {train}/{test} | {accuracy} | {macro_f1} | {balanced} | {baseline} | {logistic} | {gain} | {ordinal_mae} | {qwk} | {dataset_hash} |".format(
                 scope=str(scope).replace("|", "\\|"),
                 version=row.get("version") or "not recorded",
+                status=metrics.get("evaluation_status") or "legacy/not assessed",
                 train=metrics.get("train_samples", "?"),
                 test=metrics.get("test_samples", "?"),
                 accuracy=_number(candidate.get("accuracy", metrics.get("accuracy"))),
                 macro_f1=_number((candidate.get("macro") or {}).get("f1_score")),
+                balanced=_number(candidate.get("balanced_accuracy")),
                 baseline=_number(baseline.get("accuracy")),
+                logistic=_number(logistic.get("accuracy")),
                 gain=_number(metrics.get("accuracy_gain_over_baseline")),
+                ordinal_mae=_number(candidate.get("ordinal_mae")),
+                qwk=_number(candidate.get("quadratic_weighted_kappa")),
                 dataset_hash=dataset_hash,
             )
         )
@@ -159,6 +165,10 @@ def format_markdown(rows: Iterable[Dict[str, Any]]) -> str:
     for row in rows:
         metrics = _metrics(row)
         dataset = metrics.get("dataset") or {}
+        scientific_gate = metrics.get("scientific_gate") or {}
+        temporal_summary = ((metrics.get("temporal_evaluation") or {}).get("summary") or {})
+        test_distribution = metrics.get("test_class_distribution") or {}
+        permutation = metrics.get("holdout_permutation_importance") or {}
         scope = row.get("brand_name") or row.get("niche") or row.get("brand_id") or "unknown"
         lines.extend([
             f"### {scope} — {row.get('version') or 'unknown version'}",
@@ -167,6 +177,20 @@ def format_markdown(rows: Iterable[Dict[str, Any]]) -> str:
             f"- Chronological split: `{metrics.get('split') or 'not recorded'}`",
             f"- Data window: `{dataset.get('first_post_at') or 'unknown'}` to `{dataset.get('last_post_at') or 'unknown'}`",
             f"- Verified posts: `{dataset.get('verified_posts', metrics.get('verified_posts', 'unknown'))}`",
+            "- Held-out class support (LOW/AVERAGE/HIGH): "
+            f"`{test_distribution.get('LOW', 'unknown')}/"
+            f"{test_distribution.get('AVERAGE', 'unknown')}/"
+            f"{test_distribution.get('HIGH', 'unknown')}`",
+            f"- Scientific status: `{metrics.get('evaluation_status') or 'not assessed'}`",
+            f"- Scientific decision: `{scientific_gate.get('decision') or 'not assessed'}`",
+            "- Scientific failure reasons: `" + (
+                ", ".join(scientific_gate.get("failure_reasons") or []) or "none"
+            ) + "`",
+            "- Temporal folds (evaluated/positive/skipped): "
+            f"`{temporal_summary.get('evaluated_folds', 'unknown')}/"
+            f"{temporal_summary.get('positive_gain_folds', 'unknown')}/"
+            f"{temporal_summary.get('skipped_folds', 'unknown')}`",
+            f"- Holdout permutation importance available: `{permutation.get('available', False)}`",
             f"- Training code SHA-256: `{metrics.get('training_code_sha256') or 'not recorded'}`",
             f"- Requirements SHA-256: `{runtime.get('requirements_sha256') or 'not recorded'}`",
             f"- Runtime: Python `{runtime.get('python') or 'unknown'}`, scikit-learn `{runtime.get('scikit_learn') or 'unknown'}`, pandas `{runtime.get('pandas') or 'unknown'}`, NumPy `{runtime.get('numpy') or 'unknown'}`",
@@ -178,6 +202,16 @@ def format_markdown(rows: Iterable[Dict[str, Any]]) -> str:
             "```",
             "",
         ])
+
+    lines.extend([
+        "## Interpretation boundary",
+        "",
+        "- `validated` means every implemented scientific gate passed for this internal temporal evaluation; it does not prove external validity for unrepresented brands or future Instagram regimes.",
+        "- `exploratory` is an honest usable result with insufficient or inconsistent scientific evidence. It must not be reported as validated merely because the operational promotion gate passed.",
+        "- Raw Random Forest class scores are not calibrated probabilities, and counterfactual score changes are not causal engagement uplift.",
+        "- The outcome is a relative cumulative likes-and-comments tier using the follower count captured at first observation, not an exact fixed seven-day outcome.",
+        "",
+    ])
     return "\n".join(lines)
 
 

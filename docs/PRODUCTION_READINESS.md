@@ -13,7 +13,7 @@ Enterprise readiness is a future-work review, not the acceptance contract for th
 
 The thesis does not claim public Instagram publishing, calibrated causal uplift, enterprise multi-user governance, globally distributed scaling, managed disaster recovery, or contractual SLA compliance.
 
-The Predict workflow is the strongest part of the product, but its current scores are uncalibrated, duplicate POST requests are not idempotent, deployment has only a thesis-level majority-baseline promotion gate rather than full champion/candidate control, and the product has no durable publication-job architecture. Calendar is a planning workspace, not an Instagram publishing engine.
+The Predict workflow is the strongest part of the product, but its current scores are uncalibrated, duplicate POST requests are not idempotent, and deployment has thesis-level operational/scientific gates rather than full enterprise champion/candidate control. The product also has no durable publication-job architecture. Calendar is a planning workspace, not an Instagram publishing engine.
 
 This release adds a safety foundation:
 
@@ -459,7 +459,7 @@ Initial Predict service target:
 4. Calendar is not a publishing engine, despite schedule-like product language.
 5. Engagement observations are overwritten rather than maturity-versioned.
 6. Training runs in process-local background tasks instead of a durable queue.
-7. Model activation has a minimal majority-baseline rejection gate but lacks explicit candidate/champion state, regression against the current champion, and one-click rollback.
+7. Model activation has an operational majority-baseline gate plus a separate thesis scientific gate, but still lacks explicit candidate/champion state, regression against the current champion, and one-click rollback.
 8. Unsigned joblib deserialization creates an artifact supply-chain risk.
 9. Browser and Python feature extraction can disagree.
 10. Exact prediction-to-publication linkage is incomplete end to end.

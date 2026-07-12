@@ -27,6 +27,8 @@ ml-service/.env
 n8n/.data/
 backups/
 docs/FINAL_MODEL_EVIDENCE.md
+docs/FINAL_USABILITY_EVIDENCE.md
+docs/usability_responses.csv
 
 # Logs
 logs/

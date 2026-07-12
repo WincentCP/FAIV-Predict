@@ -18,12 +18,12 @@ export function FormatComparison({
   const cells = [
     {
       format: currentFormat,
-      probability: formatProbes[0].from_prob_high,
+      highClassScore: formatProbes[0].from_prob_high,
       current: true,
     },
     ...formatProbes.map((probe) => ({
       format: String(probe.to_value),
-      probability: probe.to_prob_high,
+      highClassScore: probe.to_prob_high,
       current: false,
     })),
   ];
@@ -31,7 +31,7 @@ export function FormatComparison({
   return (
     <Panel
       title="Format Comparison"
-      subtitle="Format is fixed by the content calendar. Use this planning intelligence when building the next one, not as a last-minute post change."
+      subtitle="A one-feature model sensitivity check. These raw class scores are not calibrated probabilities or guaranteed performance changes."
     >
       <div className="mb-4 flex items-start gap-2 rounded-xl border border-border/60 bg-surface-2/40 p-3 text-xs text-muted-foreground">
         <CalendarRange className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
@@ -39,7 +39,7 @@ export function FormatComparison({
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         {cells.map((cell) => {
-          const probability = Math.max(0, Math.min(100, cell.probability));
+          const highClassScore = Math.max(0, Math.min(100, cell.highClassScore));
           return (
             <div
               key={cell.format}
@@ -57,13 +57,17 @@ export function FormatComparison({
                 )}
               </div>
               <div className="mt-4 flex items-end justify-between font-mono tabular-nums">
-                <span className="text-xs text-muted-foreground">P(High)</span>
-                <span className="text-lg font-black text-foreground">{probability}%</span>
+                <span className="text-xs text-muted-foreground">Raw High score</span>
+                <span className="text-lg font-black text-foreground">{highClassScore}/100</span>
               </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-3">
+              <div
+                className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-3"
+                role="img"
+                aria-label={`${cell.format}: raw High class score ${highClassScore} out of 100; not a calibrated probability`}
+              >
                 <div
                   className={cn("h-full rounded-full", cell.current ? "bg-primary" : "bg-muted-foreground/50")}
-                  style={{ width: `${probability}%` }}
+                  style={{ width: `${highClassScore}%` }}
                 />
               </div>
             </div>
@@ -73,4 +77,3 @@ export function FormatComparison({
     </Panel>
   );
 }
-

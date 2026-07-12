@@ -11,19 +11,33 @@ const OOD_LABELS: Record<string, string> = {
 
 /**
  * One quiet row stating exactly what this score is based on — model scope,
- * training-set size, validated accuracy, and version. Trust through
- * disclosure, not decoration.
+ * training and holdout size, class-aware evaluation metrics, baseline gain,
+ * and version. Trust through disclosure, not decoration.
  */
 export function TrustStrip({
   isPersonalModel,
   trainedSamples,
   modelAccuracy,
+  modelMacroF1,
+  modelBalancedAccuracy,
+  baselineAccuracy,
+  accuracyGainOverBaseline,
+  testSamples,
+  heldOutClassesComplete,
+  evaluationStatus,
   modelVersion,
   outOfRange,
 }: {
   isPersonalModel: boolean;
   trainedSamples: number | null;
   modelAccuracy: number | null;
+  modelMacroF1: number | null;
+  modelBalancedAccuracy: number | null;
+  baselineAccuracy: number | null;
+  accuracyGainOverBaseline: number | null;
+  testSamples: number | null;
+  heldOutClassesComplete: boolean | null;
+  evaluationStatus: "validated" | "exploratory" | null;
   modelVersion: string | null;
   outOfRange: string[];
 }) {
@@ -42,7 +56,7 @@ export function TrustStrip({
       )}
       {trainedSamples !== null && trainedSamples < 50 && (
         <WarningChip>
-          early model — trained on under 50 posts; treat scores as directional
+          limited training set — under 50 posts; treat scores as exploratory
         </WarningChip>
       )}
       {outOfRange.map((feature) => (
@@ -50,13 +64,62 @@ export function TrustStrip({
           {OOD_LABELS[feature] || feature} is outside anything this model trained on
         </WarningChip>
       ))}
-      {modelAccuracy !== null && (
+      {(modelAccuracy !== null || testSamples !== null) && (
         <Chip
           icon={<Check className="h-3 w-3" />}
-          title="How often this model's tier predictions matched reality when validated on the newest 20% of its training data"
+          title="Held-out evaluation uses the newest chronological 20% of eligible posts"
         >
-          {modelAccuracy}% validated accuracy
+          holdout: {modelAccuracy !== null ? `${formatMetric(modelAccuracy)}% accuracy` : "accuracy unavailable"}
+          {testSamples !== null ? ` · n=${testSamples}` : ""}
         </Chip>
+      )}
+      {modelMacroF1 !== null && (
+        <Chip
+          icon={<Check className="h-3 w-3" />}
+          title="Macro-F1 gives Low, Average, and High tiers equal weight, regardless of how frequent each tier is"
+        >
+          macro-F1 {formatMetric(modelMacroF1)}%
+        </Chip>
+      )}
+      {modelBalancedAccuracy !== null && (
+        <Chip
+          icon={<Check className="h-3 w-3" />}
+          title="Balanced accuracy is the average recall across the three engagement tiers"
+        >
+          balanced accuracy {formatMetric(modelBalancedAccuracy)}%
+        </Chip>
+      )}
+      {accuracyGainOverBaseline !== null && (
+        <Chip
+          icon={<Check className="h-3 w-3" />}
+          title={
+            baselineAccuracy !== null
+              ? `Compared with a majority-class baseline accuracy of ${formatMetric(baselineAccuracy)}%`
+              : "Compared with the majority-class baseline"
+          }
+        >
+          {accuracyGainOverBaseline >= 0 ? "+" : ""}{formatMetric(accuracyGainOverBaseline)} pp vs majority baseline
+        </Chip>
+      )}
+      {heldOutClassesComplete === true && (
+        <Chip icon={<Check className="h-3 w-3" />} title="Low, Average, and High all occur in the chronological holdout">
+          all 3 tiers represented in holdout
+        </Chip>
+      )}
+      {heldOutClassesComplete === false && (
+        <WarningChip>
+          holdout is missing at least one tier; evaluation is exploratory
+        </WarningChip>
+      )}
+      {evaluationStatus === "validated" && (
+        <Chip icon={<Check className="h-3 w-3" />} title="This model passed the configured thesis scientific gate">
+          scientific gate passed
+        </Chip>
+      )}
+      {evaluationStatus === "exploratory" && heldOutClassesComplete !== false && (
+        <WarningChip>
+          evaluation is exploratory; do not treat this score as established accuracy
+        </WarningChip>
       )}
       {modelVersion && (
         <Chip icon={<Tag className="h-3 w-3" />} title="Models retrain automatically every week on freshly synced posts">
@@ -65,6 +128,10 @@ export function TrustStrip({
       )}
     </div>
   );
+}
+
+function formatMetric(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function WarningChip({ children }: { children: React.ReactNode }) {

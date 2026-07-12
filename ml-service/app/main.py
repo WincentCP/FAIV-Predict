@@ -207,12 +207,39 @@ def run_training_job_async(job_id: str, brand_id: Optional[str], niche: Optional
             conn.close()
 
 
-def build_counterfactuals(model, base_features, feature_order, classes, base_probs):
+def _positive_int_mapping(value: Any, *, minimum: int = 0, maximum: int | None = None) -> Dict[int, int]:
+    """Normalize artifact count mappings without trusting serialized key types."""
+    normalized: Dict[int, int] = {}
+    if not isinstance(value, dict):
+        return normalized
+    for raw_key, raw_count in value.items():
+        try:
+            key = int(raw_key)
+            count = int(raw_count)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if key < minimum or (maximum is not None and key > maximum) or count <= 0:
+            continue
+        normalized[key] = count
+    return normalized
+
+
+def build_counterfactuals(
+    model,
+    base_features,
+    feature_order,
+    classes,
+    base_probs,
+    *,
+    post_hour_support=None,
+    feature_reference_values=None,
+):
     """
     What-if analysis: re-scores single-feature variants of the SAME draft with
-    the SAME model and reports the measured change in P(High). This is
-    evidence, not heuristics — probes that show no gain are reported honestly.
-    Probes only touch features the loaded model was actually trained on.
+    the SAME model and reports the measured change in the raw High-class score.
+    The score change is model-derived, not a causal uplift estimate. Candidate
+    values come from the artifact's training split wherever those values are
+    available; probes never invent an unsupported posting hour.
     """
     class_list = [str(c).upper() for c in classes]
     if "HIGH" not in class_list:
@@ -225,18 +252,42 @@ def build_counterfactuals(model, base_features, feature_order, classes, base_pro
     base_class = str(classes[int(np.argmax(base_probs))]).upper()
 
     probes = []  # (parameter, change, from_value, to_value, overrides)
+    reference_values = (
+        feature_reference_values if isinstance(feature_reference_values, dict) else {}
+    )
     hour = int(base_features.get("post_hour", 0))
-    for h in (9, 12, 17, 19, 21):
+    supported_hours = sorted(
+        _positive_int_mapping(post_hour_support, minimum=0, maximum=23)
+    )
+    for h in supported_hours:
         if h != hour:
             probes.append(("post_hour", f"Move posting time to {h}:00", hour, h, {"post_hour": float(h)}))
     if base_features.get("has_cta", 0.0) == 0.0:
         probes.append(("has_cta", "Add a call-to-action", "No", "Yes", {"has_cta": 1.0}))
-    tags = base_features.get("hashtag_count", 0.0)
-    if tags < 3 or tags > 8:
-        probes.append(("hashtag_count", "Use 5 hashtags", int(tags), 5, {"hashtag_count": 5.0}))
-    length = base_features.get("caption_length", 0.0)
-    if length < 180 or length > 320:
-        probes.append(("caption_length", "Bring the caption to ~250 characters", int(length), 250, {"caption_length": 250.0}))
+    tags = int(base_features.get("hashtag_count", 0.0))
+    reference_tags = reference_values.get("hashtag_count_median")
+    if isinstance(reference_tags, (int, float)):
+        reference_tags = max(0, int(round(reference_tags)))
+        if tags != reference_tags:
+            probes.append((
+                "hashtag_count",
+                f"Compare with the training median of {reference_tags} hashtags",
+                tags,
+                reference_tags,
+                {"hashtag_count": float(reference_tags)},
+            ))
+    length = int(base_features.get("caption_length", 0.0))
+    reference_length = reference_values.get("caption_length_median")
+    if isinstance(reference_length, (int, float)):
+        reference_length = max(0, int(round(reference_length)))
+        if length != reference_length:
+            probes.append((
+                "caption_length",
+                f"Compare with the training median of about {reference_length} characters",
+                length,
+                reference_length,
+                {"caption_length": float(reference_length)},
+            ))
     fmt_flags = {"Reels": "is_reels", "Carousel": "is_carousel", "Single Image": "is_single_image"}
     current_fmt = next((n for n, f in fmt_flags.items() if base_features.get(f, 0.0) == 1.0), None)
     for name, flag in fmt_flags.items():
@@ -279,8 +330,8 @@ def build_counterfactuals(model, base_features, feature_order, classes, base_pro
             "tier_changed": new_class != base_class,
         })
 
-    # Keep only the single best posting-hour probe — four near-identical hour
-    # rows would drown the rest of the list.
+        # Keep only the best artifact-supported posting hour so the UI remains
+        # useful without presenting unsupported/extrapolated schedules.
     hour_rows = [r for r in results if r["parameter"] == "post_hour"]
     if hour_rows:
         best = max(hour_rows, key=lambda r: r["to_prob_high"])
@@ -435,7 +486,13 @@ def predict(req: PredictionRequest):
         # hour scenario and explain why the remaining recommendations wait.
         if time_known:
             counterfactuals, cf_note = build_counterfactuals(
-                model, features, feature_order, classes, probs_raw
+                model,
+                features,
+                feature_order,
+                classes,
+                probs_raw,
+                post_hour_support=bundle.get("post_hour_support"),
+                feature_reference_values=bundle.get("feature_reference_values"),
             )
         else:
             class_list = [str(value).upper() for value in classes]
@@ -466,13 +523,21 @@ def predict(req: PredictionRequest):
             )
             cf_note = (
                 "Posting time is not set. This provisional tier averages "
-                f"{scenario_description} equally. Set a time and re-analyze "
+                f"{scenario_description}. Set a time and re-analyze "
                 "for complete what-if recommendations."
             )
 
         # Training-set size for the trust display (metrics may be a JSON string
         # depending on the driver).
         trained_samples = None
+        test_samples = None
+        macro_f1 = None
+        balanced_accuracy = None
+        baseline_accuracy = None
+        accuracy_gain_over_baseline = None
+        held_out_classes_complete = None
+        evaluation_status = None
+        scientific_gate_passed = None
         metrics_blob = metadata.get("metrics")
         if isinstance(metrics_blob, str):
             try:
@@ -481,6 +546,21 @@ def predict(req: PredictionRequest):
                 metrics_blob = None
         if isinstance(metrics_blob, dict):
             trained_samples = metrics_blob.get("train_samples")
+            test_samples = metrics_blob.get("test_samples")
+            candidate_metrics = metrics_blob.get("candidate") or {}
+            baseline_metrics = metrics_blob.get("baseline") or {}
+            macro_metrics = candidate_metrics.get("macro") or {}
+            macro_f1 = macro_metrics.get("f1_score")
+            balanced_accuracy = candidate_metrics.get("balanced_accuracy")
+            baseline_accuracy = baseline_metrics.get("accuracy")
+            accuracy_gain_over_baseline = metrics_blob.get("accuracy_gain_over_baseline")
+            evaluation_status = metrics_blob.get("evaluation_status")
+            scientific_gate = metrics_blob.get("scientific_gate") or {}
+            scientific_gate_passed = scientific_gate.get("passed")
+            scientific_criteria = scientific_gate.get("hard_criteria") or {}
+            held_out_classes_complete = scientific_criteria.get(
+                "all_held_out_classes_present"
+            )
 
         # 5. Persist only the fully assembled prediction. Brand-scoped requests
         # are successful only when creator provenance is durably recorded.
@@ -610,7 +690,15 @@ def predict(req: PredictionRequest):
                 "accuracy": float(metadata["accuracy"]) if metadata.get("accuracy") is not None else None,
                 "is_personal_model_active": is_personal_model_active,
                 "feature_names": feature_order,
-                "trained_samples": trained_samples
+                "trained_samples": trained_samples,
+                "test_samples": test_samples,
+                "macro_f1": macro_f1,
+                "balanced_accuracy": balanced_accuracy,
+                "baseline_accuracy": baseline_accuracy,
+                "accuracy_gain_over_baseline": accuracy_gain_over_baseline,
+                "held_out_classes_complete": held_out_classes_complete,
+                "evaluation_status": evaluation_status,
+                "scientific_gate_passed": scientific_gate_passed,
             },
             "feature_importances": feature_importances,
             "out_of_range": out_of_range,

@@ -56,6 +56,8 @@ class ModelLoader:
                         WHERE brand_id = %s AND model_type = 'account'
                           AND metrics->>'data_source' = 'instagram_graph'
                           AND metrics->>'identity_key' = 'instagram_media_id'
+                          AND metrics->>'evaluation_contract' IN ('faiv-thesis-v1', 'faiv-thesis-v2')
+                          AND metrics->'promotion_gate'->>'passed' = 'true'
                         ORDER BY created_at DESC LIMIT 1
                         """,
                         (brand_id,)
@@ -73,6 +75,8 @@ class ModelLoader:
                         WHERE niche = %s AND model_type = 'niche' AND brand_id IS NULL
                           AND metrics->>'data_source' = 'instagram_graph'
                           AND metrics->>'identity_key' = 'instagram_media_id'
+                          AND metrics->>'evaluation_contract' IN ('faiv-thesis-v1', 'faiv-thesis-v2')
+                          AND metrics->'promotion_gate'->>'passed' = 'true'
                         ORDER BY created_at DESC LIMIT 1
                         """,
                         (niche,)

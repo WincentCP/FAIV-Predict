@@ -200,7 +200,9 @@ export default function HistoryPage() {
                 <th className="px-6 py-5">Brand</th>
                 <th className="px-6 py-5">Format</th>
                 <th className="px-6 py-5">Caption preview</th>
-                <th className="px-6 py-5 text-center">Confidence</th>
+                <th className="px-6 py-5 text-center" title="Uncalibrated score for the predicted class">
+                  Raw score
+                </th>
                 <th className="px-6 py-5">Predicted</th>
                 <th className="px-6 py-5">Actual</th>
                 <th className="px-6 py-5">When</th>
@@ -240,10 +242,13 @@ export default function HistoryPage() {
                     </p>
                   </td>
 
-                  {/* Confidence */}
+                  {/* Raw predicted-class score; not a calibrated probability. */}
                   <td className="px-6 py-5 align-middle text-center">
-                    <span className="font-mono text-xs font-semibold tabular-nums">
-                      {h.confidence != null ? `${h.confidence}%` : "Not recorded"}
+                    <span
+                      className="font-mono text-xs font-semibold tabular-nums"
+                      title="Raw class score; not a calibrated probability"
+                    >
+                      {h.confidence != null ? `${h.confidence}/100` : "Not recorded"}
                     </span>
                   </td>
 

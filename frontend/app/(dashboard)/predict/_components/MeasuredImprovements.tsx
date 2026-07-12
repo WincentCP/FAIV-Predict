@@ -78,11 +78,11 @@ export function MeasuredImprovements({
                     </div>
                     <p className="text-xs font-semibold text-foreground">{c.change}</p>
                     <p className="flex items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground">
-                      Raw High score {c.from_prob_high}%
+                      Raw High score {c.from_prob_high}/100
                       <ArrowRight className="h-3 w-3" />
-                      <span className="font-bold text-foreground">{c.to_prob_high}%</span>
+                      <span className="font-bold text-foreground">{c.to_prob_high}/100</span>
                       <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-xs font-bold text-emerald-600">
-                        +{c.delta_high}pp
+                        +{c.delta_high} points
                       </span>
                     </p>
                   </div>
@@ -126,4 +126,3 @@ export function MeasuredImprovements({
     </Panel>
   );
 }
-

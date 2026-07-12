@@ -8,12 +8,14 @@ import { cn } from "@/lib/utils";
 export type MaturityState = "low" | "learning" | "personal";
 
 export interface ModelMaturityProps {
-  /** Number of training samples collected for this account/model. */
+  /** Number of posts currently attributed to this account. */
   samples: number;
-  /** Threshold for "Personal Model Active". Default 200. */
+  /** Threshold at which an account model can become available. Default 200. */
   target?: number;
-  /** Cutoff for "Low Confidence". Default 50. */
+  /** Cutoff for the early-history state. Default 50. */
   lowThreshold?: number;
+  /** Artifact scope actually available to serve predictions for this brand. */
+  activeScope?: "personal" | "cohort" | "none";
   variant?: "compact" | "full";
   className?: string;
 }
@@ -28,31 +30,31 @@ const META: Record<MaturityState, {
   label: string;
   short: string;
   Icon: React.ComponentType<{ className?: string }>;
-  tone: string; // tailwind text color class
+  tone: string;
   ring: string;
   bg: string;
   dot: string;
   description: string;
 }> = {
   low: {
-    label: "Low confidence",
+    label: "Limited account history",
     short: "Cold start",
     Icon: AlertCircle,
     tone: "text-[oklch(0.55_0.18_45)] dark:text-[oklch(0.82_0.16_75)]",
     ring: "ring-[color-mix(in_oklab,hsl(var(--warning))_40%,transparent)]",
     bg: "bg-[color-mix(in_oklab,hsl(var(--warning))_12%,transparent)]",
     dot: "bg-warning",
-    description: "Predictions use niche-level patterns until enough personal data is collected.",
+    description: "Predictions use the available niche model while this account builds enough eligible history for a separate personal model.",
   },
   learning: {
-    label: "Learning",
-    short: "Learning",
+    label: "Building personal history",
+    short: "Building history",
     Icon: Brain,
     tone: "text-primary",
     ring: "ring-[color-mix(in_oklab,hsl(var(--primary))_35%,transparent)]",
     bg: "bg-[color-mix(in_oklab,hsl(var(--primary))_10%,transparent)]",
     dot: "bg-primary",
-    description: "Model is blending niche-level data with your account's emerging signal.",
+    description: "Predictions continue using the available niche model until a separately trained personal model becomes active. The models are selected, not blended.",
   },
   personal: {
     label: "Personal Model Active",
@@ -62,7 +64,7 @@ const META: Record<MaturityState, {
     ring: "ring-[color-mix(in_oklab,hsl(var(--accent-lime))_45%,transparent)]",
     bg: "bg-[color-mix(in_oklab,hsl(var(--accent-lime))_18%,transparent)]",
     dot: "bg-accent-lime",
-    description: "Predictions are tuned to this account's personal model.",
+    description: "Predictions use a separately trained model based on this account's eligible post history.",
   },
 };
 
@@ -70,12 +72,26 @@ export function ModelMaturity({
   samples,
   target = 200,
   lowThreshold = 50,
+  activeScope,
   variant = "full",
   className,
 }: ModelMaturityProps) {
-  const state = getMaturityState(samples, target, lowThreshold);
+  const sampleState = getMaturityState(samples, target, lowThreshold);
+  // When the caller knows the active artifact, it is authoritative. Reaching a
+  // count threshold does not prove that personal training/evaluation passed.
+  const state = activeScope === undefined
+    ? sampleState
+    : activeScope === "personal"
+      ? "personal"
+      : sampleState === "low"
+        ? "low"
+        : "learning";
   const m = META[state];
   const pct = Math.min(100, Math.round((samples / target) * 100));
+  const description = activeScope === "none"
+    ? "No trained model is currently available for this brand. Sync eligible posts and complete retraining before prediction."
+    : m.description;
+  const shortLabel = activeScope === "none" ? "No active model" : m.short;
 
   if (variant === "compact") {
     return (
@@ -87,64 +103,48 @@ export function ModelMaturity({
           m.ring,
           className,
         )}
-        title={`${samples}/${target} samples · ${m.label}`}
+        title={`${samples}/${target} stored posts · ${m.label}. Eligibility also requires verified mature posts and a successful model evaluation. This is not a confidence score.`}
       >
         <m.Icon className="h-3 w-3" />
-        {m.short} · <span className="font-mono tabular-nums">{samples}/{target}</span>
+        {shortLabel} · <span className="font-mono tabular-nums">{samples}/{target}</span>
       </span>
     );
   }
 
   return (
-    <div
-      className={cn(
-        "rounded-xl border border-border bg-surface p-4",
-        className,
-      )}
-    >
+    <div className={cn("rounded-xl border border-border bg-surface p-4", className)}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <span
-            className={cn(
-              "grid h-8 w-8 place-items-center rounded-lg ring-1 ring-inset",
-              m.bg,
-              m.ring,
-              m.tone,
-            )}
-          >
+          <span className={cn("grid h-8 w-8 place-items-center rounded-lg ring-1 ring-inset", m.bg, m.ring, m.tone)}>
             <m.Icon className="h-4 w-4" />
           </span>
           <div className="leading-tight">
             <div className="flex items-center gap-1.5 text-[13px] font-semibold">
               {m.label}
-              <span
-                className="inline-flex h-1.5 w-1.5 items-center justify-center"
-                aria-hidden
-              >
+              <span className="inline-flex h-1.5 w-1.5 items-center justify-center" aria-hidden>
                 <span className={cn("h-1.5 w-1.5 rounded-full", m.dot)} />
               </span>
             </div>
             <div className="text-xs text-muted-foreground">
               <span className="font-mono tabular-nums text-foreground">{samples}</span>
-              <span className="text-muted-foreground">/{target} samples</span>
+              <span>/{target} posts</span>
               <span className="mx-1.5 text-muted-foreground/50">·</span>
               <span className="font-mono tabular-nums">{pct}%</span>
             </div>
           </div>
         </div>
-        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+        <Info
+          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
+          aria-label="This indicates data maturity, not prediction confidence"
+        />
       </div>
 
-      {/* segmented progress */}
-      <div className="mt-3 flex h-1.5 gap-0.5 overflow-hidden rounded-full bg-surface-3">
+      <div className="mt-3 flex h-1.5 gap-0.5 overflow-hidden rounded-full bg-surface-3" aria-hidden>
         {Array.from({ length: 20 }).map((_, i) => {
-          const fill = pct / 5; // 0..20
+          const fill = pct / 5;
           const filled = i < Math.floor(fill);
-          const partial = i === Math.floor(fill) ? (fill - Math.floor(fill)) : 0;
-          
-          let colorClass = "bg-warning";
-          if (state === "personal") colorClass = "bg-accent-lime";
-          else if (state === "learning") colorClass = "bg-primary";
+          const partial = i === Math.floor(fill) ? fill - Math.floor(fill) : 0;
+          const colorClass = state === "personal" ? "bg-accent-lime" : state === "learning" ? "bg-primary" : "bg-warning";
 
           return (
             <div key={i} className="relative flex-1 overflow-hidden">
@@ -160,8 +160,10 @@ export function ModelMaturity({
         })}
       </div>
 
-      <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{m.description}</p>
+      <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
+      <p className="mt-1 text-xs text-muted-foreground/80">
+        Stored-post count is only a maturity indicator; model eligibility also requires verified mature posts and successful evaluation.
+      </p>
     </div>
   );
 }
-

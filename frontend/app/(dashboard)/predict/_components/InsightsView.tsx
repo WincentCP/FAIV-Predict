@@ -24,10 +24,17 @@ const FeatureAttributionChart = dynamic(() => import("@/components/FeatureAttrib
 
 export interface InsightsPrediction {
   tier: Tier;
-  confidence: number;
-  probs: Array<{ tier: Tier; prob: number }>;
+  classScore: number;
+  classScores: Array<{ tier: Tier; score: number }>;
   isPersonalModel: boolean;
   modelAccuracy: number | null;
+  modelMacroF1: number | null;
+  modelBalancedAccuracy: number | null;
+  baselineAccuracy: number | null;
+  accuracyGainOverBaseline: number | null;
+  testSamples: number | null;
+  heldOutClassesComplete: boolean | null;
+  evaluationStatus: "validated" | "exploratory" | null;
   modelVersion: string | null;
   trainedSamples: number | null;
   savedId: string | null;
@@ -91,7 +98,7 @@ export function InsightsView(props: {
       {/* Verdict header */}
       <div className="grid gap-6 rounded-2xl border border-border bg-surface/60 p-6 backdrop-blur shadow-[var(--shadow-soft)] md:grid-cols-12">
         <div className="flex items-center justify-center md:col-span-4">
-          <ConfidenceMeter value={prediction.confidence} tier={prediction.tier} size={160} label="Raw Class Score" />
+          <ConfidenceMeter value={prediction.classScore} tier={prediction.tier} size={160} label="Raw Class Score" />
         </div>
         <div className="flex flex-col justify-center space-y-3 md:col-span-8">
           <div className="flex flex-wrap items-center gap-2">
@@ -116,15 +123,19 @@ export function InsightsView(props: {
             This draft is {prediction.status === "provisional" ? "provisionally " : ""}predicted to earn <strong className="text-foreground">
             {prediction.tier.toLowerCase()}-tier engagement</strong> (likes + comments relative to {prediction.isPersonalModel
               ? "this brand's own verified history"
-              : "the selected industry's verified cohort history"}; not reach or sales), with a {prediction.confidence}% raw class score.
+              : "the selected industry's verified cohort history"}; not reach or sales), with a raw class score of {prediction.classScore}/100.
             This score is not yet a calibrated probability.
             {prediction.status === "provisional" && " Set a posting time and re-analyze before approval or publishing."}
           </p>
 
-          {/* Inline probability bars */}
-          <div className="grid gap-2 sm:grid-cols-3">
-            {prediction.probs.map((c) => {
-              const pct = Math.round(c.prob * 100);
+          {/* Inline uncalibrated class-score bars */}
+          <div
+            className="grid gap-2 sm:grid-cols-3"
+            role="group"
+            aria-label="Raw uncalibrated class scores"
+          >
+            {prediction.classScores.map((c) => {
+              const score = Math.max(0, Math.min(100, Math.round(c.score)));
               const active = c.tier === prediction.tier;
               const colorClass =
                 c.tier === "High" ? "bg-emerald-500" : c.tier === "Average" ? "bg-amber-500" : "bg-rose-500";
@@ -132,10 +143,14 @@ export function InsightsView(props: {
                 <div key={c.tier} className={cn("space-y-1", !active && "opacity-60")}>
                   <div className="flex items-center justify-between font-mono text-xs">
                     <span className="font-bold text-foreground">{c.tier}</span>
-                    <span className="font-extrabold text-foreground tabular-nums">{pct}%</span>
+                    <span className="font-extrabold text-foreground tabular-nums">{score}/100</span>
                   </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3 border border-border/30">
-                    <div className={cn("h-full rounded-full transition-all duration-700", colorClass)} style={{ width: `${pct}%` }} />
+                  <div
+                    className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3 border border-border/30"
+                    role="img"
+                    aria-label={`${c.tier}: raw class score ${score} out of 100; not a calibrated probability`}
+                  >
+                    <div className={cn("h-full rounded-full transition-all duration-700", colorClass)} style={{ width: `${score}%` }} />
                   </div>
                 </div>
               );
@@ -146,7 +161,7 @@ export function InsightsView(props: {
           <div className="flex flex-wrap items-center gap-3 border-t border-border/40 pt-3 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5 font-semibold"><FileText className="h-3 w-3" />{brandName || "—"}</span>
             <span className="inline-flex items-center gap-1.5"><Calendar className="h-3 w-3" />{formatDate(scheduledAt, "MMM d, yyyy")}</span>
-            <span className="inline-flex items-center gap-1.5"><Clock className="h-3 w-3" />{hasPostTime ? formatDate(scheduledAt, "HH:mm") : "Time not set"}</span>
+            <span className="inline-flex items-center gap-1.5"><Clock className="h-3 w-3" />{hasPostTime ? `${formatDate(scheduledAt, "HH")}:00 WIB (hour bucket)` : "Time not set"}</span>
             <span className="rounded-md border border-border bg-surface px-2 py-0.5 font-mono text-xs font-bold">{contentFormat}</span>
           </div>
         </div>
@@ -156,6 +171,13 @@ export function InsightsView(props: {
         isPersonalModel={prediction.isPersonalModel}
         trainedSamples={prediction.trainedSamples}
         modelAccuracy={prediction.modelAccuracy}
+        modelMacroF1={prediction.modelMacroF1}
+        modelBalancedAccuracy={prediction.modelBalancedAccuracy}
+        baselineAccuracy={prediction.baselineAccuracy}
+        accuracyGainOverBaseline={prediction.accuracyGainOverBaseline}
+        testSamples={prediction.testSamples}
+        heldOutClassesComplete={prediction.heldOutClassesComplete}
+        evaluationStatus={prediction.evaluationStatus}
         modelVersion={prediction.modelVersion}
         outOfRange={prediction.outOfRange}
       />

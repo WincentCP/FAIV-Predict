@@ -25,6 +25,12 @@ const FEATURE_LABELS: Record<string, string> = {
   emoji_count: "Emoji Count",
 };
 
+function asPercentMetric(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const percent = Math.abs(value) <= 1 ? value * 100 : value;
+  return Math.round(percent * 10) / 10;
+}
+
 export default function PredictPage() {
   const [view, setView] = useState<PredictView>("compose");
 
@@ -38,11 +44,11 @@ export default function PredictPage() {
   const [scheduledAt, setScheduledAt] = useState<Date>(() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
-    d.setHours(19, 30, 0, 0);
+    d.setHours(19, 0, 0, 0);
     return d;
   });
   // A new draft has no committed publishing time. Keep the internal Date for
-  // the date picker, but do not silently treat its 19:30 placeholder as input.
+  // the date picker, but do not silently treat its 19:00 placeholder as input.
   const [hasPostTime, setHasPostTime] = useState(false);
   const [caption, setCaption] = useState("");
   const [visualConcept, setVisualConcept] = useState("");
@@ -153,16 +159,30 @@ export default function PredictPage() {
       const rawProbs = data.probabilities || {};
       setPrediction({
         tier: data.predicted_class as Tier,
-        confidence: Math.round(data.confidence),
-        probs: [
-          { tier: "High", prob: (rawProbs.High || 0) / 100 },
-          { tier: "Average", prob: (rawProbs.Average || 0) / 100 },
-          { tier: "Low", prob: (rawProbs.Low || 0) / 100 },
+        classScore: Math.round(data.confidence),
+        classScores: [
+          { tier: "High", score: rawProbs.High || 0 },
+          { tier: "Average", score: rawProbs.Average || 0 },
+          { tier: "Low", score: rawProbs.Low || 0 },
         ],
         isPersonalModel: Boolean(data.model_metadata?.is_personal_model_active),
-        modelAccuracy:
-          typeof data.model_metadata?.accuracy === "number"
-            ? Math.round(data.model_metadata.accuracy * 100)
+        modelAccuracy: asPercentMetric(data.model_metadata?.accuracy),
+        modelMacroF1: asPercentMetric(data.model_metadata?.macro_f1),
+        modelBalancedAccuracy: asPercentMetric(data.model_metadata?.balanced_accuracy),
+        baselineAccuracy: asPercentMetric(data.model_metadata?.baseline_accuracy),
+        accuracyGainOverBaseline: asPercentMetric(data.model_metadata?.accuracy_gain_over_baseline),
+        testSamples:
+          typeof data.model_metadata?.test_samples === "number"
+            ? data.model_metadata.test_samples
+            : null,
+        heldOutClassesComplete:
+          typeof data.model_metadata?.held_out_classes_complete === "boolean"
+            ? data.model_metadata.held_out_classes_complete
+            : null,
+        evaluationStatus:
+          data.model_metadata?.evaluation_status === "validated" ||
+          data.model_metadata?.evaluation_status === "exploratory"
+            ? data.model_metadata.evaluation_status
             : null,
         modelVersion: data.model_metadata?.version ?? null,
         trainedSamples:
@@ -207,7 +227,7 @@ export default function PredictPage() {
       const hourProbe = prediction?.counterfactuals.find((c: Counterfactual) => c.parameter === "post_hour");
       const bestHour = typeof hourProbe?.to_value === "number" ? hourProbe.to_value : 19;
       const d = new Date(scheduledAt);
-      d.setHours(bestHour);
+      d.setHours(bestHour, 0, 0, 0);
       setScheduledAt(d);
       setHasPostTime(true);
     }
@@ -280,7 +300,7 @@ export default function PredictPage() {
       {
         label: postHour == null ? "Posting time not set" : `Scheduled at ${String(postHour).padStart(2, "0")}:00`,
         detail: postHour == null
-          ? "This provisional result averages the model artifact's supported posting-hour scenarios."
+          ? "This provisional result combines posting hours observed in training, weighted by how often each hour occurred."
           : "Posting hour is an input used by this trained model.",
         weight: fi.post_hour ?? 0,
         direction: "neutral" as const,

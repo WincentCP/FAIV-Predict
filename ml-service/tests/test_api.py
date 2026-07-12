@@ -146,6 +146,7 @@ from app.train_pipeline import (
     InsufficientDataError,
     ModelQualityError,
     ModelTrainer,
+    build_expanding_window_evidence,
     build_model_version,
     build_classification_evidence,
     build_dataset_evidence,
@@ -283,9 +284,66 @@ def test_classification_evidence_has_fixed_confusion_matrix_and_per_class_metric
     }
     assert evidence["per_class"]["HIGH"]["support"] == 2
     assert evidence["accuracy"] == 0.5
+    assert evidence["balanced_accuracy"] == 0.5
+    assert evidence["ordinal_mae"] == 0.5
+    assert evidence["quadratic_weighted_kappa"] is not None
     assert set(evidence) == {
-        "accuracy", "weighted", "macro", "per_class", "confusion_matrix"
+        "accuracy",
+        "balanced_accuracy",
+        "ordinal_mae",
+        "quadratic_weighted_kappa",
+        "weighted",
+        "macro",
+        "per_class",
+        "confusion_matrix",
     }
+
+
+def test_expanding_window_evidence_recomputes_thresholds_without_holdout_leakage():
+    import pandas as pd
+
+    # Every chronological window contains the same learnable three-tier pattern.
+    rows = 48
+    y_er = pd.Series([float((index % 3) + 1) for index in range(rows)])
+    X = pd.DataFrame({
+        "is_single_image": [1.0 if index % 3 == 0 else 0.0 for index in range(rows)],
+        "is_carousel": [1.0 if index % 3 == 1 else 0.0 for index in range(rows)],
+        "is_reels": [1.0 if index % 3 == 2 else 0.0 for index in range(rows)],
+        "post_hour": [float(index % 24) for index in range(rows)],
+    })
+
+    evidence = build_expanding_window_evidence(X, y_er)
+
+    assert evidence["method"] == "expanding_window_on_training_portion"
+    assert evidence["threshold_policy"] == (
+        "recomputed_from_each_fold_training_window"
+    )
+    assert evidence["summary"]["evaluated_folds"] == 3
+    assert evidence["summary"]["sufficient_evidence"] is True
+    for fold in evidence["folds"]:
+        assert fold["status"] == "evaluated"
+        expected_p33, expected_p67 = DataPreprocessor.calculate_percentile_bounds(
+            y_er.iloc[:fold["train_samples"]]
+        )
+        assert fold["p33_threshold"] == expected_p33
+        assert fold["p67_threshold"] == expected_p67
+        assert "logistic_regression" in fold
+        assert "balanced_accuracy" in fold["candidate"]
+
+
+def test_expanding_window_evidence_marks_small_history_insufficient_without_crashing():
+    import pandas as pd
+
+    y_er = pd.Series([float((index % 3) + 1) for index in range(15)])
+    X = pd.DataFrame({
+        "feature": [float(index % 3) for index in range(15)],
+    })
+
+    evidence = build_expanding_window_evidence(X, y_er)
+
+    assert evidence["summary"]["evaluated_folds"] < 2
+    assert evidence["summary"]["sufficient_evidence"] is False
+    assert evidence["summary"]["status"] == "insufficient_history"
 
 
 def test_dataset_evidence_is_deterministic_private_and_change_sensitive():
@@ -336,7 +394,9 @@ def test_training_persists_complete_thesis_evaluation_artifact(monkeypatch, tmp_
             "brand_id": "brand-1",
             "instagram_media_id": f"media-{index:03d}",
             "caption": caption,
-            "er": float(index + 1),
+            # A stable, learnable three-tier pattern appears in every temporal
+            # fold and in the untouched newest 20% holdout.
+            "er": float(format_index + 1),
             "is_single_image": format_index == 0,
             "is_carousel": format_index == 1,
             "is_reels": format_index == 2,
@@ -394,11 +454,25 @@ def test_training_persists_complete_thesis_evaluation_artifact(monkeypatch, tmp_
     metrics = result["metrics"]
 
     assert result["status"] == "success"
-    assert metrics["evaluation_contract"] == "faiv-thesis-v1"
+    assert metrics["evaluation_contract"] == "faiv-thesis-v2"
     assert metrics["baseline"]["model"] == "DummyClassifier"
+    assert metrics["comparators"]["logistic_regression"]["model"] == (
+        "LogisticRegression"
+    )
     assert metrics["candidate"]["confusion_matrix"]["labels"] == [
         "LOW", "AVERAGE", "HIGH"
     ]
+    assert "balanced_accuracy" in metrics["candidate"]
+    assert "ordinal_mae" in metrics["candidate"]
+    assert "quadratic_weighted_kappa" in metrics["candidate"]
+    assert metrics["temporal_evaluation"]["summary"]["evaluated_folds"] == 3
+    assert metrics["holdout_permutation_importance"]["available"] is True
+    assert len(metrics["holdout_permutation_importance"]["features"]) == 10
+    assert metrics["feature_reference_values"]["hashtag_count_median"] == 1.0
+    assert metrics["feature_reference_values"]["caption_length_median"] > 0
+    assert metrics["promotion_gate"]["passed"] is True
+    assert metrics["scientific_gate"]["passed"] is True
+    assert metrics["evaluation_status"] == "validated"
     assert len(metrics["dataset"]["dataset_sha256"]) == 64
     assert len(metrics["training_code_sha256"]) == 64
     assert metrics["dataset"]["verified_posts"] == 60
@@ -411,6 +485,98 @@ def test_training_persists_complete_thesis_evaluation_artifact(monkeypatch, tmp_
     persisted = json.loads(report_path.read_text(encoding="utf-8"))
     assert persisted["dataset"] == metrics["dataset"]
     assert persisted["model_parameters"]["random_state"] == 42
+
+
+def test_training_keeps_useful_model_operational_but_marks_weak_holdout_exploratory(
+    monkeypatch, tmp_path
+):
+    import pandas as pd
+
+    base_time = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    rows = []
+    for index in range(60):
+        # The older 80% contains all classes. The latest 20% intentionally has
+        # only HIGH posts, so operational accuracy can be useful while the
+        # three-tier scientific claim remains incomplete.
+        format_index = index % 3 if index < 48 else 2
+        rows.append({
+            "brand_id": "brand-1",
+            "instagram_media_id": f"exploratory-{index:03d}",
+            "caption": f"Caption {format_index}",
+            "er": float(format_index + 1),
+            "is_single_image": format_index == 0,
+            "is_carousel": format_index == 1,
+            "is_reels": format_index == 2,
+            "post_hour": 10 + format_index,
+            "created_at": base_time + datetime.timedelta(days=index),
+        })
+    dataset = pd.DataFrame(rows)
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        @staticmethod
+        def execute(*_args, **_kwargs):
+            pass
+
+        @staticmethod
+        def fetchone():
+            return ("model-id",)
+
+    class Connection:
+        @staticmethod
+        def cursor(*_args, **_kwargs):
+            return Cursor()
+
+        @staticmethod
+        def commit():
+            pass
+
+        @staticmethod
+        def close():
+            pass
+
+    monkeypatch.setattr("app.train_pipeline.CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        ModelTrainer,
+        "fetch_historical_data",
+        classmethod(lambda cls, brand_id=None, niche=None: dataset.copy()),
+    )
+    monkeypatch.setattr(
+        ModelTrainer,
+        "upload_to_supabase_storage",
+        classmethod(
+            lambda cls, file_path, storage_path: (
+                f"https://storage.invalid/{storage_path}"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        ModelTrainer,
+        "_get_db_connection",
+        staticmethod(lambda: Connection()),
+    )
+
+    result = ModelTrainer.run_training(niche="Exploratory Test")
+    metrics = result["metrics"]
+
+    assert metrics["promotion_gate"]["passed"] is True
+    assert metrics["promotion_gate"]["decision"] == "promote"
+    assert metrics["scientific_gate"]["passed"] is False
+    assert metrics["evaluation_status"] == "exploratory"
+    assert metrics["scientific_gate"]["missing_held_out_classes"] == [
+        "AVERAGE", "LOW"
+    ]
+    assert (
+        metrics["scientific_gate"]["hard_criteria"][
+            "all_held_out_classes_present"
+        ]
+        is False
+    )
 
 
 def test_training_rejects_candidate_that_does_not_beat_baseline(monkeypatch, tmp_path):
@@ -577,13 +743,32 @@ def test_predict_success_contract_uses_real_bundle_outputs(monkeypatch):
             "hashtag_count": [0.0, 5.0],
             "emoji_count": [0.0, 2.0],
         },
+        "post_hour_support": {"8": 2, "20": 1},
+        "feature_reference_values": {
+            "caption_length_median": 120.0,
+            "hashtag_count_median": 2.0,
+        },
     }
     metadata = {
         "id": "model-1",
         "model_type": "niche",
         "version": "test-v1",
         "accuracy": 0.75,
-        "metrics": {"train_samples": 42},
+        "metrics": {
+            "train_samples": 42,
+            "test_samples": 12,
+            "candidate": {
+                "macro": {"f1_score": 0.7},
+                "balanced_accuracy": 0.72,
+            },
+            "baseline": {"accuracy": 0.4},
+            "accuracy_gain_over_baseline": 0.35,
+            "evaluation_status": "validated",
+            "scientific_gate": {
+                "passed": True,
+                "hard_criteria": {"all_held_out_classes_present": True},
+            },
+        },
     }
     monkeypatch.setattr(ModelLoader, "load_model", lambda **_kwargs: (bundle, metadata))
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -601,6 +786,14 @@ def test_predict_success_contract_uses_real_bundle_outputs(monkeypatch):
     assert body["prediction_id"] is None
     assert body["model_metadata"]["trained_samples"] == 42
     assert body["model_metadata"]["is_personal_model_active"] is False
+    assert body["model_metadata"]["test_samples"] == 12
+    assert body["model_metadata"]["macro_f1"] == 0.7
+    assert body["model_metadata"]["balanced_accuracy"] == 0.72
+    assert body["model_metadata"]["baseline_accuracy"] == 0.4
+    assert body["model_metadata"]["accuracy_gain_over_baseline"] == 0.35
+    assert body["model_metadata"]["held_out_classes_complete"] is True
+    assert body["model_metadata"]["evaluation_status"] == "validated"
+    assert body["model_metadata"]["scientific_gate_passed"] is True
     assert body["prediction_context"] == {
         "status": "current",
         "time_known": True,
@@ -615,6 +808,9 @@ def test_predict_success_contract_uses_real_bundle_outputs(monkeypatch):
     assert "caption_length" in body["out_of_range"]
     assert set(body["probabilities"]) == {name.title() for name in model.classes_}
     assert len([row for row in body["counterfactuals"] if row["parameter"] == "format"]) == 2
+    hour_rows = [row for row in body["counterfactuals"] if row["parameter"] == "post_hour"]
+    assert len(hour_rows) == 1
+    assert hour_rows[0]["to_value"] in {8, 20}
 
 
 def test_predict_without_post_time_is_explicitly_provisional(monkeypatch):
@@ -660,6 +856,7 @@ def test_predict_without_post_time_is_explicitly_provisional(monkeypatch):
         "feature_schema_version": body["prediction_context"]["feature_schema_version"],
     }
     assert "frequency-weighted hours observed" in body["counterfactuals_note"]
+    assert "equally" not in body["counterfactuals_note"]
     assert "post_hour" not in body["out_of_range"]
     assert len(body["counterfactuals"]) == 1
     assert body["counterfactuals"][0]["parameter"] == "post_hour"
@@ -695,6 +892,38 @@ def test_build_counterfactuals_measured_and_honest():
     assert len({c["to_value"] for c in format_probes}) == 2
     for c in cfs:
         assert round(c["to_prob_high"] - c["from_prob_high"], 1) == c["delta_high"]
+
+
+def test_counterfactual_candidates_use_training_artifact_support():
+    model = _tiny_model()
+    base = DataPreprocessor.extract_features(
+        "A short caption #one",
+        "Reels",
+        10,
+        is_weekend=False,
+    )
+    probs = model.predict_proba([
+        DataPreprocessor.features_to_list(base, FEATURE_ORDER_V2)
+    ])[0]
+
+    cfs, _ = build_counterfactuals(
+        model,
+        base,
+        FEATURE_ORDER_V2,
+        model.classes_,
+        probs,
+        post_hour_support={"8": 3, "20": 1, "99": 100, "bad": 2},
+        feature_reference_values={
+            "caption_length_median": 137.0,
+            "hashtag_count_median": 4.0,
+        },
+    )
+
+    hour_rows = [row for row in cfs if row["parameter"] == "post_hour"]
+    assert len(hour_rows) == 1
+    assert hour_rows[0]["to_value"] in {8, 20}
+    assert next(row for row in cfs if row["parameter"] == "hashtag_count")["to_value"] == 4
+    assert next(row for row in cfs if row["parameter"] == "caption_length")["to_value"] == 137
 
 
 def test_build_counterfactuals_respects_v1_order_and_missing_high():

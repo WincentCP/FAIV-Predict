@@ -52,7 +52,7 @@ Before a release, all gates below must pass:
    token by display-name inference.
 6. Run frontend lint, TypeScript, production build, the ML test suite, and `python scripts/verify_thesis_readiness.py`.
 7. Confirm n8n blocks `$env`, both HTTP nodes use the encrypted Header Auth credential, and the imported workflow remains inactive until both branches pass manually.
-8. Retrain final thesis models with evaluation contract `faiv-thesis-v1` and export the baseline, confusion matrix, per-class metrics, data window, and fingerprints.
+8. Retrain final thesis models with evaluation contract `faiv-thesis-v2` and export the baselines/comparators, temporal evaluation, scientific status, confusion matrix, per-class and ordinal metrics, data window, and fingerprints.
 9. Run `scripts/thesis_preflight.ps1` and record A01–A12 from `docs/THESIS_TEST_REPORT.md`.
 10. Verify empty accounts show empty states on Dashboard, History, Insights, and
    Calendar before connecting real integrations.

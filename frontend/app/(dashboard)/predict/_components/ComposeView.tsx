@@ -121,7 +121,11 @@ export function ComposeView(props: {
             ) : (
               account && (
                 <div className="mt-2">
-                  <ModelMaturity samples={account.samples ?? 0} variant="compact" />
+                  <ModelMaturity
+                    samples={account.samples ?? 0}
+                    activeScope={account.active_model_scope}
+                    variant="compact"
+                  />
                 </div>
               )
             )}
@@ -156,6 +160,9 @@ export function ComposeView(props: {
           <div>
             <Label htmlFor="predict-date">Post Date</Label>
             <DatePicker id="predict-date" aria-label="Scheduled post date" value={scheduledAt} onChange={setScheduledAt} />
+            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+              The exact date is kept for planning; the model uses only whether it falls on a weekday or weekend.
+            </p>
           </div>
           <div>
             <div className="flex items-center justify-between gap-3">
@@ -169,7 +176,7 @@ export function ComposeView(props: {
               </button>
             </div>
             {hasPostTime ? (
-              <TimePicker id="predict-time" aria-label="Scheduled post time in WIB" value={scheduledAt} onChange={setScheduledAt} />
+              <TimePicker id="predict-time" aria-label="Scheduled posting hour in WIB" value={scheduledAt} onChange={setScheduledAt} />
             ) : (
               <div
                 id="predict-time"
@@ -227,9 +234,11 @@ export function ComposeView(props: {
               Inputs changed — re-analyze to refresh the result.
             </span>
           ) : !hasPostTime ? (
-            <span>Time is optional. The model will average its supported hours and mark the result provisional.</span>
+            <span>
+              Time is optional. The provisional score combines posting hours observed in training, weighted by how often each hour occurred.
+            </span>
           ) : (
-            <span>Caption, format, and timing feed the model.</span>
+            <span>Caption, format, weekday/weekend, and the selected hourly time bucket feed the model.</span>
           )}
         </div>
         <button

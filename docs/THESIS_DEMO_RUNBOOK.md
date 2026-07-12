@@ -6,6 +6,12 @@ This runbook is for the bachelor-thesis prototype on the Windows thesis machine.
 
 FAIV Predict is a Docker-based decision-support prototype that predicts Instagram content-performance tiers from verified historical post metadata. It demonstrates authenticated prediction, immutable lifecycle history, Instagram synchronization, and automated retraining. Public Instagram publishing, enterprise multi-tenancy, global high availability, and calibrated causal uplift are outside the research scope.
 
+Use the precise outcome description during the demonstration: the tier represents
+relative cumulative likes-and-comments engagement using a follower count captured
+at first observation. It is not exact seven-day engagement, reach, sales,
+virality, or a causal guarantee. The seven-day rule is a minimum maturity gate,
+not a fixed-horizon metric snapshot.
+
 ## One day before the demonstration
 
 1. Connect the laptop to power and confirm sufficient disk space.
@@ -26,7 +32,7 @@ FAIV Predict is a Docker-based decision-support prototype that predicts Instagra
 
 5. Open `http://localhost:3000` and `http://localhost:5678`.
 6. Execute both n8n branches manually. Do not re-import the workflow when the existing one already works in the persistent volume.
-7. Ensure the final sync/retrain creates models using evaluation contract `faiv-thesis-v1`.
+7. Ensure the final sync/retrain creates models using evaluation contract `faiv-thesis-v2`.
 8. Export final model evidence:
 
    ```powershell
@@ -39,7 +45,25 @@ FAIV Predict is a Docker-based decision-support prototype that predicts Instagra
    powershell -ExecutionPolicy Bypass -File .\scripts\thesis_preflight.ps1
    ```
 
-10. Complete A01–A12 in `docs/THESIS_TEST_REPORT.md` and retain screenshots outside Git.
+10. Complete A01–A12 in `docs/THESIS_TEST_REPORT.md`. Record date/time, exact
+    screenshot/log/query reference, and n8n execution IDs; retain unredacted
+    evidence outside Git.
+11. Review every exported model's `scientific_gate` and `evaluation_status`.
+    Present a missing test class or zero class recall as `exploratory`, even if
+    the artifact passed the separate operational promotion gate.
+12. Complete the usability study in
+    `docs/THESIS_USABILITY_EVALUATION.md` before reporting any usability score.
+    Do not create placeholder participants or estimated SUS values.
+13. Generate the anonymized usability summary from real response rows:
+
+    ```powershell
+    python .\scripts\analyze_usability.py .\docs\usability_responses.csv `
+      --minimum-participants 5 `
+      --output .\docs\FINAL_USABILITY_EVIDENCE.md
+    ```
+
+    Keep the raw response CSV private and review the generated report before
+    using it in the thesis.
 
 ## Private backup
 
@@ -109,6 +133,8 @@ Open Brands/Niches and show:
 3. Enter a real date, posting time, and caption.
 4. Analyze.
 5. Explain tier, raw class score, model scope/version, validation evidence, OOD warning, and non-causal sensitivity scenarios.
+6. State that the model uses format, timing, and structural caption features; it
+   does not inspect the image/video or semantically understand creative quality.
 
 Do not call the raw Random Forest score a calibrated probability.
 
@@ -140,11 +166,44 @@ Show verified Instagram insights, then open the latest successful n8n execution.
 Open the locally exported `FINAL_MODEL_EVIDENCE.md` and present:
 
 - sample counts and chronological split;
-- baseline versus Random Forest;
+- majority Dummy baseline, Logistic Regression comparator, and Random Forest;
+- expanding-window temporal-validation results from within the oldest 80% and
+  the untouched newest-20% final result;
 - confusion matrix;
-- per-class and macro/weighted metrics;
+- per-class support/recall, macro F1, balanced accuracy, ordinal MAE, and
+  quadratic weighted kappa;
+- holdout permutation importance as a complementary global diagnostic, not a
+  causal explanation of one prediction;
+- operational promotion versus scientific validation status;
 - dataset and code fingerprints;
 - limitations caused by small/brand-specific history.
+
+Interpret evidence in this order:
+
+1. test size and `LOW`/`AVERAGE`/`HIGH` support;
+2. missing classes or zero recall;
+3. comparator performance and temporal stability;
+4. confusion matrix and ordinal severity of errors;
+5. aggregate scores.
+
+Do not lead with accuracy alone. If evidence is `exploratory`, say so directly
+and frame the demonstrated contribution as a traceable decision-support
+artifact rather than proof of generalized predictive accuracy.
+
+### 8. Usability evidence
+
+Show `FINAL_USABILITY_EVIDENCE.md` together with the protocol and anonymized
+issue summary from `THESIS_USABILITY_EVALUATION.md`:
+
+- participant count and relevant experience mix;
+- task completion and moderator assistance;
+- whether participants correctly understood raw score, provisional, and stale
+  states;
+- SEQ/SUS descriptive results;
+- usability issues found, changes made, and retest evidence.
+
+State the actual small-sample limitation. Do not claim population-level
+usability significance.
 
 ## Failure demonstrations
 
@@ -172,6 +231,11 @@ docker compose logs --tail=100 n8n
 ```
 
 If internet access fails, continue with locally persisted prediction history, architecture, test evidence, and the previously exported model report. Never replace unavailable live information with invented results.
+
+If a live action fails during the defense, keep the failed state visible long
+enough to explain it, record the scenario as `FAIL` or `BLOCKED`, then use the
+documented recovery command. A rehearsed screenshot is supporting evidence, not
+permission to describe the failed live action as successful.
 
 ## Normal shutdown
 

@@ -62,27 +62,33 @@ export function DatePicker({ value, onChange, className, id, "aria-label": ariaL
 
 // ─── WheelColumn ─────────────────────────────────────────────────────────────
 export function TimePicker({ value, onChange, className, id, "aria-label": ariaLabel }: PickerProps) {
-  const timeValue = `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+  const hourValue = String(value.getHours());
 
   return (
     <div className={cn("relative", className)}>
-      <input
+      <select
         id={id}
         aria-label={ariaLabel}
-        type="time"
-        step={60}
-        value={timeValue}
+        value={hourValue}
         onChange={(event) => {
-          const [hour, minute] = event.target.value.split(":").map(Number);
-          if (!Number.isFinite(hour) || !Number.isFinite(minute)) return;
+          const hour = Number(event.target.value);
+          if (!Number.isInteger(hour) || hour < 0 || hour > 23) return;
           const next = new Date(value);
-          next.setHours(hour, minute, 0, 0);
+          // Inference accepts an hourly bucket, so minutes must not imply
+          // precision the model does not use.
+          next.setHours(hour, 0, 0, 0);
           onChange(next);
         }}
-        className="h-10 w-full rounded-lg border border-border bg-surface px-3 pr-14 font-mono text-xs font-semibold text-foreground outline-none transition-colors hover:border-border-strong focus-visible:border-ring"
-      />
+        className="h-10 w-full rounded-lg border border-border bg-surface px-3 pr-28 font-mono text-xs font-semibold text-foreground outline-none transition-colors hover:border-border-strong focus-visible:border-ring"
+      >
+        {Array.from({ length: 24 }, (_, hour) => (
+          <option key={hour} value={hour}>
+            {String(hour).padStart(2, "0")}:00
+          </option>
+        ))}
+      </select>
       <span className="pointer-events-none absolute right-8 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">
-        WIB
+        WIB · hourly
       </span>
     </div>
   );

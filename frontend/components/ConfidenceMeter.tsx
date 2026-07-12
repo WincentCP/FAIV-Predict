@@ -13,7 +13,7 @@ interface ConfidenceMeterProps {
 export function ConfidenceMeter({
   value,
   size = 230,
-  label = "AI Confidence",
+  label = "Raw Class Score",
   tier,
 }: ConfidenceMeterProps) {
   const stroke = 12;
@@ -81,12 +81,8 @@ export function ConfidenceMeter({
     <div
       className="relative grid place-items-center select-none"
       style={{ width: size, height: size }}
-      role="progressbar"
-      aria-label={label}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={Math.round(clampedValue)}
-      aria-valuetext={`${Math.round(clampedValue)} percent${tier ? `, ${parsedTier} potential` : ""}`}
+      role="img"
+      aria-label={`${tier ? `${parsedTier} predicted tier; ` : ""}${label} ${Math.round(clampedValue)} out of 100. This is not a calibrated probability.`}
     >
 
       {/* SVG Dial System */}
@@ -174,7 +170,7 @@ export function ConfidenceMeter({
           {/* Animated score number */}
           <div className="font-display text-[42px] font-black leading-none tracking-tight text-foreground flex items-baseline justify-center">
             <span className="tabular-nums">{Math.round(clampedValue)}</span>
-            <span className="text-lg font-bold text-muted-foreground ml-0.5">%</span>
+            <span className="text-sm font-bold text-muted-foreground ml-0.5">/100</span>
           </div>
           
           {/* Metric label */}
@@ -185,7 +181,7 @@ export function ConfidenceMeter({
           {/* Dynamic Small Badge Indicator inside the core */}
           {tier && (
             <div className={`text-xs uppercase font-black tracking-widest leading-none mt-1.5 ${theme.labelColor}`}>
-              {parsedTier} POTENTIAL
+              {parsedTier} TIER
             </div>
           )}
         </div>
