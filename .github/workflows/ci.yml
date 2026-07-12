@@ -40,6 +40,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Parse thesis preflight script
         shell: powershell
         run: |
@@ -53,6 +56,21 @@ jobs:
           if ($errors.Count -gt 0) {
             $errors | Format-List | Out-String | Write-Error
             exit 1
+          }
+      - name: Verify PowerShell-to-Python quote roundtrip
+        shell: powershell
+        run: |
+          $env:DATABASE_URL = "quote-safe"
+          $Code = @'
+          import os
+          print(os.environ["DATABASE_URL"])
+          '@
+          $EncodedCode = [Convert]::ToBase64String(
+              [Text.Encoding]::UTF8.GetBytes($Code)
+          )
+          $Result = & python -c 'import base64,sys;exec(base64.b64decode(sys.argv[1]))' $EncodedCode
+          if ($LASTEXITCODE -ne 0 -or ([string]$Result).Trim() -ne "quote-safe") {
+            throw "PowerShell native argument roundtrip failed"
           }
 
   frontend:

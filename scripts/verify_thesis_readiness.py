@@ -431,6 +431,13 @@ def main() -> int:
         "PowerShell variables immediately followed by ':' must use ${Variable} syntax",
     )
     require(
+        "function Invoke-MlPython" in powershell_preflight
+        and "ToBase64String" in powershell_preflight
+        and "base64.b64decode(sys.argv[1])" in powershell_preflight
+        and "python -c 'import os,psycopg2" not in powershell_preflight,
+        "PowerShell 5.1 container Python must use quote-safe encoded source",
+    )
+    require(
         "foreach ($ParsedModel in $ParsedEvidence)" in powershell_preflight
         and "[int]$Metrics.train_class_distribution" not in powershell_preflight,
         "PowerShell 5.1 model evidence arrays must be flattened before class validation",

@@ -39,6 +39,20 @@ function Test-Endpoint(
     }
 }
 
+function Invoke-MlPython(
+    [Parameter(Mandatory = $true)][string]$Code,
+    [string]$FailureMessage = "ML container Python command failed"
+) {
+    # Windows PowerShell 5.1 can strip nested quotes from native-command
+    # arguments. Base64 keeps the Python source as one quote-free argument.
+    $EncodedCode = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes($Code)
+    )
+    $Output = & docker compose exec -T ml-service python -c 'import base64,sys;exec(base64.b64decode(sys.argv[1]))' $EncodedCode
+    if ($LASTEXITCODE -ne 0) { throw $FailureMessage }
+    return $Output
+}
+
 Write-Host "FAIV Predict thesis preflight" -ForegroundColor Cyan
 Write-Host "Repository: $Root"
 
@@ -92,8 +106,37 @@ try {
 }
 
 try {
-    $SchemaOutput = & docker compose exec -T ml-service python -c 'import os,psycopg2; connection=psycopg2.connect(os.environ["DATABASE_URL"]); cursor=connection.cursor(); cursor.execute("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s), to_regclass(%s) IS NOT NULL, EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s), EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s), to_regprocedure(%s) IS NOT NULL, to_regprocedure(%s) IS NOT NULL, to_regprocedure(%s) IS NOT NULL", ("public", "posts", "media_product_type", "public.prediction_publications", "public", "predictions", "actual_er", "public", "brands", "instagram_account_id", "public.link_prediction_publication(uuid,uuid)", "public.reconcile_prediction_publication_outcomes(uuid)", "public.validate_prediction_observed_outcome()")); print("|".join(str(value).lower() for value in cursor.fetchone())); connection.close()'
-    if ($LASTEXITCODE -ne 0) { throw "database schema command failed" }
+    $SchemaCode = @'
+import os
+import psycopg2
+
+connection = psycopg2.connect(os.environ["DATABASE_URL"])
+try:
+    cursor = connection.cursor()
+    cursor.execute(
+        """SELECT
+             EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s),
+             to_regclass(%s) IS NOT NULL,
+             EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s),
+             EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s),
+             to_regprocedure(%s) IS NOT NULL,
+             to_regprocedure(%s) IS NOT NULL,
+             to_regprocedure(%s) IS NOT NULL""",
+        (
+            "public", "posts", "media_product_type",
+            "public.prediction_publications",
+            "public", "predictions", "actual_er",
+            "public", "brands", "instagram_account_id",
+            "public.link_prediction_publication(uuid,uuid)",
+            "public.reconcile_prediction_publication_outcomes(uuid)",
+            "public.validate_prediction_observed_outcome()",
+        ),
+    )
+    print("|".join(str(value).lower() for value in cursor.fetchone()))
+finally:
+    connection.close()
+'@
+    $SchemaOutput = Invoke-MlPython -Code $SchemaCode -FailureMessage "database schema command failed"
     $SchemaFlags = ([string]($SchemaOutput | Select-Object -Last 1)).Trim().ToLowerInvariant().Split("|")
     if ($SchemaFlags.Count -ne 7 -or $SchemaFlags[0] -ne "true") {
         throw "posts.media_product_type is missing; apply migration 202607120003 before rebuilding/retraining"
@@ -115,8 +158,11 @@ try {
 
 if (-not $SkipModelEvidence) {
     try {
-        $TrainingHashOutput = & docker compose exec -T ml-service python -c "from app.train_pipeline import training_code_sha256; print(training_code_sha256())"
-        if ($LASTEXITCODE -ne 0) { throw "current training-code fingerprint command failed" }
+        $TrainingHashCode = @'
+from app.train_pipeline import training_code_sha256
+print(training_code_sha256())
+'@
+        $TrainingHashOutput = Invoke-MlPython -Code $TrainingHashCode -FailureMessage "current training-code fingerprint command failed"
         $CurrentTrainingCodeHash = ([string]($TrainingHashOutput | Select-Object -Last 1)).Trim().ToLowerInvariant()
         if ($CurrentTrainingCodeHash -notmatch '^[0-9a-f]{64}$') {
             throw "current training-code fingerprint is invalid"
@@ -140,8 +186,11 @@ if (-not $SkipModelEvidence) {
                 throw "model $Scope was trained before faiv-thesis-v2; execute sync/retrain again"
             }
             $RecordedTrainingCodeHash = ([string]$Metrics.training_code_sha256).Trim().ToLowerInvariant()
+            if ($RecordedTrainingCodeHash -notmatch '^[0-9a-f]{64}$') {
+                throw "model $Scope has no valid training-code fingerprint; execute sync/retrain again"
+            }
             if ($RecordedTrainingCodeHash -ne $CurrentTrainingCodeHash) {
-                throw "model $Scope was trained with different training/preprocessing source; execute sync/retrain again"
+                throw "model $Scope was trained with different training/preprocessing source (model $($RecordedTrainingCodeHash.Substring(0, 12)), current $($CurrentTrainingCodeHash.Substring(0, 12))); execute sync/retrain again"
             }
             if (
                 -not $Metrics.dataset.dataset_sha256 -or
