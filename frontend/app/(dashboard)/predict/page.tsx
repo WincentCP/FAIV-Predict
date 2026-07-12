@@ -13,6 +13,16 @@ import { ComposeView } from "./_components/ComposeView";
 import { InsightsView, type InsightsPrediction } from "./_components/InsightsView";
 import { type Counterfactual } from "./_components/MeasuredImprovements";
 
+interface ContentPlanContext {
+  id: string;
+  predictionId: string | null;
+  predictionStatus: "current" | "provisional" | "stale" | "superseded" | null;
+  visualReference: string;
+  voiceOver: "Need" | "No Need" | "Done" | null;
+  pic: string;
+  status: "Need Shooting" | "Need Design" | "Need Editing" | "Screening" | "Ready to Post" | "Posted" | null;
+}
+
 // Labels for the real model feature keys returned by the ML service.
 const FEATURE_LABELS: Record<string, string> = {
   media_type: "Content Format",
@@ -52,6 +62,10 @@ export default function PredictPage() {
   const [hasPostTime, setHasPostTime] = useState(false);
   const [caption, setCaption] = useState("");
   const [visualConcept, setVisualConcept] = useState("");
+  const [contentPlan, setContentPlan] = useState<ContentPlanContext | null>(null);
+  const [planLoadError, setPlanLoadError] = useState<string | null>(null);
+  const [planSaveState, setPlanSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [planSaveMessage, setPlanSaveMessage] = useState<string | null>(null);
 
   // Prediction state — null until the model has actually returned a result.
   const [prediction, setPrediction] = useState<InsightsPrediction | null>(null);
@@ -74,12 +88,14 @@ export default function PredictPage() {
     postHour: number | null;
     accountId: string | null;
     brandName: string | null;
+    visualConcept: string;
   } | null>(null);
 
   const isFormValid = useMemo(
     () =>
       caption.trim() !== "" &&
       account !== null &&
+      account.active_model_scope !== "none" &&
       scheduledAt instanceof Date &&
       !isNaN(scheduledAt.getTime()),
     [caption, account, scheduledAt]
@@ -108,6 +124,47 @@ export default function PredictPage() {
           setBrandsList(data || []);
           setBrandsError(null);
           if (data && data.length > 0) setAccountId(data[0].id);
+          const planId = new URLSearchParams(window.location.search).get("plan_id");
+          if (planId) {
+            try {
+              const planResponse = await fetch(`/api/calendar?plan_id=${encodeURIComponent(planId)}`, {
+                cache: "no-store",
+              });
+              const planPayload = await planResponse.json().catch(() => null);
+              const entry = Array.isArray(planPayload) ? planPayload[0] : null;
+              if (!planResponse.ok || !entry) {
+                throw new Error(planPayload?.message || "Content Plan entry was not found.");
+              }
+              const ownedBrand = (data || []).find((brand: Brand) => brand.id === entry.brand_id) || null;
+              if (!ownedBrand) throw new Error("The Content Plan entry is not assigned to an available brand.");
+              const nextDate = new Date(`${entry.posting_date}T12:00:00`);
+              const rawTime = entry.posting_time ? String(entry.posting_time).slice(0, 5) : null;
+              if (rawTime) {
+                const [hours, minutes] = rawTime.split(":").map(Number);
+                nextDate.setHours(hours, minutes || 0, 0, 0);
+              }
+              setAccountId(ownedBrand.id);
+              if (["Reels", "Carousel", "Single Image"].includes(entry.content_type)) {
+                setContentFormat(entry.content_type as ContentFormat);
+              }
+              setScheduledAt(nextDate);
+              setHasPostTime(Boolean(rawTime));
+              setCaption(entry.caption || "");
+              setVisualConcept(entry.content_details || "");
+              setContentPlan({
+                id: entry.id,
+                predictionId: entry.prediction_id || null,
+                predictionStatus: entry.prediction?.status || null,
+                visualReference: entry.visual_reference || "",
+                voiceOver: entry.voice_over || null,
+                pic: entry.pic || "",
+                status: entry.status || null,
+              });
+              setPlanLoadError(null);
+            } catch (caught: unknown) {
+              setPlanLoadError(caught instanceof Error ? caught.message : "Content Plan entry could not be loaded.");
+            }
+          }
         } else {
           setBrandsList([]);
           setBrandsError("Brand accounts could not be loaded.");
@@ -122,7 +179,56 @@ export default function PredictPage() {
   // Clear the "optimizations applied" note once inputs are edited again
   useEffect(() => {
     setOptimizationsApplied(false);
+    setPlanSaveState("idle");
+    setPlanSaveMessage(null);
   }, [caption, contentFormat, scheduledAt, hasPostTime, accountId]);
+
+  const persistContentPlan = async (predictionId: string): Promise<boolean> => {
+    if (!account) return false;
+    setPlanSaveState("saving");
+    setPlanSaveMessage(null);
+    try {
+      const payload = {
+        brand_id: account.id,
+        posting_date: formatDate(scheduledAt, "yyyy-MM-dd"),
+        posting_time: hasPostTime ? formatDate(scheduledAt, "HH:mm") : null,
+        content_type: contentFormat,
+        content_details: visualConcept || null,
+        visual_reference: contentPlan?.visualReference || null,
+        caption,
+        voice_over: contentPlan?.voiceOver || null,
+        pic: contentPlan?.pic || null,
+        status: contentPlan?.status || null,
+        prediction_id: predictionId,
+      };
+      const response = await fetch("/api/calendar", {
+        method: contentPlan ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(contentPlan ? { id: contentPlan.id, ...payload } : payload),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.message || "Content Plan could not be saved.");
+      const saved = result?.entry || result?.entries?.[0];
+      const planId = contentPlan?.id || saved?.id;
+      if (!planId) throw new Error("Content Plan was saved but its ID was not returned.");
+      setContentPlan({
+        id: planId,
+        predictionId,
+        predictionStatus: hasPostTime ? "current" : "provisional",
+        visualReference: contentPlan?.visualReference || "",
+        voiceOver: contentPlan?.voiceOver || null,
+        pic: contentPlan?.pic || "",
+        status: contentPlan?.status || null,
+      });
+      setPlanSaveState("saved");
+      setPlanSaveMessage(contentPlan ? "Linked Content Plan updated." : "Saved to Content Plan.");
+      return true;
+    } catch (caught: unknown) {
+      setPlanSaveState("error");
+      setPlanSaveMessage(caught instanceof Error ? caught.message : "Content Plan could not be saved.");
+      return false;
+    }
+  };
 
   const handlePredict = async () => {
     if (!isFormValid || submitting) return;
@@ -142,11 +248,13 @@ export default function PredictPage() {
           niche: account?.niche,
           scheduled_date: formatDate(scheduledAt, "yyyy-MM-dd"),
           supersedes_prediction_id:
-            isPredictionStale &&
-            prediction?.savedId &&
-            predictionSnapshot?.accountId === accountId
-              ? prediction.savedId
-              : null,
+            contentPlan?.predictionId && contentPlan.predictionStatus !== "superseded"
+              ? contentPlan.predictionId
+              : isPredictionStale &&
+                  prediction?.savedId &&
+                  predictionSnapshot?.accountId === accountId
+                ? prediction.savedId
+                : null,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -208,7 +316,11 @@ export default function PredictPage() {
         postHour: hasPostTime ? scheduledAt.getHours() : null,
         accountId,
         brandName: account?.name ?? null,
+        visualConcept,
       });
+      if (contentPlan && data.prediction_id) {
+        await persistContentPlan(data.prediction_id);
+      }
       setView("insights");
     } catch {
       setPredictError("Could not reach the prediction service. Please try again.");
@@ -413,6 +525,8 @@ export default function PredictPage() {
             visualConcept={visualConcept}
             setVisualConcept={setVisualConcept}
             predictError={predictError}
+            contentPlanId={contentPlan?.id || null}
+            planLoadError={planLoadError}
             optimizationsApplied={optimizationsApplied}
             isFormValid={isFormValid}
             isPredictionStale={isPredictionStale}
@@ -436,6 +550,12 @@ export default function PredictPage() {
               anyRecsApplied={anyRecsApplied}
               onApply={applyStagedRecommendations}
               onEditDraft={() => setView("compose")}
+              contentPlanId={contentPlan?.id || null}
+              planSaveState={planSaveState}
+              planSaveMessage={planSaveMessage}
+              onSaveToContentPlan={() => {
+                if (prediction.savedId) void persistContentPlan(prediction.savedId);
+              }}
             />
           )
         )}

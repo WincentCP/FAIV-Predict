@@ -131,16 +131,16 @@ export default function NichesPage() {
 
       <motion.div variants={itemVariants}>
         <SectionHeader
-          eyebrow="Benchmark Cohorts & Accounts"
-          title="Industry Cohorts & Brand Accounts"
-          description="Each brand has one controlled industry cohort for understandable benchmarking. AI may suggest a cohort, but the user confirms it."
+          eyebrow="Brand Readiness"
+          title="Brands & Connections"
+          description="Create a planning workspace, verify its Instagram data connection, and see whether a cohort or personal model is ready."
           actions={
             <button
               onClick={() => setShowAddBrand(true)}
               className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground transition-colors duration-200 hover:bg-primary/92"
             >
               <Users className="h-3.5 w-3.5" />
-              Register New Brand
+              Create Workspace
             </button>
           }
         />
@@ -163,10 +163,25 @@ export default function NichesPage() {
         </motion.div>
       )}
 
+      <motion.div
+        variants={itemVariants}
+        className="rounded-2xl border border-primary/20 bg-primary/[0.035] p-4 text-xs leading-relaxed text-muted-foreground"
+      >
+        <div className="flex items-start gap-3">
+          <Activity className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <div>
+            <div className="font-bold text-foreground">Connection flow for this thesis deployment</div>
+            <p className="mt-1">
+              New workspaces start in planning-only mode. An administrator authorizes the Meta account server-side and runs the verified sync; this page then changes automatically to Connected. Until then, Predict is available only when a trained cohort model exists, and brand-specific Insights remain unavailable.
+            </p>
+          </div>
+        </div>
+      </motion.div>
+
       {/* Summary Widgets */}
       <motion.section variants={itemVariants} className="grid gap-4 sm:grid-cols-3">
         <SummaryCard
-          label="Registered Brands"
+          label="Brand Workspaces"
           value={`${brands.length}`}
           tone="primary"
           icon={Users}
@@ -188,7 +203,7 @@ export default function NichesPage() {
       {/* ── Underline Tabs ── */}
       <motion.div variants={itemVariants} className="flex gap-2 border-b border-border pb-px">
         {(["brands", "niches"] as const).map((tab) => {
-        const labels = { niches: "Industry Cohorts", brands: "Brand Accounts" };
+        const labels = { niches: "Industry Cohorts", brands: "Brands & Connections" };
           const active = activeTab === tab;
           return (
             <button
@@ -535,6 +550,8 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
         body: JSON.stringify({
           name,
           niche: picked,
+          profile_summary: bio,
+          timezone: "Asia/Jakarta",
         }),
       });
       if (res.ok) {
@@ -598,9 +615,9 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
               <Users className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <h2 className="font-display text-base font-bold tracking-tight">Create Brand Workspace</h2>
+              <h2 className="font-display text-base font-bold tracking-tight">Create Planning Workspace</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Create the workspace record first. Instagram remains disconnected until Meta authorization and a successful sync.
+                Save the brand identity and cohort now. Instagram connection is the administrator-assisted next step in this thesis deployment.
               </p>
             </div>
           </div>
@@ -630,19 +647,20 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
 
             <div className="space-y-1.5">
               <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Business Profile &amp; Target Audience
+                Brand Profile &amp; Intended Audience
               </label>
               <textarea
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
                 rows={5}
-                placeholder="Describe the business core, products, and who they sell to..."
+                maxLength={2000}
+                placeholder="Describe the brand, products, intended audience, positioning, and boundaries the creative assistant should preserve..."
                 className="w-full resize-none rounded-lg border border-border bg-surface p-3 text-sm leading-relaxed outline-none transition-all focus:border-primary focus:shadow-[0_0_0_3px_color-mix(in_oklab,hsl(var(--ring))_16%,transparent)]"
               />
               <div className="text-xs text-muted-foreground">
                 {bio.trim().length < 10 ? (
                   <span className="text-warning font-medium">
-                    Requires at least 10 characters to analyze ({bio.trim().length}/10)
+                    Optional to save; at least 10 characters are needed for AI cohort suggestions ({bio.trim().length}/10)
                   </span>
                 ) : (
                   <span className="text-success font-semibold">Valid profile ({bio.trim().length} characters)</span>
@@ -815,9 +833,9 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
               <div className="flex items-start gap-2 text-xs">
                 <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                 <div>
-                  <div className="font-bold text-foreground">Workspace created</div>
+                  <div className="font-bold text-foreground">Planning workspace created</div>
                   <div className="mt-0.5 text-muted-foreground">
-                    Instagram remains not connected until an administrator completes Meta authorization and a sync test.
+                    The profile is preserved. Ask the administrator to authorize this Instagram account and run the initial sync; connection, data freshness, and model readiness will then appear here.
                   </div>
                 </div>
               </div>
@@ -845,7 +863,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
                 Saving…
               </>
             ) : (
-              "Confirm & Save Account"
+              "Create Planning Workspace"
             )}
           </button>
             </>

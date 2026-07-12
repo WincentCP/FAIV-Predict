@@ -64,6 +64,7 @@ Brand context:
 Brand: ${brand.name}
 Niche: ${brand.niche}
 Format: ${safeFormat}
+User-supplied profile: ${brand.profileSummary || "Not supplied"}
 
 Safe historical evidence:
 ${evidenceContext}
@@ -81,6 +82,7 @@ Evidence rules:
 • Historical summaries are descriptive, not causal audience preferences.
 • Do not invent demographics, visual preferences, seasonality, or platform trends.
 • Treat campaign, season, and trend statements in the brief as user-supplied planning context, not verified external evidence.
+• Treat the profile as user-supplied identity context, not audience research.
 • Do not claim that this rewrite will improve performance.
 
 Output requirements:

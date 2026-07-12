@@ -58,6 +58,8 @@ type Provenance = {
   synced_source?: "production_database_instagram_graph_sync" | null;
   historical_source?: "production_database_instagram_graph_sync" | null;
   prediction_source?: "authenticated_user_prediction_history" | null;
+  stored_only?: boolean;
+  degraded_reason_code?: string | null;
   fetched_at: string | null;
   post_limit?: number | null;
 };
@@ -80,13 +82,16 @@ type PostDetail = {
     };
   };
   prediction: {
+    prediction_id: string | null;
     tier: Tier;
-    actual_tier: Tier | null;
+    actual_er: number | null;
     confidence: number | null;
     model_version: string | null;
-    match_method: "verified_graph_caption" | null;
+    match_method: "verified_media_id" | "verified_graph_caption_candidate" | null;
+    linked: boolean;
+    linked_elsewhere: boolean;
   } | null;
-  prediction_match_status: "not_found" | "unique_verified_caption" | "ambiguous_duplicate_caption";
+  prediction_match_status: "not_found" | "verified_publication_link" | "unique_verified_caption" | "ambiguous_duplicate_caption";
   provenance: Provenance;
 };
 
@@ -360,6 +365,7 @@ export default function InsightsPage() {
                   loading={detailLoading}
                   error={detailError}
                   onRetry={brandId ? () => loadDetail(brandId, selected) : undefined}
+                  onLinked={brandId ? () => loadDetail(brandId, selected) : undefined}
                 />
               )}
             </div>
@@ -420,13 +426,17 @@ function PostAnalysis({
   loading,
   error,
   onRetry,
+  onLinked,
 }: {
   post: IgPost;
   detail: PostDetail | null;
   loading: boolean;
   error: string | null;
   onRetry?: () => void;
+  onLinked?: () => Promise<void> | void;
 }) {
+  const [linkingPublication, setLinkingPublication] = useState(false);
+  const [publicationLinkError, setPublicationLinkError] = useState<string | null>(null);
   const media = mediaBadge(post);
   const preview = post.media_type === "VIDEO" ? post.thumbnail_url || post.media_url : post.media_url;
   const brandMedian = detail?.historical?.brand_median_er;
@@ -434,6 +444,42 @@ function PostAnalysis({
   const unavailableLabels = detail?.unavailable_metrics
     .map((metric) => METRIC_LABELS[metric])
     .filter(Boolean) ?? [];
+
+  useEffect(() => {
+    setLinkingPublication(false);
+    setPublicationLinkError(null);
+  }, [post.id]);
+
+  const confirmPublicationLink = async () => {
+    const predictionId = detail?.prediction?.prediction_id;
+    if (!predictionId || linkingPublication) return;
+    const confirmed = window.confirm(
+      "Confirm that this exact Instagram post is the content represented by the prediction. This stores an immutable media-ID link; caption similarity alone is not proof."
+    );
+    if (!confirmed) return;
+    setLinkingPublication(true);
+    setPublicationLinkError(null);
+    try {
+      const response = await fetch("/api/publication-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prediction_id: predictionId,
+          media_id: post.id,
+          confirmed: true,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.message || "Publication link could not be saved.");
+      await onLinked?.();
+    } catch (caught: unknown) {
+      setPublicationLinkError(
+        caught instanceof Error ? caught.message : "Publication link could not be saved."
+      );
+    } finally {
+      setLinkingPublication(false);
+    }
+  };
 
   return (
     <article className="overflow-hidden rounded-2xl border border-border bg-surface">
@@ -554,16 +600,43 @@ function PostAnalysis({
             <EvidenceSection post={post} detail={detail} />
 
             <section className="rounded-xl border border-border p-5" aria-labelledby="prediction-trace-heading">
-              <h3 id="prediction-trace-heading" className="text-sm font-semibold">Prediction candidate</h3>
+              <h3 id="prediction-trace-heading" className="text-sm font-semibold">Prediction trace</h3>
               {detail.prediction ? (
                 <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
                   <TierBadge tier={detail.prediction.tier} />
-                  <span>{detail.prediction.confidence !== null ? `${Math.round(detail.prediction.confidence)}% confidence` : "Confidence unavailable"}</span>
-                  {detail.prediction.actual_tier && <span>Verified outcome: <strong>{detail.prediction.actual_tier}</strong></span>}
+                  {detail.prediction.linked && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                      Verified media-ID link
+                    </span>
+                  )}
+                  <span>{detail.prediction.confidence !== null ? `${Math.round(detail.prediction.confidence)}/100 raw score` : "Raw score unavailable"}</span>
+                  {detail.prediction.actual_er !== null && <span>Observed ER: <strong>{detail.prediction.actual_er.toFixed(2)}%</strong></span>}
                   {detail.prediction.model_version && <span className="font-mono text-xs text-muted-foreground">Model {detail.prediction.model_version}</span>}
                   <p className="w-full text-xs leading-relaxed text-muted-foreground">
-                    Candidate match to this user&apos;s newest prediction using the exact caption returned by Meta. This is not an immutable media-ID link, so duplicate captions can remain ambiguous.
+                    {detail.prediction.linked
+                      ? "This outcome is attached through a user-confirmed immutable Instagram media ID."
+                      : detail.prediction.linked_elsewhere
+                        ? "This prediction already has an immutable link to another Instagram media ID, so it cannot be attached to this post."
+                      : "Operator-assisted candidate using the exact caption returned by Meta. Caption equality is not proof; verify the post before creating an immutable media-ID link."}
                   </p>
+                  {!detail.prediction.linked &&
+                    !detail.prediction.linked_elsewhere &&
+                    detail.prediction.prediction_id &&
+                    detail.prediction_match_status === "unique_verified_caption" && (
+                      <button
+                        type="button"
+                        onClick={confirmPublicationLink}
+                        disabled={linkingPublication}
+                        className="inline-flex min-h-10 items-center justify-center rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/92 disabled:opacity-50"
+                      >
+                        {linkingPublication ? "Saving verified link…" : "Confirm this publication"}
+                      </button>
+                    )}
+                  {publicationLinkError && (
+                    <p role="alert" className="w-full text-xs font-semibold text-destructive">
+                      {publicationLinkError}
+                    </p>
+                  )}
                 </div>
               ) : detail.prediction_match_status === "ambiguous_duplicate_caption" ? (
                 <p className="mt-2 text-sm text-muted-foreground">More than one prediction has this exact Meta-verified caption, so no score is assigned to the post without an immutable media-ID link.</p>
@@ -681,11 +754,14 @@ function EvidenceSection({ post, detail }: { post: IgPost; detail: PostDetail })
 
 function ProvenanceNotice({ followers, provenance, latestSync: sync }: { followers: number | null; provenance: Provenance | null; latestSync: string | null }) {
   const fetched = provenance?.fetched_at ? formatDateTime(provenance.fetched_at) : "time unavailable";
+  const storedOnly = provenance?.stored_only === true || provenance?.live_source !== "instagram_graph_api";
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-start">
       <Database aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
       <div className="min-w-0 flex-1 leading-relaxed">
-        <p><strong className="text-foreground">Data origin:</strong> previews, captions, likes, comments, and the current account follower count were fetched live from Instagram Graph at {fetched}.</p>
+        <p><strong className="text-foreground">Data origin:</strong> {storedOnly
+          ? `Instagram Graph was unavailable at ${fetched}; this list uses the latest verified records preserved by synchronization. Live previews and current per-post counters may be unavailable.`
+          : `previews, captions, likes, comments, and the current account follower count were fetched live from Instagram Graph at ${fetched}.`}</p>
         <p className="mt-1">ER is synced likes plus comments divided by the follower snapshot preserved when that media was first verified. Tiers and brand-history comparisons require mature, model-supported posts{sync ? ` from sync records updated as recently as ${formatDateTime(sync)}` : " and remain unavailable until a sync completes"}. Recent performance is not inferred from unequal-age cumulative ER.</p>
         {provenance?.post_limit && <p className="mt-1">This view requests up to {provenance.post_limit} of the account&apos;s latest posts.</p>}
       </div>

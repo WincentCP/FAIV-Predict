@@ -19,6 +19,7 @@ export async function GET() {
         model_type,
         version,
         accuracy,
+        metrics,
         created_at,
         brand_id,
         brands (
@@ -84,6 +85,25 @@ export async function GET() {
         // Accuracy recorded at training time. Rolling/live-drift telemetry is not
         // captured yet, so we do not synthesize a rolling series.
         baselineAccuracy: baselineAcc,
+        evaluationStatus:
+          m.metrics?.evaluation_status === "validated" || m.metrics?.evaluation_status === "exploratory"
+            ? m.metrics.evaluation_status
+            : null,
+        macroF1: typeof m.metrics?.candidate?.macro?.f1_score === "number"
+          ? m.metrics.candidate.macro.f1_score * 100
+          : null,
+        balancedAccuracy: typeof m.metrics?.candidate?.balanced_accuracy === "number"
+          ? m.metrics.candidate.balanced_accuracy * 100
+          : null,
+        majorityBaselineAccuracy: typeof m.metrics?.baseline?.accuracy === "number"
+          ? m.metrics.baseline.accuracy * 100
+          : null,
+        accuracyGain: typeof m.metrics?.accuracy_gain_over_baseline === "number"
+          ? m.metrics.accuracy_gain_over_baseline * 100
+          : null,
+        holdoutSamples: typeof m.metrics?.test_samples === "number"
+          ? m.metrics.test_samples
+          : null,
         trained: trainedText,
       });
     }

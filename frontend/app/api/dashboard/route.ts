@@ -19,9 +19,18 @@ export async function GET() {
       return NextResponse.json({
         totalPredictions: 0, totalModels: 0, totalBrands: 0,
         highCount: 0, avgCount: 0, lowCount: 0,
-        highTierRate: "0%", avgConfidence: "—", accuracyTrend: [], recent: [],
+        staleCount: 0, provisionalCount: 0, observedCount: 0,
+        accuracyTrend: [], recent: [],
       });
     }
+
+    const activePredictions = () => supabase
+      .from("predictions")
+      .select("*", { count: "exact", head: true })
+      .in("brand_id", brandIds)
+      .eq("created_by", user.id)
+      .is("deleted_at", null)
+      .in("prediction_status", ["current", "provisional"]);
 
     const personalModels = supabase
       .from("models")
@@ -39,21 +48,24 @@ export async function GET() {
           .contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" })
       : Promise.resolve({ data: [], error: null });
 
-    const [totalResult, highResult, averageResult, lowResult, confidenceResult, recentResult, personalModelResult, cohortModelResult] =
+    const [totalResult, highResult, averageResult, lowResult, staleResult, provisionalResult, observedResult, recentResult, personalModelResult, cohortModelResult] =
       await Promise.all([
-        supabase.from("predictions").select("*", { count: "exact", head: true }).in("brand_id", brandIds).eq("created_by", user.id),
-        supabase.from("predictions").select("*", { count: "exact", head: true }).in("brand_id", brandIds).eq("created_by", user.id).eq("pred_class", "HIGH"),
-        supabase.from("predictions").select("*", { count: "exact", head: true }).in("brand_id", brandIds).eq("created_by", user.id).eq("pred_class", "AVERAGE"),
-        supabase.from("predictions").select("*", { count: "exact", head: true }).in("brand_id", brandIds).eq("created_by", user.id).eq("pred_class", "LOW"),
-        supabase.from("predictions").select("features").in("brand_id", brandIds).eq("created_by", user.id).order("created_at", { ascending: false }).limit(50),
-        supabase.from("predictions").select("id, caption, pred_class, created_at, features, brands(name)").in("brand_id", brandIds).eq("created_by", user.id).order("created_at", { ascending: false }).limit(5),
+        activePredictions(),
+        activePredictions().eq("pred_class", "HIGH"),
+        activePredictions().eq("pred_class", "AVERAGE"),
+        activePredictions().eq("pred_class", "LOW"),
+        supabase.from("predictions").select("*", { count: "exact", head: true }).in("brand_id", brandIds).eq("created_by", user.id).is("deleted_at", null).eq("prediction_status", "stale"),
+        supabase.from("predictions").select("*", { count: "exact", head: true }).in("brand_id", brandIds).eq("created_by", user.id).is("deleted_at", null).eq("prediction_status", "provisional"),
+        supabase.from("predictions").select("*", { count: "exact", head: true }).in("brand_id", brandIds).eq("created_by", user.id).is("deleted_at", null).eq("actual_source", "instagram_media_id").not("actual_er", "is", null),
+        supabase.from("predictions").select("id, caption, pred_class, created_at, features, brands(name)").in("brand_id", brandIds).eq("created_by", user.id).is("deleted_at", null).in("prediction_status", ["current", "provisional"]).order("created_at", { ascending: false }).limit(5),
         personalModels,
         cohortModels,
       ]);
 
     const firstError = [
       totalResult.error, highResult.error, averageResult.error, lowResult.error,
-      confidenceResult.error, recentResult.error, personalModelResult.error, cohortModelResult.error,
+      staleResult.error, provisionalResult.error, observedResult.error,
+      recentResult.error, personalModelResult.error, cohortModelResult.error,
     ].find(Boolean);
     if (firstError) throw firstError;
 
@@ -61,12 +73,6 @@ export async function GET() {
     const high = highResult.count || 0;
     const avg = averageResult.count || 0;
     const low = lowResult.count || 0;
-    const confidences = (confidenceResult.data || [])
-      .map((row: any) => row.features?.confidence)
-      .filter((value: unknown): value is number => typeof value === "number" && Number.isFinite(value));
-    const avgConfidence = confidences.length
-      ? `${(confidences.reduce((sum, value) => sum + value, 0) / confidences.length).toFixed(1)}%`
-      : "—";
 
     const relevantModels = [
       ...(personalModelResult.data || []),
@@ -104,8 +110,10 @@ export async function GET() {
       totalModels: modelScopes.size,
       totalBrands: ownedBrands.length,
       highCount: high, avgCount: avg, lowCount: low,
-      highTierRate: total > 0 ? `${((high / total) * 100).toFixed(1)}%` : "0%",
-      avgConfidence, accuracyTrend, recent,
+      staleCount: staleResult.count || 0,
+      provisionalCount: provisionalResult.count || 0,
+      observedCount: observedResult.count || 0,
+      accuracyTrend, recent,
     });
   } catch (error: any) {
     console.error("[BFF Dashboard] Failed to fetch dashboard aggregates:", error);

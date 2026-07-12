@@ -65,10 +65,16 @@ export async function POST(request: Request) {
 SAFE HISTORICAL CONTEXT:
 ${evidenceContext}
 
+USER-SUPPLIED BRAND PROFILE (identity context only; never historical evidence):
+"""
+${brand.profileSummary || "Not supplied."}
+"""
+
 EVIDENCE RULES:
 - Historical summaries are descriptive associations, not causal audience preferences.
 - Do not claim access to audience demographics, platform-wide trends, seasonality, or media-vision analysis.
 - Treat any campaign, season, or trend in the brief as user-supplied context, not verified external evidence.
+- Treat the brand profile as user-supplied identity context. Never claim it was learned from Instagram audience data.
 - If you reference historical context, qualify it as "observed in this brand's eligible history" and include no stronger claim.
 - The brief and this analysis are not Random Forest inputs and do not change the prediction score.
 

@@ -13,6 +13,8 @@ interface BrandRow {
   followers: number | null;
   model_type: string;
   created_at: string;
+  profile_summary: string | null;
+  timezone: string;
 }
 
 interface TrainingPostRow {
@@ -36,7 +38,7 @@ export async function GET() {
     if (!user) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
     const { data: brandData, error } = await supabase
       .from("brands")
-      .select("id, name, niche, followers, model_type, created_at")
+      .select("id, name, niche, followers, model_type, created_at, profile_summary, timezone")
       .eq("owner_id", user.id)
       .order("name", { ascending: true });
     if (error) throw error;
@@ -111,7 +113,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await readJsonObject(request);
-    const { name, niche } = body;
+    const { name, niche, profile_summary, timezone } = body;
 
     if (typeof name !== "string" || !name.trim() || typeof niche !== "string" || !niche.trim()) {
       return NextResponse.json(
@@ -128,6 +130,22 @@ export async function POST(request: Request) {
     if (!(NICHES as readonly string[]).includes(niche.trim())) {
       return NextResponse.json(
         { status: "error", message: "Select a supported industry cohort." },
+        { status: 400 }
+      );
+    }
+    if (
+      profile_summary !== undefined &&
+      (typeof profile_summary !== "string" || profile_summary.trim().length > 2000)
+    ) {
+      return NextResponse.json(
+        { status: "error", message: "Brand profile must be text no longer than 2,000 characters." },
+        { status: 400 }
+      );
+    }
+    const resolvedTimezone = timezone === undefined ? "Asia/Jakarta" : timezone;
+    if (typeof resolvedTimezone !== "string" || resolvedTimezone !== "Asia/Jakarta") {
+      return NextResponse.json(
+        { status: "error", message: "This thesis deployment currently supports the Asia/Jakarta timezone." },
         { status: 400 }
       );
     }
@@ -150,7 +168,15 @@ export async function POST(request: Request) {
     }
     const { data: newBrand, error } = await supabase
       .from("brands")
-      .insert([{ name: name.trim(), owner_id: user.id, niche: niche.trim() }])
+      .insert([{
+        name: name.trim(),
+        owner_id: user.id,
+        niche: niche.trim(),
+        profile_summary: typeof profile_summary === "string" && profile_summary.trim()
+          ? profile_summary.trim()
+          : null,
+        timezone: resolvedTimezone,
+      }])
       .select()
       .single();
     if (error) throw error;

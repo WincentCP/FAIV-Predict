@@ -24,7 +24,7 @@ export async function GET() {
         caption,
         features,
         pred_class,
-        actual_class,
+        actual_er,
         actual_source,
         created_at,
         scheduled_date,
@@ -52,6 +52,28 @@ export async function GET() {
       throw error;
     }
 
+    const predictionIds = (predictions || []).map((prediction) => prediction.id);
+    const { data: publications, error: publicationError } = predictionIds.length > 0
+      ? await supabase
+          .from("prediction_publications")
+          .select("id, prediction_id, post_id")
+          .in("prediction_id", predictionIds)
+          .eq("owner_id", user.id)
+      : { data: [], error: null };
+    if (publicationError) throw publicationError;
+    const postIds = Array.from(new Set((publications || []).map((publication) => publication.post_id)));
+    const { data: linkedPosts, error: linkedPostsError } = postIds.length > 0
+      ? await supabase
+          .from("posts")
+          .select("id, instagram_media_id, created_at, synced_at")
+          .in("id", postIds)
+      : { data: [], error: null };
+    if (linkedPostsError) throw linkedPostsError;
+    const publicationByPrediction = new Map(
+      (publications || []).map((publication) => [publication.prediction_id, publication])
+    );
+    const postById = new Map((linkedPosts || []).map((post) => [post.id, post]));
+
     // Map database properties to the schema required by the history UI
     const formatted = (predictions || []).map((p: any) => {
       const is_reels = p.features?.is_reels === 1.0;
@@ -61,6 +83,14 @@ export async function GET() {
         typeof p.features?.confidence === "number" ? Math.round(p.features.confidence) : null;
       const postHour =
         typeof p.features?.post_hour === "number" ? Math.round(p.features.post_hour) : null;
+      const publication = publicationByPrediction.get(p.id);
+      const linkedPost = publication ? postById.get(publication.post_id) : null;
+      const observedAgeDays = linkedPost?.created_at
+        ? Math.max(0, Math.floor((Date.now() - new Date(linkedPost.created_at).getTime()) / 86_400_000))
+        : null;
+      const observedEr = p.actual_source === "instagram_media_id" && typeof p.actual_er === "number"
+        ? p.actual_er
+        : null;
 
       return {
         id: p.id,
@@ -74,9 +104,21 @@ export async function GET() {
         format,
         caption: p.caption || "",
         tier: p.pred_class.charAt(0).toUpperCase() + p.pred_class.slice(1).toLowerCase(),
-        actual: p.actual_source === "instagram_media_id" && p.actual_class
-          ? p.actual_class.charAt(0).toUpperCase() + p.actual_class.slice(1).toLowerCase()
-          : null,
+        // Do not present a derived tier as ground truth. Outcomes are exposed
+        // as the observed ER snapshot plus post age and provenance.
+        actual: null,
+        publication_linked: Boolean(publication),
+        publication_media_id: linkedPost?.instagram_media_id || null,
+        observed_er: observedEr,
+        observed_post_age_days: observedAgeDays,
+        observed_at: linkedPost?.synced_at || null,
+        observation_status: publication
+          ? p.actual_source === "instagram_media_id"
+            ? "observed_mature"
+            : observedAgeDays !== null && observedAgeDays < 7
+              ? "linked_pending_maturity"
+              : "linked_awaiting_metrics"
+          : "not_linked",
         confidence,
         post_hour: postHour,
         when: p.created_at,

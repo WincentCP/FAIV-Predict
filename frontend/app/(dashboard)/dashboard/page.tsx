@@ -32,7 +32,7 @@ import { motion, Variants } from "framer-motion";
 const KPI_DEFINITIONS = [
   {
     id: "predictions",
-    label: "Total Predictions",
+    label: "Active Predictions",
     value: "—",
     sub: "Loading verified data",
     colorClass: "text-success bg-success/10 border-success/20",
@@ -41,8 +41,8 @@ const KPI_DEFINITIONS = [
     icon: Activity,
   },
   {
-    id: "accounts",
-    label: "Brand Workspaces",
+    id: "connections",
+    label: "Instagram Connections",
     value: "—",
     sub: "Loading verified data",
     colorClass: "text-chart-3 bg-chart-3/10 border-chart-3/20",
@@ -61,8 +61,8 @@ const KPI_DEFINITIONS = [
     icon: ShieldCheck,
   },
   {
-    id: "confidence",
-    label: "Average Confidence",
+    id: "attention",
+    label: "Predictions to Review",
     value: "—",
     sub: "Loading verified data",
     colorClass: "text-warning bg-warning/10 border-warning/20",
@@ -111,11 +111,13 @@ export default function DashboardPage() {
               if (kpi.id === "models" && data.totalModels !== undefined) {
                 return { ...kpi, value: data.totalModels.toString(), sub: data.totalModels === 0 ? "No models available" : "Latest account and cohort scopes" };
               }
-              if (kpi.id === "accounts" && data.totalBrands !== undefined) {
-                return { ...kpi, value: data.totalBrands.toString(), sub: `${data.totalBrands} registered brand${data.totalBrands === 1 ? "" : "s"}` };
-              }
-              if (kpi.id === "confidence" && data.avgConfidence !== undefined) {
-                return { ...kpi, value: data.avgConfidence, sub: data.avgConfidence === "—" ? "No confidence values recorded" : "Across recent predictions" };
+              if (kpi.id === "attention") {
+                const review = Number(data.staleCount || 0) + Number(data.provisionalCount || 0);
+                return {
+                  ...kpi,
+                  value: review.toString(),
+                  sub: `${data.observedCount || 0} linked mature outcome${data.observedCount === 1 ? "" : "s"}`,
+                };
               }
               return kpi;
             })
@@ -171,8 +173,23 @@ export default function DashboardPage() {
       }
     }
 
+    async function fetchConnections() {
+      try {
+        const res = await fetchWithRetry("/api/instagram-health", { cache: "no-store" }, 1);
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !Array.isArray(data?.connections)) return;
+        const connected = data.connections.filter((item: any) => item?.status === "connected").length;
+        setKpis((prev) => prev.map((kpi) => kpi.id === "connections"
+          ? { ...kpi, value: connected.toString(), sub: `${data.connections.length - connected} need setup or attention` }
+          : kpi));
+      } catch {
+        // The connection card remains unavailable without replacing it with a fabricated zero.
+      }
+    }
+
     fetchDashboard();
     fetchBrands();
+    fetchConnections();
   }, []);
 
   const containerVariants: Variants = {
@@ -210,8 +227,7 @@ export default function DashboardPage() {
             <div>
               <div className="text-sm font-bold text-foreground">Set up your workspace</div>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Register your first brand to unlock predictions. Everything else — models,
-                history, and this dashboard — builds on it.
+                Create a planning workspace, then verify its Instagram connection and serving model before predicting.
               </p>
             </div>
           </div>
@@ -219,7 +235,7 @@ export default function DashboardPage() {
             href="/niches"
             className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground transition-all hover:bg-primary/90 active:scale-[0.98]"
           >
-            Register a brand
+            Create workspace
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </motion.section>
@@ -300,8 +316,8 @@ export default function DashboardPage() {
       >
         <div className="rounded-2xl border border-border bg-surface/70 p-6 backdrop-blur-xl shadow-sm">
           <SectionHeader
-            eyebrow="AI Validation"
-            title={<span className="text-2xl font-bold">Recent Validation Runs</span>}
+            eyebrow="Research Evidence"
+            title={<span className="text-2xl font-bold">Model Evaluation Evidence</span>}
             description={accuracyTrend.length > 0 ? `Latest ${accuracyTrend.length} owned model runs. Each bar is a separate scope, not a continuous trend.` : "No model training data available yet."}
           />
           <div className="mt-6 h-[260px]">
@@ -311,7 +327,7 @@ export default function DashboardPage() {
               <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/65 text-center">
                 <BarChart3 className="h-5 w-5 text-muted-foreground" />
                 <p className="text-xs font-semibold text-muted-foreground">No training sessions yet</p>
-                <p className="text-xs text-muted-foreground">Accuracy appears after the scheduled training pipeline registers a validated model.</p>
+                <p className="text-xs text-muted-foreground">Accuracy appears after the scheduled training pipeline registers an evaluated model.</p>
               </div>
             )}
           </div>
@@ -327,7 +343,7 @@ export default function DashboardPage() {
                   Recent activity
                 </div>
                 <h3 className="mt-2 font-display text-base font-bold">
-                  Recent Forecasts
+                  Recent Predictions
                 </h3>
               </div>
               <Link href="/history" className="text-xs font-bold text-primary hover:text-primary-glow hover:underline">
@@ -360,8 +376,8 @@ export default function DashboardPage() {
                         <TierBadge tier={r.tier} />
                         {r.confidence != null && (
                           <div className="flex items-center gap-1 text-xs font-bold">
-                            <span className="font-mono text-foreground">{r.confidence}%</span>
-                            <span className="text-xs text-muted-foreground/60 font-medium">conf</span>
+                            <span className="font-mono text-foreground">{r.confidence}/100</span>
+                            <span className="text-xs text-muted-foreground/60 font-medium">raw class score</span>
                           </div>
                         )}
                       </div>
@@ -383,7 +399,7 @@ export default function DashboardPage() {
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_oklab,hsl(var(--primary))_30%,transparent)] bg-[color-mix(in_oklab,hsl(var(--primary))_8%,transparent)] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-primary">
               <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-              AI Levels
+              Model Readiness
             </div>
             <h3 className="mt-3 font-display text-lg font-bold">
               Per-Account AI Status
@@ -461,8 +477,8 @@ export default function DashboardPage() {
           <div>
             <SectionHeader
               eyebrow="Authenticated history"
-              title={<span className="text-2xl font-bold">Performance Potential Distribution</span>}
-              description="Distribution across predictions generated by your account."
+              title={<span className="text-2xl font-bold">Current Prediction Tier Mix</span>}
+              description="Distribution of current prediction results. This describes analyzed drafts, not verified business success."
             />
           </div>
           <div className="mt-4 space-y-5">

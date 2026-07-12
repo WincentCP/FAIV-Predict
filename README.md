@@ -13,6 +13,7 @@
 
 * **Real-time predictive classifier** — hierarchical Random Forest models (shared **niche model** → dedicated **personal model** once a brand accumulates 200 mature, verified, model-supported historical posts).
 * **Brand Performance Snapshot** — brand-scoped descriptive medians, interquartile ranges, and sample counts for observed format, posting-window, and structural-caption patterns before prediction. These are historical associations, not causal audience-preference claims.
+* **Traceable content lifecycle** — an owned Content Plan can seed Predict, retain the immutable prediction snapshot, and later be linked deliberately to one verified Instagram media identity so a mature observed ER can be traced without caption guessing.
 * **Calibration workspace** — test format, posting time, caption length, hashtag density, and CTA presence to see what shapes the score.
 * **Explainability** — global MDI feature-importance charts and per-draft counterfactual "what-if" analysis measured by the real model. No hardcoded optimization advice is presented as evidence.
 
@@ -20,6 +21,7 @@
 * 🚫 Not a generative AI copywriter (AI caption refinement is an optional, clearly-labeled Gemini helper).
 * 🚫 Not a reach estimator — it outputs classification tiers and an uncalibrated raw class score, never absolute metrics ("+15% reach" style claims are deliberately absent).
 * 🚫 Not an audience-demographics, visual-understanding, or real-time trend-intelligence product. It does not currently measure audience age/location, content pillars, visual or video style, hooks, storytelling, seasonal events, or an external platform-trend feed.
+* 🚫 Not a public Instagram OAuth or publishing platform. In the thesis deployment, an operator obtains and rotates the Meta credential, binds the immutable Instagram account ID to an existing owned brand through `IG_BRANDS_JSON`, and verifies the connection. End users are not asked to paste Meta tokens into the browser.
 
 ---
 
@@ -34,7 +36,7 @@
          ▼                                       ▼
 ┌────────────────────────────────────────────────────────────┐
 │ Supabase — Postgres (brands, posts, predictions, models,   │
-│ retrain jobs, calendar entries) · Auth · model Storage      │
+│ plans, publication links, lifecycle events) · Auth · Storage│
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -43,7 +45,7 @@
 * **Inference engine**: FastAPI hosting Random Forest classifiers per niche/brand. If no trained model exists it returns an honest `503` — there is no fabricated fallback model.
 * **Storage & Auth**: Supabase Postgres for brands/posts/predictions/model metadata; Supabase Storage for trained `.joblib` bundles; Supabase Auth for login sessions.
 * **Optional LLM**: Google Gemini powers the brand classifier (`/api/classify`), Creative Brief review (`/api/analyze-concept`), and caption refinement (`/api/refine-caption`). Each reports itself unavailable (`501`) when `LLM_API_KEY` is not configured and requires an authenticated session; Creative Brief routes additionally authorize the selected brand before using safe aggregate context.
-* **Automation**: one inactive-by-default n8n workflow (`n8n/workflow_sync_retrain.json`) with two schedules — a **weekly** run (Mon 06:00 WIB) that calls `POST /sync/now` to pull Instagram Graph API data and retrain models, and a **daily** run (07:00 WIB) that calls `GET /instagram/health` and alerts operators if a verified connection is unhealthy. API and SMTP secrets live in encrypted n8n Credentials; `$env` access is blocked. The pinned, persistent runtime and activation checklist are documented in [`n8n/README.md`](./n8n/README.md).
+* **Automation**: one inactive-by-default n8n workflow (`n8n/workflow_sync_retrain.json`) with two schedules — a **weekly** run (Mon 06:00 WIB) that calls `POST /sync/now` to pull Instagram Graph data, reconcile mature already-confirmed publication outcomes, and retrain models, and a **daily** run (07:00 WIB) that calls `GET /instagram/health` and alerts operators if a verified connection is unhealthy. n8n never chooses a publication link. API and SMTP secrets live in encrypted n8n Credentials; `$env` access is blocked. The pinned, persistent runtime and activation checklist are documented in [`n8n/README.md`](./n8n/README.md).
 * **Row-Level Security**: `brands.owner_id` is the ownership root and `predictions.created_by` records the initiating user. Every authenticated user sees only owned records. Legacy predictions and posts without verifiable provenance are quarantined from user-facing metrics and model training instead of being guessed or destructively deleted. The BFF repeats ownership checks before invoking the privileged ML service.
 * **CI**: GitHub Actions (`.github/workflows/ci.yml`) runs frontend lint + type-check + production build and the ML service test suite on every push and PR.
 
@@ -63,6 +65,7 @@ authoritative integration is maintained in
 | `POST /api/analyze-concept` | Optional Gemini review of an unscored creative brief |
 | `GET /api/brand-patterns` | Owned-brand descriptive performance snapshot from mature verified Graph history |
 | `GET/POST/PATCH/DELETE /api/calendar` | User-owned planning records and reviewed spreadsheet imports |
+| `POST /api/publication-links` | Explicitly confirm one owned prediction against one verified same-brand Instagram media ID |
 | `GET /api/dashboard` | Workspace KPI aggregates (503 on database failure) |
 | `GET /api/models` | Trained model registry |
 | `GET/POST /api/train` | Trigger retraining and poll job status |
@@ -82,8 +85,9 @@ authoritative integration is maintained in
 6. **Serving**: model bundles (`model + thresholds + feature order + data provenance`) are uploaded to Supabase Storage, registered in the `models` table, downloaded, provenance-verified, and memory-cached by the inference service. Pre-migration models without certified Graph media IDs are not served.
 7. **Hierarchy**: prediction requests resolve a brand-specific (`account`) model first, falling back to the shared niche model. The response reports which one served the request (`is_personal_model_active`).
 8. **Explainability**: two complementary layers. **Global**: real MDI feature importance describes overall model behavior but is not presented as a signed local explanation; holdout permutation importance is exported as separate academic evidence. **Sensitivity scenarios**: the model re-scores single-feature variants of the same draft using observed posting hours and training-split median caption/tag anchors. These are non-causal model simulations, not guaranteed engagement uplift, and the actual edited draft must be scored again.
-9. **Post provenance**: sync upserts by immutable Instagram media ID and never deletes/rebuilds historical posts. Meta `media_product_type` is retained so a Feed video is not mislabeled or trained as a Reel. A legacy row is claimed only by an exact timestamp-and-caption match; otherwise it remains quarantined. Caption matching may provide a read-only prediction trace in Insights, but never writes an “actual” outcome. Predicted-vs-actual values are shown only when `actual_source = instagram_media_id` supplies explicit future linkage.
+9. **Post provenance**: sync upserts by immutable Instagram media ID and never deletes/rebuilds historical posts. Meta `media_product_type` is retained so a Feed video is not mislabeled or trained as a Reel. A legacy row is claimed only by an exact timestamp-and-caption match; otherwise it remains quarantined. Caption similarity may remain a read-only candidate hint, but it can never create a publication link or write an “actual” outcome.
 10. **Descriptive planning evidence**: Brand Performance Snapshot uses only one owned brand's mature, verified Graph history. It reports median cumulative ER, IQR, `n`, and evidence level for observed groups. It is separate from model inference, never changes a score, and may remain brand-specific when Predict falls back to a niche model.
+11. **Observed-outcome linkage**: a Content Plan and prediction are associated only inside the same owner and brand. A publication link is then confirmed against one immutable Instagram media ID; synchronization may attach the verified post and expose mature observed ER. This thesis deliberately stores continuous ER only and rejects new `actual_class` values. A future categorical outcome would require a new versioned schema/migration and a validated threshold/outcome contract.
 
 ---
 
@@ -101,11 +105,38 @@ Compose (draft the post) → Insights (everything the model has to say, one scre
 Other pages:
 
 * **`/dashboard`** — KPIs, model accuracy trend, recent forecasts, per-brand model status (all queried live from Supabase).
-* **`/calendar`** — a planning workspace independent from prediction history. It contains only manual or reviewed CSV/XLSX imports, supports workflow metadata, drag-to-reschedule, and CSV/XLSX/PDF export.
+* **`/calendar`** — the Content Plan workspace for manual or reviewed CSV/XLSX entries. A supported owned entry can open Predict with its planning inputs, retain the returned immutable prediction ID, and later record a verified publication link; drag-to-reschedule, workflow metadata, and CSV/XLSX/PDF export remain available.
 * **`/history`**: filterable, immutable prediction evidence. Recalculation creates a successor; user deletion is a reversible soft archive and never rewrites or destroys the scored snapshot.
 * **`/insights`** — a master-detail analytics hub. The post list stays lightweight; supported Meta lifetime metrics load only for the selected post, alongside verified historical and prediction comparisons.
 * **`/niches`** — brand registration with one controlled industry cohort. AI may suggest a cohort, but the user confirms it; follower counts come only from Instagram sync.
 Instagram connection health is shown per brand on **`/niches`**. The daily n8n check can notify operators before a scheduled sync fails.
+
+### Content Plan to observed outcome
+
+```text
+Owned Content Plan
+  → Predict with the plan's brand, caption, format, date, and optional time
+  → save one immutable prediction snapshot back to that plan
+  → authenticated user explicitly confirms the published media for that prediction
+  → store one immutable plan/prediction/media identity link
+  → n8n-triggered Graph sync resolves and refreshes the verified post
+  → after the maturity gate, expose observed cumulative ER with provenance
+```
+
+The link is intentionally explicit. The system does not infer publication
+identity from caption text, posting order, or a display name, because captions
+can be duplicated or edited. Changing the plan later may make its linked
+prediction stale, but never rewrites the old scored snapshot or publication
+identity. Observed ER is the primary realized measurement. An “actual tier” is
+not manufactured from a different brand percentile or the current distribution;
+the current thesis always reports the tier as unavailable. Adding one later
+requires a new versioned schema/migration and proof that the original model's
+thresholds and the same outcome/maturity rule are applied consistently.
+
+n8n orchestrates scheduled connection health checks and Graph sync/retraining.
+It does not own tenant authorization, create brands, choose a publication link,
+or bypass database identity constraints. Core ownership and linkage invariants
+remain in the authenticated BFF and Postgres.
 
 ### Historical patterns and trend relevance
 
@@ -141,11 +172,27 @@ For Docker Compose, copy `.env.example` to repository-root `.env`. Native develo
 * `SUPABASE_KEY` (ML service) should be a secret/service-role key so model artifacts can be uploaded to Storage.
 * `INTERNAL_API_TOKEN` must match between the frontend and ML service. Enter that same value into the encrypted n8n Header Auth credential; do not expose it to the n8n process environment.
 * `LLM_API_KEY` is optional and server-only. Use a current Gemini authorization/restricted key, keep it out of browser variables and Git, and rotate it if exposed. The BFF sends it in the `x-goog-api-key` header rather than a request URL.
-* `IG_BRANDS_JSON` (ML service, optional) links Instagram Business accounts for the sync pipeline. Each entry must bind credentials to an existing `brand_id`; sync never creates brands. Without a configured connection, the UI reports the account as disconnected and never fabricates metrics.
+* `IG_BRANDS_JSON` (ML service, optional) is the thesis deployment's **operator-assisted** Instagram connection registry. Each entry binds a Meta credential and immutable Instagram Business account ID to an existing owned `brand_id`; sync never creates brands. The first verified sync persists that identity and later mismatches fail closed. This is not public OAuth or user self-service. Without a verified binding, the UI reports the account as disconnected and never fabricates metrics.
 * `IG_SYNC_POST_LIMIT` controls how many historical media rows each weekly sync may retrieve (default `500`, accepted range `1–1000`). The importer follows Meta pagination, upserts immutable media IDs idempotently, and reports whether additional Graph history was actually truncated by the configured cap. Training still uses every eligible verified row accumulated in the database; lowering a later sync limit never deletes older history.
 * Meta tokens are secrets: rotate any token that appears in terminal output, screenshots, logs, or chat. The ML service suppresses HTTP client request logs and records only sanitized Graph status/type diagnostics.
 * n8n has no access to application environment secrets. Create a Header Auth credential for `X-Internal-Token`, select it in both HTTP Request nodes, replace the safe `.invalid` email placeholders, and select an SMTP credential before activation. See [`n8n/README.md`](./n8n/README.md).
 * Login accounts are provisioned by an administrator (Supabase dashboard → Authentication → Users → *Add user* with auto-confirm; self-signup requires email confirmation).
+
+### Migration-first deployment order
+
+Apply database changes before rebuilding services that query the new contract:
+
+1. `202607110001_user_data_ownership_and_calendar.sql`
+2. `202607110002_prediction_lifecycle.sql`
+3. `202607120003_brand_patterns_and_media_product.sql`
+4. `202607120004_content_lifecycle_integration.sql`
+
+Then rebuild/restart the frontend and ML service, run one verified n8n
+sync/reconcile/retrain execution, export fresh model evidence, and run
+`scripts/thesis_preflight.ps1`. Migration 003 changes which videos are eligible
+as Reels, so old model evidence must not be reused. Migration 004 must exist
+before Content Plan enrichment, secure publication-link RPC calls, immutable
+Instagram account binding, or observed-outcome reconciliation is exercised.
 
 ### Run
 ```bash

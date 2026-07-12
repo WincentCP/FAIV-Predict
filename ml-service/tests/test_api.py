@@ -3,6 +3,7 @@ import os
 import sys
 import datetime
 import logging
+from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -164,12 +165,16 @@ from app.thesis_evidence import (
 from app.main import (
     build_counterfactuals,
     DEFAULT_INSTAGRAM_SYNC_POST_LIMIT,
+    InstagramIdentityBindingError,
+    _bind_instagram_identity,
+    _fail_stale_retrain_jobs,
     _fetch_ig_posts,
     _get_brands_config,
     _instagram_sync_post_limit,
     _media_insight_value,
     _media_insight_values,
     _parse_instagram_health_brand_ids,
+    _reconcile_prediction_publications,
     _sync_and_retrain_pipeline,
     _upsert_instagram_media,
 )
@@ -1028,7 +1033,7 @@ def test_instagram_posts_uses_verified_sync_er_instead_of_current_followers(monk
         def fetchall(self):
             assert "p.source = 'instagram_graph'" in self.query
             assert "p.instagram_media_id IS NOT NULL" in self.query
-            return [("111", 4.2, synced_at, True, True, True)]
+            return [("post-111", "111", 4.2, synced_at, True, True, True)]
 
         def fetchone(self):
             assert "p.source = 'instagram_graph'" in self.query
@@ -1096,6 +1101,7 @@ def test_instagram_posts_uses_verified_sync_er_instead_of_current_followers(monk
     assert response.status_code == 200
     payload = response.json()
     assert payload["posts"][0]["er"] == 4.2  # not live (10 + 5) / 1,000 = 1.5%
+    assert payload["posts"][0]["post_id"] == "post-111"
     assert payload["posts"][0]["tier"] == "Average"
     assert payload["posts"][0]["comparison_eligible"] is True
     assert payload["posts"][0]["comparison_unavailable_reason"] is None
@@ -1111,6 +1117,85 @@ def test_instagram_posts_uses_verified_sync_er_instead_of_current_followers(monk
     assert executed_queries[1][1] == (brand_id, MIN_POST_AGE_DAYS)
 
 
+def test_instagram_posts_falls_back_to_stored_verified_history(monkeypatch):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+    brand_id = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
+    post_id = "4b3e1aa0-3926-4b8c-b212-4015b756e62c"
+    created_at = datetime.datetime(2026, 6, 1, tzinfo=datetime.timezone.utc)
+    synced_at = datetime.datetime(2026, 7, 10, tzinfo=datetime.timezone.utc)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setattr(main_module, "_get_instagram_connection", lambda _brand_id: {
+        "brand_id": brand_id,
+        "name": "Stored brand",
+        "instagram_id": "17840000000000000",
+        "access_token": "secret",
+    })
+    monkeypatch.setattr(
+        main_module,
+        "_fetch_ig_profile",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+
+    class Cursor:
+        def __init__(self):
+            self.query = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def execute(self, query, _params):
+            self.query = query
+
+        def fetchall(self):
+            if "JOIN brands b" in self.query:
+                return [(
+                    post_id,
+                    "111",
+                    "Stored verified caption",
+                    "FEED",
+                    True,
+                    False,
+                    False,
+                    created_at,
+                    1250,
+                )]
+            return [(post_id, "111", 4.2, synced_at, True, True, True)]
+
+        @staticmethod
+        def fetchone():
+            return (3.0, 5.0)
+
+    class Connection:
+        @staticmethod
+        def cursor(*_args, **_kwargs):
+            return Cursor()
+
+        @staticmethod
+        def close():
+            pass
+
+    monkeypatch.setattr(main_module.psycopg2, "connect", lambda *_args, **_kwargs: Connection())
+
+    response = client.get(f"/instagram/posts?brand_id={brand_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "degraded"
+    assert payload["followers"] == 1250
+    assert payload["provenance"]["live_source"] is None
+    assert payload["provenance"]["stored_only"] is True
+    assert payload["posts"][0]["post_id"] == post_id
+    assert payload["posts"][0]["er"] == 4.2
+    assert payload["posts"][0]["likes"] is None
+    assert payload["posts"][0]["comments"] is None
+    assert payload["posts"][0]["media_url"] is None
+
+
 def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
     """The caller cannot supply a caption to manufacture a prediction match."""
     import importlib
@@ -1121,6 +1206,28 @@ def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
     media_id = "17900000000000001"
     prediction_params = []
     historical_queries = []
+    prediction_rows = [
+        {
+            "id": "4b3e1aa0-3926-4b8c-b212-4015b756e62c",
+            "pred_class": "HIGH",
+            "actual_er": None,
+            "actual_source": None,
+            "model_version": "1",
+            "confidence": "80",
+            "publication_linked": False,
+            "publication_matches_selected_media": False,
+        },
+        {
+            "id": "6656a7ff-dd36-456d-bf72-03b090e9fd5a",
+            "pred_class": "LOW",
+            "actual_er": None,
+            "actual_source": None,
+            "model_version": "2",
+            "confidence": "70",
+            "publication_linked": False,
+            "publication_matches_selected_media": False,
+        },
+    ]
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
     monkeypatch.setattr(main_module, "_get_instagram_connection", lambda _brand_id: {
@@ -1181,6 +1288,7 @@ def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
         def fetchone(self):
             if "AS is_mature" in self.query:
                 return {
+                    "post_id": "4b3e1aa0-3926-4b8c-b212-4015b756e62c",
                     "er": 4.0,
                     "is_mature": True,
                     "is_modeled_format": True,
@@ -1195,10 +1303,7 @@ def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
                 return []
             # Two exact-caption rows are intentionally ambiguous; the API must
             # not arbitrarily pick the newest and present it as this post.
-            return [
-                {"pred_class": "HIGH", "actual_class": None, "actual_source": None, "model_version": "1", "confidence": "80"},
-                {"pred_class": "LOW", "actual_class": None, "actual_source": None, "model_version": "2", "confidence": "70"},
-            ]
+            return list(prediction_rows)
 
     class Connection:
         @staticmethod
@@ -1225,11 +1330,12 @@ def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
         "created_by": user_id,
     })
     assert response.status_code == 200
-    assert prediction_params == [(brand_id, user_id, "verified graph caption")]
+    assert prediction_params == [(media_id, brand_id, user_id, "verified graph caption")]
     payload = response.json()
     assert payload["prediction"] is None
     assert payload["prediction_match_status"] == "ambiguous_duplicate_caption"
     assert payload["historical"]["comparison_eligible"] is True
+    assert payload["historical"]["verified_post_id"] == "4b3e1aa0-3926-4b8c-b212-4015b756e62c"
     assert payload["historical"]["brand_median_er"] == 3.0
     assert payload["historical"]["brand_baseline_posts"] == 12
     assert "recent_median_er" not in payload["historical"]
@@ -1249,6 +1355,139 @@ def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
     assert all("recent_median_er" not in query for query, _params in historical_queries)
     assert payload["provenance"]["live_source"] == "instagram_graph_api"
 
+    prediction_rows[:] = [prediction_rows[0]]
+    candidate_response = client.post("/instagram/post-insights", json={
+        "brand_id": brand_id,
+        "media_id": media_id,
+        "created_by": user_id,
+    })
+    assert candidate_response.status_code == 200
+    candidate = candidate_response.json()["prediction"]
+    assert candidate_response.json()["prediction_match_status"] == "unique_verified_caption"
+    assert candidate["id"] == "4b3e1aa0-3926-4b8c-b212-4015b756e62c"
+    assert candidate["publication_linked"] is False
+    assert candidate["publication_matches_selected_media"] is False
+    assert candidate["match_method"] == "verified_graph_caption_candidate"
+
+
+def test_post_detail_resolves_immutable_link_even_when_caption_is_empty(monkeypatch):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+    brand_id = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
+    user_id = "15663b0a-d1fc-4cb9-bac2-bb0251307441"
+    prediction_id = "4b3e1aa0-3926-4b8c-b212-4015b756e62c"
+    post_id = "6656a7ff-dd36-456d-bf72-03b090e9fd5a"
+    media_id = "17900000000000001"
+    prediction_queries = []
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setattr(main_module, "_get_instagram_connection", lambda _brand_id: {
+        "brand_id": brand_id,
+        "name": "Verified brand",
+        "instagram_id": "17840000000000000",
+        "access_token": "token",
+    })
+
+    class GraphResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    class GraphClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        @staticmethod
+        def get(url, params):
+            if url.endswith(f"/{media_id}"):
+                return GraphResponse(200, {
+                    "id": media_id,
+                    "owner": {"id": "17840000000000000"},
+                    "caption": "",
+                })
+            return GraphResponse(400, {})
+
+    monkeypatch.setattr(main_module.httpx, "Client", GraphClient)
+
+    class Cursor:
+        def __init__(self):
+            self.query = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def execute(self, query, _params):
+            self.query = query
+            if "prediction_publications" in query:
+                prediction_queries.append(query)
+
+        def fetchone(self):
+            if "AS is_mature" in self.query:
+                return {
+                    "post_id": post_id,
+                    "er": 4.1,
+                    "is_mature": True,
+                    "is_modeled_format": True,
+                    "has_complete_features": True,
+                }
+            if "brand_median_er" in self.query:
+                return {"brand_median_er": 3.0, "brand_baseline_posts": 12}
+            if "FROM prediction_publications publication" in self.query:
+                return {
+                    "id": prediction_id,
+                    "pred_class": "HIGH",
+                    "actual_er": 4.1,
+                    "actual_source": "instagram_media_id",
+                    "model_version": "v1",
+                    "confidence": "80",
+                    "publication_linked": True,
+                    "publication_matches_selected_media": True,
+                }
+            return None
+
+        @staticmethod
+        def fetchall():
+            raise AssertionError("caption fallback must not run for an immutable link")
+
+    class Connection:
+        @staticmethod
+        def cursor(*_args, **_kwargs):
+            return Cursor()
+
+        @staticmethod
+        def close():
+            pass
+
+    monkeypatch.setattr(main_module.psycopg2, "connect", lambda *_args, **_kwargs: Connection())
+
+    response = client.post("/instagram/post-insights", json={
+        "brand_id": brand_id,
+        "media_id": media_id,
+        "created_by": user_id,
+    })
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["prediction_match_status"] == "verified_publication_link"
+    assert payload["prediction"]["id"] == prediction_id
+    assert payload["prediction"]["match_method"] == "verified_media_id"
+    assert payload["prediction"]["publication_linked"] is True
+    assert payload["prediction"]["actual_er"] == 4.1
+    assert payload["prediction"]["actual_tier"] is None
+    assert all("actual_class" not in query for query in prediction_queries)
+
 
 def test_instagram_config_requires_explicit_json(monkeypatch):
     """An absent explicit mapping must remain disconnected."""
@@ -1260,16 +1499,177 @@ def test_instagram_config_validates_and_rejects_duplicate_bindings(monkeypatch):
     brand_id = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
     monkeypatch.setenv(
         "IG_BRANDS_JSON",
-        json.dumps([{"brand_id": brand_id, "instagram_id": "1784", "access_token": "token"}]),
+        json.dumps([{"brand_id": brand_id, "instagram_id": "17840", "access_token": "token"}]),
     )
     config = _get_brands_config()
-    assert config == [{"brand_id": brand_id, "instagram_id": "1784", "access_token": "token"}]
+    assert config == [{"brand_id": brand_id, "instagram_id": "17840", "access_token": "token"}]
 
     monkeypatch.setenv("IG_BRANDS_JSON", json.dumps([
-        {"brand_id": brand_id, "instagram_id": "1784", "access_token": "a"},
-        {"brand_id": brand_id, "instagram_id": "1785", "access_token": "b"},
+        {"brand_id": brand_id, "instagram_id": "17840", "access_token": "a"},
+        {"brand_id": brand_id, "instagram_id": "17850", "access_token": "b"},
     ]))
     assert _get_brands_config() == []
+
+    other_brand = "15663b0a-d1fc-4cb9-bac2-bb0251307441"
+    monkeypatch.setenv("IG_BRANDS_JSON", json.dumps([
+        {"brand_id": brand_id, "instagram_id": "17840", "access_token": "a"},
+        {"brand_id": other_brand, "instagram_id": "17840", "access_token": "b"},
+    ]))
+    assert _get_brands_config() == []
+
+
+def test_persisted_instagram_identity_mismatch_is_rejected_before_graph_io(monkeypatch):
+    import importlib
+
+    main_module = importlib.import_module("app.main")
+    brand_id = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setattr(main_module, "_get_brands_config", lambda: [{
+        "brand_id": brand_id,
+        "instagram_id": "17840000000000001",
+        "access_token": "runtime-only-secret",
+    }])
+    queries = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def execute(self, query):
+            queries.append(query)
+
+        @staticmethod
+        def fetchall():
+            return [{
+                "id": brand_id,
+                "name": "Bound brand",
+                "niche": "Fitness",
+                "instagram_account_id": "17840000000000002",
+            }]
+
+    class Connection:
+        @staticmethod
+        def cursor(*_args, **_kwargs):
+            return Cursor()
+
+        @staticmethod
+        def close():
+            pass
+
+    monkeypatch.setattr(main_module.psycopg2, "connect", lambda *_args, **_kwargs: Connection())
+
+    result = main_module._bound_instagram_configs()
+
+    assert result[0]["brand_id"] is None
+    assert "persistent" in result[0]["binding_error"]
+    assert all("access_token" not in query for query in queries)
+
+
+def test_identity_binding_is_atomic_and_never_persists_a_token():
+    class Cursor:
+        def __init__(self, row):
+            self.row = row
+            self.query = ""
+            self.params = None
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+
+        def fetchone(self):
+            return self.row
+
+    cursor = Cursor(("17840000000000001",))
+    _bind_instagram_identity(
+        cursor,
+        brand_id="bfd6dbca-613d-4950-8b1e-45ad7dcf1088",
+        instagram_account_id="17840000000000001",
+        followers=100,
+    )
+
+    assert "COALESCE(instagram_account_id" in cursor.query
+    assert "instagram_account_id = %s" in cursor.query
+    assert "access_token" not in cursor.query.lower()
+    assert cursor.params == (
+        100,
+        "17840000000000001",
+        "bfd6dbca-613d-4950-8b1e-45ad7dcf1088",
+        "17840000000000001",
+    )
+
+    with pytest.raises(InstagramIdentityBindingError, match="persistent binding"):
+        _bind_instagram_identity(
+            Cursor(None),
+            brand_id="bfd6dbca-613d-4950-8b1e-45ad7dcf1088",
+            instagram_account_id="17840000000000002",
+            followers=100,
+        )
+
+
+def test_publication_reconciliation_delegates_to_guarded_database_function():
+    class Cursor:
+        def __init__(self):
+            self.query = ""
+            self.params = None
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+
+        @staticmethod
+        def fetchone():
+            return (2,)
+
+    cursor = Cursor()
+    brand_id = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
+
+    assert _reconcile_prediction_publications(cursor, brand_id) == 2
+    assert "reconcile_prediction_publication_outcomes" in cursor.query
+    assert "actual_class" not in cursor.query
+    assert cursor.params == (brand_id,)
+
+
+def test_publication_migration_keeps_continuous_outcome_academically_honest():
+    migration = (
+        Path(__file__).resolve().parents[2]
+        / "supabase"
+        / "migrations"
+        / "202607120004_content_lifecycle_integration.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE IF NOT EXISTS public.prediction_publications" in migration
+    assert "CREATE OR REPLACE FUNCTION public.link_prediction_publication" in migration
+    assert "reconcile_prediction_publication_outcomes" in migration
+    assert "post.created_at <= now() - (7 * interval '1 day')" in migration
+    assert "prediction.actual_class IS NULL" in migration
+    assert "SET actual_er = eligible.er" in migration
+    assert "actual_source = 'instagram_media_id'" in migration
+    assert "SET actual_class = NULL" not in migration
+    assert "access_token" not in migration.lower()
+
+
+def test_stale_retrain_jobs_are_failed_before_new_work_is_queued():
+    class Cursor:
+        rowcount = 3
+
+        def __init__(self):
+            self.query = ""
+            self.params = None
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+
+    cursor = Cursor()
+
+    assert _fail_stale_retrain_jobs(cursor) == 3
+    assert "status IN ('pending', 'running')" in cursor.query
+    assert "status = 'failed'" in cursor.query
+    assert "service restart" in cursor.query
+    assert cursor.params == (30,)
 
 
 def test_instagram_sync_post_limit_is_configurable_and_bounded(monkeypatch):

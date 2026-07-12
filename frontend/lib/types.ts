@@ -18,6 +18,10 @@ export interface Brand {
   active_model_scope: "personal" | "cohort" | "none";
   /** Real count of historical posts stored for this brand. */
   samples: number;
+  /** Optional operator-maintained brand identity summary for planning context. */
+  profile_summary?: string | null;
+  /** IANA planning timezone. Current training features use WIB buckets. */
+  timezone?: string;
   created_at?: string;
 }
 
@@ -30,6 +34,12 @@ export interface MlModel {
   baselineAccuracy: number | null; // validation accuracy recorded at training time
   trained: string;
   brandId?: string;
+  evaluationStatus?: "validated" | "exploratory" | null;
+  macroF1?: number | null;
+  balancedAccuracy?: number | null;
+  majorityBaselineAccuracy?: number | null;
+  accuracyGain?: number | null;
+  holdoutSamples?: number | null;
 }
 
 /** Normalize user-entered brand references for matching, never for display. */

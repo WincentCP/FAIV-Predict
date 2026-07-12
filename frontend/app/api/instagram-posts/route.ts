@@ -176,6 +176,8 @@ export async function GET(request: Request) {
           data.provenance?.synced_source === "production_database_instagram_graph_sync"
           ? "production_database_instagram_graph_sync"
           : null,
+        stored_only: data.provenance?.stored_only === true,
+        degraded_reason_code: stringOrNull(data.provenance?.degraded_reason_code),
         fetched_at: stringOrNull(data.provenance?.fetched_at),
         post_limit: finiteNumber(data.provenance?.post_limit),
       },

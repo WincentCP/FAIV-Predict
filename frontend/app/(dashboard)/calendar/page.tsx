@@ -1,9 +1,10 @@
 "use client";
 
 import { fetchWithRetry } from "@/lib/fetch-retry";
+import Link from "next/link";
 import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
-import { type ContentFormat, type Brand, normalizeBrandReference } from "@/lib/types";
+import { type ContentFormat, type Brand, type Tier, normalizeBrandReference } from "@/lib/types";
 import {
   UploadCloud,
   Download,
@@ -39,6 +40,24 @@ type CalendarEntry = {
   status: "Need Shooting" | "Need Design" | "Need Editing" | "Screening" | "Ready to Post" | "Posted" | null;
   source: "manual" | "import";
   createdAt: string | null;
+  prediction_id: string | null;
+  prediction: {
+    id: string;
+    tier: Tier;
+    status: "current" | "provisional" | "stale" | "superseded";
+    time_known: boolean;
+    model_version: string | null;
+    actual_er: number | null;
+  } | null;
+  publication: {
+    id: string;
+    post_id: string;
+    media_id: string;
+    observed_er: number | null;
+    post_age_days: number | null;
+    synced_at: string | null;
+    outcome_status: "observed" | "pending_maturity" | "awaiting_observation";
+  } | null;
 };
 
 type ImportReport = {
@@ -152,7 +171,7 @@ export default function CalendarPage() {
   const [entries, setEntries] = useState<CalendarEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cursor, setCursor] = useState<{ y: number; m: number }>({ y: yyyy, m: mm });
-  const [view, setView] = useState<"month" | "list">("month");
+  const [view, setView] = useState<"month" | "list">("list");
   const [editing, setEditing] = useState<CalendarEntry | null>(null);
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
   const [brandsList, setBrandsList] = useState<Brand[]>([]);
@@ -164,7 +183,7 @@ export default function CalendarPage() {
     try {
       const res = await fetchWithRetry("/api/calendar");
       if (!res.ok) {
-        throw new Error("Could not load calendar entries");
+        throw new Error("Could not load Content Plan entries");
       }
       const data = await res.json();
       const mapped: CalendarEntry[] = (data || []).map((entry: any) => ({
@@ -183,11 +202,17 @@ export default function CalendarPage() {
         status: entry.status || null,
         source: entry.source === "import" ? "import" : "manual",
         createdAt: entry.created_at || null,
+        prediction_id: entry.prediction_id || null,
+        prediction: entry.prediction ? {
+          ...entry.prediction,
+          tier: normalizeTier(entry.prediction.tier),
+        } : null,
+        publication: entry.publication || null,
       }));
       setEntries(mapped);
       setLoadError(null);
     } catch {
-      setLoadError("The content calendar could not be loaded. Apply the ownership migration if this is the first production run.");
+      setLoadError("The Content Plan could not be loaded. Apply the current database migrations if this is the first production run.");
     }
   }, []);
 
@@ -249,14 +274,14 @@ export default function CalendarPage() {
     if (!/\.(csv|xlsx)$/i.test(file.name)) {
       setImportReport({
         total: 0, imported: 0, skipped: 0, failed: 0, running: false,
-        errors: ["Choose a CSV or XLSX content-calendar file."],
+        errors: ["Choose a CSV or XLSX Content Plan file."],
       });
       return;
     }
     if (file.size > MAX_IMPORT_BYTES) {
       setImportReport({
         total: 0, imported: 0, skipped: 0, failed: 0, running: false,
-        errors: ["The spreadsheet is larger than 10 MB. Split it into smaller calendar files before importing."],
+        errors: ["The spreadsheet is larger than 10 MB. Split it into smaller Content Plan files before importing."],
       });
       return;
     }
@@ -294,7 +319,7 @@ export default function CalendarPage() {
     if (rows.length - 1 > MAX_IMPORT_ROWS) {
       setImportReport({
         total: rows.length - 1, imported: 0, skipped: rows.length - 1, failed: 0, running: false,
-        errors: [`This file contains more than ${MAX_IMPORT_ROWS.toLocaleString()} rows. Split it into smaller calendar files before review.`],
+        errors: [`This file contains more than ${MAX_IMPORT_ROWS.toLocaleString()} rows. Split it into smaller Content Plan files before review.`],
       });
       return;
     }
@@ -348,7 +373,7 @@ export default function CalendarPage() {
       if (caption && seenInFile.has(key)) warnings.push("duplicate of another row in this file");
       seenInFile.add(key);
       if (dateValue && existingEntries.has(`${dateValue}||${brand?.name || "Unassigned"}||${caption}`.toLowerCase()))
-        warnings.push("a matching calendar entry already exists");
+        warnings.push("a matching Content Plan entry already exists");
       return {
         brand, formatValue, caption, dateValue, timeValue, contentDetails,
         visualReference, voiceOver, pic, status, errors, warnings,
@@ -397,7 +422,7 @@ export default function CalendarPage() {
           body: JSON.stringify({ entries: batch }),
         });
         const data = await res.json().catch(() => null);
-        if (!res.ok) throw new Error(data?.message || "calendar import failed");
+        if (!res.ok) throw new Error(data?.message || "Content Plan import failed");
         report.imported += Array.isArray(data?.entries) ? data.entries.length : batch.length;
       } catch (error: any) {
         report.failed += batch.length;
@@ -432,7 +457,7 @@ export default function CalendarPage() {
       );
     }
     const blob = new Blob(["\uFEFF", lines.join("\n")], { type: "text/csv;charset=utf-8" });
-    downloadBlob(blob, `faiv-calendar-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.csv`);
+    downloadBlob(blob, `faiv-content-plan-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.csv`);
   };
 
   const handleExportXlsx = async () => {
@@ -440,7 +465,7 @@ export default function CalendarPage() {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "FAIV Predict";
     workbook.created = new Date();
-    const sheet = workbook.addWorksheet("Content Calendar", {
+    const sheet = workbook.addWorksheet("Content Plan", {
       views: [{ state: "frozen", ySplit: 1 }],
     });
     sheet.columns = [
@@ -469,7 +494,7 @@ export default function CalendarPage() {
     const buffer = await workbook.xlsx.writeBuffer();
     downloadBlob(
       new Blob([buffer as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-      `faiv-calendar-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.xlsx`,
+      `faiv-content-plan-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.xlsx`,
     );
   };
 
@@ -479,7 +504,7 @@ export default function CalendarPage() {
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
-    doc.text(`Content Calendar — ${MONTH_NAMES[cursor.m]} ${cursor.y}`, 14, 16);
+    doc.text(`Content Plan — ${MONTH_NAMES[cursor.m]} ${cursor.y}`, 14, 16);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(90);
@@ -497,7 +522,7 @@ export default function CalendarPage() {
       columnStyles: { 4: { cellWidth: 38 }, 5: { cellWidth: 55 } },
       margin: { left: 10, right: 10 },
     });
-    doc.save(`faiv-calendar-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.pdf`);
+    doc.save(`faiv-content-plan-${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}.pdf`);
   };
 
   const handleSave = async (next: CalendarEntry) => {
@@ -515,7 +540,7 @@ export default function CalendarPage() {
       if (!res.ok) throw new Error();
       await loadCalendar();
     } catch {
-      setLoadError("Saving the change failed — the database rejected the update.");
+      setLoadError("Saving the Content Plan change failed — the database rejected the update.");
     }
   };
 
@@ -530,7 +555,7 @@ export default function CalendarPage() {
       if (!res.ok) throw new Error();
       setEntries((prev) => prev.filter((e) => e.id !== id));
     } catch {
-      setLoadError("Deleting the calendar entry failed — the database rejected the delete.");
+      setLoadError("Deleting the Content Plan entry failed — the database rejected the delete.");
     }
   };
 
@@ -576,8 +601,8 @@ export default function CalendarPage() {
     <div className="px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto">
       <SectionHeader
         eyebrow="Content Planning"
-        title="Content Calendar"
-        description="Plan user-created content independently from prediction history. Import flexible spreadsheets, review mappings, and export presentation-ready schedules."
+        title="Content Plan"
+        description="Plan a post, evaluate it with the current model, then connect its verified Instagram publication and observed outcome without losing the original prediction history."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -873,7 +898,7 @@ export default function CalendarPage() {
         <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 p-1 text-xs w-full md:w-auto justify-center">
           {(
             [
-              { id: "month", label: "Calendar", icon: CalendarIcon },
+              { id: "month", label: "Month", icon: CalendarIcon },
               { id: "list", label: "List", icon: List },
             ] as const
           ).map((v) => (
@@ -951,8 +976,8 @@ export default function CalendarPage() {
                           type="button"
                           onClick={() => setEditing(blankCalendarEntry(dateStr, brandsList[0]))}
                           className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground opacity-100 hover:bg-surface-3 transition-colors md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
-                          aria-label="Add calendar entry"
-                          title="Add calendar entry"
+                          aria-label="Add Content Plan entry"
+                          title="Add Content Plan entry"
                         >
                           <Plus className="h-3.5 w-3.5" />
                         </button>
@@ -991,6 +1016,14 @@ export default function CalendarPage() {
                               <span className="truncate rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-bold text-primary">{e.status}</span>
                             )}
                           </div>
+                          {(e.prediction || e.publication) && (
+                            <div className="flex flex-wrap gap-1 border-t border-border/40 pt-1.5 text-xs font-bold">
+                              {e.prediction && <span className="text-primary">Predicted {e.prediction.tier}</span>}
+                              {e.publication && e.publication.observed_er !== null && (
+                                <span className="text-emerald-700 dark:text-emerald-300">Observed ER {e.publication.observed_er.toFixed(2)}%</span>
+                              )}
+                            </div>
+                          )}
                         </button>
                       ))}
                       {dayEntries.length > 3 && (
@@ -1040,12 +1073,14 @@ export default function CalendarPage() {
                       <span>{entry.status || "No workflow status"}</span>
                       <span aria-hidden="true">·</span>
                       <span>{entry.source === "import" ? "Spreadsheet import" : "Created manually"}</span>
+                      {entry.prediction && <><span aria-hidden="true">·</span><span>Predicted {entry.prediction.tier}</span></>}
+                      {entry.publication && entry.publication.observed_er !== null && <><span aria-hidden="true">·</span><span>Observed ER {entry.publication.observed_er.toFixed(2)}%</span></>}
                     </div>
                   </button>
                 ))}
               {monthEntries.length === 0 && (
                 <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-                  No planned content this month. Add an entry or import a CSV/XLSX calendar.
+                  No planned content this month. Add an entry or import a CSV/XLSX content plan.
                 </div>
               )}
             </div>
@@ -1093,14 +1128,6 @@ export default function CalendarPage() {
                               </span>
                             </div>
                           </td>
-                          <td className="px-6 py-4 align-middle text-xs font-semibold text-muted-foreground">
-                            {r.source === "import" ? "Spreadsheet import" : "Created manually"}
-                          </td>
-                          <td className="px-6 py-4 align-middle text-right">
-                            <button type="button" onClick={() => setEditing(r)} className="h-9 rounded-lg border border-border bg-surface px-3 text-xs font-bold text-foreground hover:bg-surface-2">
-                              Edit
-                            </button>
-                          </td>
                           <td className="px-6 py-4 align-middle font-mono text-xs font-semibold">
                             {r.time ?? "—"}
                           </td>
@@ -1127,13 +1154,33 @@ export default function CalendarPage() {
                               <span className="rounded-full border border-border bg-surface-2 px-2 py-1 text-xs font-bold">{r.status}</span>
                             ) : "—"}
                           </td>
+                          <td className="px-6 py-4 align-middle">
+                            <div className="space-y-1 text-xs font-semibold text-muted-foreground">
+                              <p>{r.source === "import" ? "Spreadsheet import" : "Created manually"}</p>
+                              {r.prediction && (
+                                <p className="text-foreground">Predicted {r.prediction.tier}</p>
+                              )}
+                              {r.publication && (
+                                <p className="text-foreground">
+                                  {r.publication.observed_er !== null
+                                    ? `Observed ER ${r.publication.observed_er.toFixed(2)}%`
+                                    : "Publication linked · outcome pending"}
+                                </p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 align-middle text-right">
+                            <button type="button" onClick={() => setEditing(r)} className="h-9 rounded-lg border border-border bg-surface px-3 text-xs font-bold text-foreground hover:bg-surface-2">
+                              Edit
+                            </button>
+                          </td>
                         </tr>
                       );
                     })}
                   {monthEntries.length === 0 && (
                     <tr>
                       <td colSpan={9} className="px-6 py-10 text-center text-xs text-muted-foreground">
-                        No planned content this month. Add an entry or import a CSV/XLSX calendar.
+                        No planned content this month. Add an entry or import a CSV/XLSX content plan.
                       </td>
                     </tr>
                   )}
@@ -1197,7 +1244,7 @@ function EntryModal({
         <div className="flex items-start justify-between border-b border-border p-4">
           <div>
             <div className="text-xs font-bold uppercase tracking-wider text-primary">
-              {draft.id.startsWith("new:") ? "New Calendar Entry" : "Edit Calendar Entry"}
+              {draft.id.startsWith("new:") ? "New Content Plan Entry" : "Edit Content Plan Entry"}
             </div>
             <h3 className="mt-1 font-display text-sm font-bold">
               {formatDayLabel(draft.date)} · {draft.account}
@@ -1232,7 +1279,15 @@ function EntryModal({
               value={draft.brand_id || ""}
               onChange={(e) => {
                 const brand = brands.find((item) => item.id === e.target.value);
-                setDraft({ ...draft, brand_id: brand?.id || null, brand: brand?.name || "Unassigned", account: brand?.name || "Unassigned" });
+                setDraft({
+                  ...draft,
+                  brand_id: brand?.id || null,
+                  brand: brand?.name || "Unassigned",
+                  account: brand?.name || "Unassigned",
+                  prediction_id: brand?.id === draft.brand_id ? draft.prediction_id : null,
+                  prediction: brand?.id === draft.brand_id ? draft.prediction : null,
+                  publication: brand?.id === draft.brand_id ? draft.publication : null,
+                });
               }}
               className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-xs outline-none focus:border-primary"
             >
@@ -1286,6 +1341,26 @@ function EntryModal({
               {CALENDAR_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
             </select>
           </ModalField></div>
+
+          {!draft.id.startsWith("new:") && (
+            <div className="sm:col-span-2 rounded-xl border border-border bg-surface-2/40 p-4 text-xs">
+              <div className="font-bold text-foreground">Prediction &amp; publication evidence</div>
+              <p className="mt-1 leading-relaxed text-muted-foreground">
+                {draft.prediction
+                  ? `Linked prediction: ${draft.prediction.tier} · ${draft.prediction.status}.`
+                  : "No prediction is linked yet."}
+                {draft.publication
+                  ? ` Verified media ${draft.publication.media_id}${draft.publication.observed_er !== null ? ` · observed ER ${draft.publication.observed_er.toFixed(2)}%` : " · outcome pending maturity"}.`
+                  : " No verified Instagram publication is linked yet."}
+              </p>
+              <Link
+                href={`/predict?plan_id=${encodeURIComponent(draft.id)}`}
+                className="mt-3 inline-flex min-h-9 items-center rounded-lg bg-primary px-3 font-bold text-primary-foreground hover:bg-primary/92"
+              >
+                {draft.prediction ? "Re-evaluate in Predict" : "Evaluate in Predict"}
+              </Link>
+            </div>
+          )}
 
         </div>
 
@@ -1530,6 +1605,7 @@ function toCalendarPayload(entry: CalendarEntry) {
     voice_over: entry.voiceOver,
     pic: entry.pic,
     status: entry.status,
+    prediction_id: entry.prediction_id,
   };
 }
 
@@ -1537,7 +1613,7 @@ function blankCalendarEntry(date: string, brand?: Brand): CalendarEntry {
   return {
     id: `new:${date}:${Date.now()}`,
     date,
-    time: "19:00",
+    time: null,
     account: brand?.name || "Unassigned",
     brand: brand?.name || "Unassigned",
     brand_id: brand?.id || null,
@@ -1550,5 +1626,15 @@ function blankCalendarEntry(date: string, brand?: Brand): CalendarEntry {
     status: null,
     source: "manual",
     createdAt: null,
+    prediction_id: null,
+    prediction: null,
+    publication: null,
   };
+}
+
+function normalizeTier(value: unknown): Tier {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "high") return "High";
+  if (normalized === "low") return "Low";
+  return "Average";
 }

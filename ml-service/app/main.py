@@ -46,6 +46,7 @@ RECENT_PERFORMANCE_UNAVAILABLE_REASON = (
 DEFAULT_INSTAGRAM_SYNC_POST_LIMIT = 500
 MAX_INSTAGRAM_SYNC_POST_LIMIT = 1000
 INSTAGRAM_GRAPH_PAGE_SIZE = 100
+STALE_RETRAIN_JOB_MINUTES = 30
 # Legacy bundles do not carry a learned posting-hour distribution. For them,
 # use all clock hours as an explicit provisional fallback. Newer bundles use
 # the frequency distribution of hours actually observed in their train split.
@@ -174,12 +175,31 @@ class InstagramPostInsightsRequest(BaseModel):
     media_id: str = Field(min_length=1, max_length=64, pattern=r"^[0-9]+$")
     created_by: str = Field(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
 
+
+class InstagramIdentityBindingError(ValueError):
+    """Safe operational error for a persistent brand/account mismatch."""
+
 # DB connection helper
 def get_db_connection():
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         raise HTTPException(status_code=500, detail="Database URL not configured")
     return psycopg2.connect(db_url)
+
+
+def _fail_stale_retrain_jobs(cur) -> int:
+    """Close jobs left non-terminal by an interrupted service process."""
+    cur.execute(
+        """UPDATE model_retrain_jobs
+           SET status = 'failed',
+               error_message = 'Training was interrupted by a service restart. Queue retraining again.',
+               completed_at = timezone('utc'::text, now()),
+               finished_at = timezone('utc'::text, now())
+           WHERE status IN ('pending', 'running')
+             AND created_at < now() - (%s * interval '1 minute')""",
+        (STALE_RETRAIN_JOB_MINUTES,),
+    )
+    return int(cur.rowcount or 0)
 
 
 def run_training_job_async(job_id: str, brand_id: Optional[str], niche: Optional[str]):
@@ -756,6 +776,12 @@ def train(req: TrainRequest, background_tasks: BackgroundTasks):
     try:
         conn = psycopg2.connect(db_url)
         with conn.cursor() as cur:
+            reconciled_jobs = _fail_stale_retrain_jobs(cur)
+            if reconciled_jobs:
+                logger.warning(
+                    "Marked %s interrupted retraining job(s) as failed before queueing.",
+                    reconciled_jobs,
+                )
             cur.execute(
                 """
                 INSERT INTO model_retrain_jobs (id, brand_id, status, created_at)
@@ -933,6 +959,7 @@ def _get_brands_config() -> list[Dict[str, Any]]:
 
         normalized = []
         seen_brand_ids = set()
+        seen_instagram_ids = set()
         for entry in entries:
             brand_id = str(entry["brand_id"])
             uuid.UUID(brand_id)
@@ -940,9 +967,14 @@ def _get_brands_config() -> list[Dict[str, Any]]:
             access_token = str(entry["access_token"]).strip()
             if not instagram_id or not access_token:
                 raise ValueError("instagram_id and access_token must be non-empty")
+            if not re.fullmatch(r"[0-9]{5,64}", instagram_id):
+                raise ValueError("instagram_id must be a numeric immutable account ID")
             if brand_id in seen_brand_ids:
                 raise ValueError(f"duplicate brand_id: {brand_id}")
+            if instagram_id in seen_instagram_ids:
+                raise ValueError(f"duplicate instagram_id: {instagram_id}")
             seen_brand_ids.add(brand_id)
+            seen_instagram_ids.add(instagram_id)
             normalized.append({
                 "brand_id": brand_id,
                 "instagram_id": instagram_id,
@@ -974,7 +1006,10 @@ def _bound_instagram_configs() -> list[Dict[str, Any]]:
     try:
         conn = psycopg2.connect(db_url)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT id, name, niche FROM brands WHERE owner_id IS NOT NULL")
+            cur.execute(
+                """SELECT id, name, niche, instagram_account_id
+                   FROM brands WHERE owner_id IS NOT NULL"""
+            )
             brands = [dict(row) for row in cur.fetchall()]
     except Exception as exc:
         logger.warning(f"Instagram configuration binding failed: {exc}")
@@ -989,7 +1024,21 @@ def _bound_instagram_configs() -> list[Dict[str, Any]]:
         configured_id = str(entry.get("brand_id") or "")
         brand = by_id.get(configured_id) if configured_id else None
 
-        if brand:
+        persisted_instagram_id = (
+            str(brand.get("instagram_account_id") or "") if brand else ""
+        )
+        if brand and persisted_instagram_id and persisted_instagram_id != entry["instagram_id"]:
+            bound.append({
+                **entry,
+                "brand_id": None,
+                "name": str(brand["name"]),
+                "niche": str(brand["niche"]),
+                "binding_error": (
+                    "Configured instagram_id does not match this brand's persistent "
+                    "Instagram account binding."
+                ),
+            })
+        elif brand:
             bound.append({
                 **entry,
                 "brand_id": str(brand["id"]),
@@ -1199,6 +1248,10 @@ def instagram_posts(brand_id: str, limit: int = 24):
     brand = config["name"]
     ig_id = config["instagram_id"]
     token = config["access_token"]
+    followers = None
+    media: list[Dict[str, Any]] = []
+    live_available = True
+    graph_failure_code = None
     try:
         followers = _fetch_ig_profile(ig_id, token)
         params = {
@@ -1211,16 +1264,25 @@ def instagram_posts(brand_id: str, limit: int = 24):
             r.raise_for_status()
             media = r.json().get("data", [])
     except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=502, detail=f"Instagram API error: HTTP {e.response.status_code}")
-    except Exception:
-        logger.exception("Instagram posts request failed for brand %s", brand_id)
-        raise HTTPException(
-            status_code=502,
-            detail="Instagram Graph API is temporarily unreachable.",
+        live_available = False
+        graph_failure_code = "graph_api_rejected_request"
+        logger.warning(
+            "Instagram live posts unavailable for brand %s: Graph HTTP %s",
+            brand_id,
+            e.response.status_code,
+        )
+    except Exception as exc:
+        live_available = False
+        graph_failure_code = "graph_api_unreachable"
+        logger.warning(
+            "Instagram live posts unavailable for brand %s: %s",
+            brand_id,
+            type(exc).__name__,
         )
 
     p33 = p67 = None
     synced_by_media: Dict[str, Dict[str, Any]] = {}
+    stored_fallback_media: list[Dict[str, Any]] = []
     db_url = os.getenv("DATABASE_URL")
     if db_url:
         conn = None
@@ -1228,7 +1290,7 @@ def instagram_posts(brand_id: str, limit: int = 24):
             conn = psycopg2.connect(db_url)
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT p.instagram_media_id, p.er, p.synced_at,
+                    """SELECT p.id::text, p.instagram_media_id, p.er, p.synced_at,
                               (
                                 p.created_at IS NOT NULL
                                 AND p.created_at <= now() - (%s * interval '1 day')
@@ -1247,6 +1309,7 @@ def instagram_posts(brand_id: str, limit: int = 24):
                 )
                 for (
                     media_id,
+                    instagram_media_id,
                     er,
                     synced_at,
                     is_mature,
@@ -1261,7 +1324,8 @@ def instagram_posts(brand_id: str, limit: int = 24):
                         is_modeled_format=bool(is_modeled_format),
                         has_complete_features=bool(has_complete_features),
                     )
-                    synced_by_media[str(media_id)] = {
+                    synced_by_media[str(instagram_media_id)] = {
+                        "post_id": str(media_id),
                         "er": numeric_er,
                         "synced_at": synced_at.isoformat() if synced_at else None,
                         "comparison": comparison,
@@ -1287,11 +1351,62 @@ def instagram_posts(brand_id: str, limit: int = 24):
                 row = cur.fetchone()
                 if row and row[0] is not None:
                     p33, p67 = float(row[0]), float(row[1])
+                if not live_available:
+                    cur.execute(
+                        """SELECT p.id::text, p.instagram_media_id, p.caption,
+                                  p.media_product_type, p.is_single_image,
+                                  p.is_carousel, p.is_reels, p.created_at,
+                                  b.followers
+                           FROM posts p
+                           JOIN brands b ON b.id = p.brand_id
+                           WHERE p.brand_id = %s
+                             AND p.source = 'instagram_graph'
+                             AND p.instagram_media_id IS NOT NULL
+                           ORDER BY p.created_at DESC, p.instagram_media_id DESC
+                           LIMIT %s""",
+                        (brand_id, min(max(limit, 1), 50)),
+                    )
+                    for (
+                        post_id,
+                        media_id,
+                        caption,
+                        media_product_type,
+                        is_single_image,
+                        is_carousel,
+                        is_reels,
+                        created_at,
+                        stored_followers,
+                    ) in cur.fetchall():
+                        if followers is None and stored_followers is not None:
+                            followers = int(stored_followers)
+                        media_type = (
+                            "IMAGE" if is_single_image
+                            else "CAROUSEL_ALBUM" if is_carousel
+                            else "VIDEO" if is_reels or media_product_type in {"FEED", "REELS"}
+                            else None
+                        )
+                        stored_fallback_media.append({
+                            "post_id": str(post_id),
+                            "id": str(media_id),
+                            "caption": caption or "",
+                            "media_type": media_type,
+                            "media_product_type": media_product_type,
+                            "timestamp": created_at.isoformat() if created_at else None,
+                            "_stored_only": True,
+                        })
         except Exception as e:
             logger.warning(f"Post insights: percentile lookup failed: {e}")
         finally:
             if conn:
                 conn.close()
+
+    if not live_available:
+        if not stored_fallback_media:
+            raise HTTPException(
+                status_code=502,
+                detail="Instagram Graph API is unavailable and no stored verified history exists.",
+            )
+        media = stored_fallback_media
 
     posts = []
     for m in media:
@@ -1317,6 +1432,7 @@ def instagram_posts(brand_id: str, limit: int = 24):
         if p33 is not None and er is not None and comparison["eligible"]:
             tier = "Low" if er < p33 else ("Average" if er <= p67 else "High")
         posts.append({
+            "post_id": m.get("post_id") or (synced.get("post_id") if synced else None),
             "id": m.get("id"),
             "caption": m.get("caption", ""),
             "media_type": m.get("media_type"),
@@ -1335,14 +1451,16 @@ def instagram_posts(brand_id: str, limit: int = 24):
             "synced_at": synced.get("synced_at") if synced else None,
         })
     return {
-        "status": "success",
+        "status": "success" if live_available else "degraded",
         "brand_id": brand_id,
         "brand": brand,
         "followers": followers,
         "posts": posts,
         "provenance": {
-            "live_source": "instagram_graph_api",
+            "live_source": "instagram_graph_api" if live_available else None,
             "synced_source": "production_database_instagram_graph_sync",
+            "stored_only": not live_available,
+            "degraded_reason_code": graph_failure_code,
             "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "post_limit": min(max(limit, 1), 50),
         },
@@ -1401,6 +1519,35 @@ def _post_comparison_status(
             POST_COMPARISON_UNAVAILABLE_REASONS[reason_code]
             if reason_code is not None
             else None
+        ),
+    }
+
+
+def _prediction_detail_payload(
+    match: Dict[str, Any],
+    *,
+    match_method: str,
+) -> Dict[str, Any]:
+    return {
+        "id": str(match["id"]),
+        "tier": str(match["pred_class"]).title(),
+        "actual_er": (
+            float(match["actual_er"])
+            if match.get("actual_source") == "instagram_media_id"
+            and match.get("actual_er") is not None
+            else None
+        ),
+        # A tier is deliberately not synthesized from a moving post
+        # population; continuous ER is the defensible observed outcome.
+        "actual_tier": None,
+        "confidence": (
+            float(match["confidence"]) if match.get("confidence") else None
+        ),
+        "model_version": match.get("model_version"),
+        "match_method": match_method,
+        "publication_linked": bool(match.get("publication_linked")),
+        "publication_matches_selected_media": bool(
+            match.get("publication_matches_selected_media")
         ),
     }
 
@@ -1473,6 +1620,7 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
         "comparison_eligible": False,
         "comparison_unavailable_code": "not_synced",
         "comparison_unavailable_reason": POST_COMPARISON_UNAVAILABLE_REASONS["not_synced"],
+        "verified_post_id": None,
         "recent_performance": {
             "available": False,
             "reason_code": "fixed_horizon_snapshots_unavailable",
@@ -1488,7 +1636,7 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
             conn = psycopg2.connect(db_url)
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
-                    """SELECT p.er,
+                    """SELECT p.id::text AS post_id, p.er,
                               (
                                 p.created_at IS NOT NULL
                                 AND p.created_at <= now() - (%s * interval '1 day')
@@ -1508,6 +1656,7 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
                 )
                 selected_row = cur.fetchone()
                 if selected_row:
+                    historical["verified_post_id"] = selected_row.get("post_id")
                     selected_er = (
                         float(selected_row["er"])
                         if selected_row.get("er") is not None
@@ -1559,32 +1708,60 @@ def instagram_post_insights(req: InstagramPostInsightsRequest):
                                     "for a brand-history baseline."
                                 )
 
-                if isinstance(verified_caption, str) and verified_caption.strip():
+                # An immutable publication link wins over mutable caption text.
+                # This remains resolvable after a caption edit or deletion.
+                cur.execute(
+                    """SELECT p.id::text AS id, p.pred_class, p.actual_er,
+                              p.actual_source, p.model_version,
+                              p.features->>'confidence' AS confidence,
+                              true AS publication_linked,
+                              true AS publication_matches_selected_media
+                       FROM prediction_publications publication
+                       JOIN predictions p ON p.id = publication.prediction_id
+                       WHERE publication.brand_id = %s
+                         AND publication.instagram_media_id = %s
+                         AND publication.owner_id = %s
+                         AND p.created_by = %s
+                       LIMIT 1""",
+                    (req.brand_id, req.media_id, req.created_by, req.created_by),
+                )
+                linked_match = cur.fetchone()
+                if linked_match:
+                    prediction_match_status = "verified_publication_link"
+                    prediction = _prediction_detail_payload(
+                        linked_match,
+                        match_method="verified_media_id",
+                    )
+
+                if prediction is None and isinstance(verified_caption, str) and verified_caption.strip():
                     normalized = re.sub(r"\s+", " ", verified_caption.strip().lower())
                     cur.execute(
-                        """SELECT p.pred_class, p.actual_class, p.actual_source, p.model_version,
-                                  p.features->>'confidence' AS confidence
+                        """SELECT p.id::text AS id, p.pred_class, p.actual_er,
+                                  p.actual_source, p.model_version,
+                                  p.features->>'confidence' AS confidence,
+                                  EXISTS (
+                                    SELECT 1 FROM prediction_publications publication
+                                    WHERE publication.prediction_id = p.id
+                                  ) AS publication_linked,
+                                  EXISTS (
+                                    SELECT 1 FROM prediction_publications publication
+                                    WHERE publication.prediction_id = p.id
+                                      AND publication.instagram_media_id = %s
+                                  ) AS publication_matches_selected_media
                            FROM predictions p
                            WHERE p.brand_id = %s AND p.created_by = %s
                              AND regexp_replace(lower(trim(coalesce(p.caption, ''))), '\\s+', ' ', 'g') = %s
                            ORDER BY p.created_at DESC LIMIT 2""",
-                        (req.brand_id, req.created_by, normalized),
+                        (req.media_id, req.brand_id, req.created_by, normalized),
                     )
                     matches = cur.fetchall()
                     if len(matches) == 1:
                         match = matches[0]
                         prediction_match_status = "unique_verified_caption"
-                        prediction = {
-                            "tier": str(match["pred_class"]).title(),
-                            "actual_tier": (
-                                str(match["actual_class"]).title()
-                                if match.get("actual_source") == "instagram_media_id" and match.get("actual_class")
-                                else None
-                            ),
-                            "confidence": float(match["confidence"]) if match.get("confidence") else None,
-                            "model_version": match.get("model_version"),
-                            "match_method": "verified_graph_caption",
-                        }
+                        prediction = _prediction_detail_payload(
+                            match,
+                            match_method="verified_graph_caption_candidate",
+                        )
                     elif len(matches) > 1:
                         prediction_match_status = "ambiguous_duplicate_caption"
         except Exception as exc:
@@ -1640,6 +1817,54 @@ def _model_format_for_media(media_type: str, product_type: str) -> Optional[str]
     if media_type == "VIDEO" and product_type == "REELS":
         return "Reels"
     return None
+
+
+def _bind_instagram_identity(
+    cur,
+    *,
+    brand_id: str,
+    instagram_account_id: str,
+    followers: int,
+) -> None:
+    """Atomically establish or verify a brand's immutable Graph identity."""
+    try:
+        cur.execute(
+            """UPDATE brands
+               SET followers = %s,
+                   instagram_account_id = COALESCE(instagram_account_id, %s)
+               WHERE id = %s
+                 AND owner_id IS NOT NULL
+                 AND (
+                   instagram_account_id IS NULL
+                   OR instagram_account_id = %s
+                 )
+               RETURNING instagram_account_id""",
+            (followers, instagram_account_id, brand_id, instagram_account_id),
+        )
+    except psycopg2.IntegrityError as exc:
+        raise InstagramIdentityBindingError(
+            "This Instagram account is already bound to another brand."
+        ) from exc
+    if cur.fetchone() is None:
+        raise InstagramIdentityBindingError(
+            "Configured Instagram account does not match the brand's persistent binding."
+        )
+
+
+def _reconcile_prediction_publications(cur, brand_id: str) -> int:
+    """Refresh mature continuous outcomes; the DB function enforces provenance."""
+    cur.execute(
+        "SELECT public.reconcile_prediction_publication_outcomes(%s::uuid)",
+        (brand_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return 0
+    if isinstance(row, dict):
+        value = next(iter(row.values()), 0)
+    else:
+        value = row[0]
+    return int(value or 0)
 
 
 def _upsert_instagram_media(cur, brand_id: str, post: Dict[str, Any], current_followers: int) -> str:
@@ -1818,13 +2043,18 @@ def _sync_and_retrain_pipeline():
             sync_counts = {"inserted": 0, "updated": 0, "claimed": 0}
             with conn.cursor() as cur:
                 # This row lock serializes concurrent syncs for the same brand
-                # until the media upserts commit.
-                cur.execute("UPDATE brands SET followers = %s WHERE id = %s", (followers, brand_id))
-                if cur.rowcount != 1:
-                    raise ValueError("Bound brand no longer exists")
+                # until the media upserts commit. It also establishes the
+                # immutable account binding on first verified synchronization.
+                _bind_instagram_identity(
+                    cur,
+                    brand_id=brand_id,
+                    instagram_account_id=str(config["instagram_id"]),
+                    followers=followers,
+                )
                 for post in valid_posts:
                     sync_result = _upsert_instagram_media(cur, brand_id, post, followers)
                     sync_counts[sync_result] += 1
+                reconciled_outcomes = _reconcile_prediction_publications(cur, brand_id)
                 cur.execute(
                     """SELECT COUNT(*),
                               COUNT(*) FILTER (
@@ -1871,6 +2101,7 @@ def _sync_and_retrain_pipeline():
             brand_result["sync"]["excluded_unmodeled_mature_posts"] = (
                 mature_history_count - mature_count
             )
+            brand_result["sync"]["prediction_outcomes_reconciled"] = reconciled_outcomes
             brand_result["sync"]["status"] = "success"
             logger.info(
                 f"[n8n Sync] {name}: {len(valid_posts)}/{len(posts)} posts synced "
@@ -1905,6 +2136,10 @@ def _sync_and_retrain_pipeline():
                     "error": "Model training failed. Inspect the ML service logs for the cause.",
                 }
 
+        except InstagramIdentityBindingError as exc:
+            logger.error("Instagram identity binding rejected for brand %s", brand_id)
+            brand_result["sync"]["status"] = "failed"
+            brand_result["sync"]["error"] = str(exc)
         except httpx.HTTPStatusError as exc:
             logger.error(
                 "Instagram synchronization failed for brand %s: Graph API HTTP %s",

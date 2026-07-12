@@ -27,7 +27,7 @@ const NAV_GROUPS = [
     items: [
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { to: "/predict", label: "Prediction", icon: Sparkles },
-      { to: "/calendar", label: "Calendar", icon: CalendarRange },
+      { to: "/calendar", label: "Content Plan", icon: CalendarRange },
       { to: "/history", label: "History", icon: History },
       { to: "/insights", label: "Insights", icon: BarChart3 },
     ],
@@ -36,7 +36,7 @@ const NAV_GROUPS = [
     label: "Administrator",
     items: [
       { to: "/niches", label: "Brands & Cohorts", icon: Building2 },
-      { to: "/model-health", label: "Model Health", icon: Cpu },
+      { to: "/model-health", label: "Research Evidence", icon: Cpu },
     ],
   },
 ] as const;

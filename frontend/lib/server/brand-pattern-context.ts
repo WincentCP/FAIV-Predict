@@ -16,6 +16,8 @@ export interface OwnedBrandContext {
   id: string;
   name: string;
   niche: string;
+  profileSummary: string | null;
+  timezone: string;
 }
 
 export async function requireOwnedBrand(rawBrandId: unknown): Promise<OwnedBrandContext> {
@@ -28,7 +30,7 @@ export async function requireOwnedBrand(rawBrandId: unknown): Promise<OwnedBrand
 
   const { data, error } = await supabase
     .from("brands")
-    .select("id, name, niche")
+    .select("id, name, niche, profile_summary, timezone")
     .eq("id", rawBrandId)
     .eq("owner_id", user.id)
     .maybeSingle();
@@ -37,7 +39,13 @@ export async function requireOwnedBrand(rawBrandId: unknown): Promise<OwnedBrand
     throw new PublicRequestError("The workspace database is temporarily unavailable.", 503);
   }
   if (!data) throw new PublicRequestError("Brand not found in this workspace.", 404);
-  return { id: data.id, name: data.name, niche: data.niche };
+  return {
+    id: data.id,
+    name: data.name,
+    niche: data.niche,
+    profileSummary: typeof data.profile_summary === "string" ? data.profile_summary : null,
+    timezone: typeof data.timezone === "string" ? data.timezone : "Asia/Jakarta",
+  };
 }
 
 export type BrandPatternLoadResult =

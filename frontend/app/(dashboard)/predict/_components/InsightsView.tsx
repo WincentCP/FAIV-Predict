@@ -2,10 +2,12 @@
 
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useState } from "react";
 import { format as formatDate } from "date-fns";
 import {
   FileText, Calendar, Clock, Check, AlertTriangle, HelpCircle, Activity, ChevronDown,
+  CalendarPlus, Loader2,
 } from "lucide-react";
 import { TierBadge } from "@/components/TierBadge";
 import { ConfidenceMeter } from "@/components/ConfidenceMeter";
@@ -60,10 +62,15 @@ export function InsightsView(props: {
   anyRecsApplied: boolean;
   onApply: () => void;
   onEditDraft: () => void;
+  contentPlanId: string | null;
+  planSaveState: "idle" | "saving" | "saved" | "error";
+  planSaveMessage: string | null;
+  onSaveToContentPlan: () => void;
 }) {
   const {
     prediction, isPredictionStale, brandName, scheduledAt, hasPostTime, contentFormat,
     whyReasons, mdiChartData, appliedRecs, onToggleRec, anyRecsApplied, onApply, onEditDraft,
+    contentPlanId, planSaveState, planSaveMessage, onSaveToContentPlan,
   } = props;
 
   const [showModelThinking, setShowModelThinking] = useState(false);
@@ -242,29 +249,58 @@ export function InsightsView(props: {
       </section>
 
       {/* Sticky action bar */}
-      <div className="sticky bottom-4 z-10 flex gap-3 rounded-2xl border border-border bg-surface/90 p-4 shadow-[var(--shadow-elevated)] backdrop-blur-xl">
-        <button
-          type="button"
-          onClick={onEditDraft}
-          className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-surface text-xs font-semibold transition-all hover:bg-surface-2 active:scale-[0.98]"
-        >
-          Edit Draft
-        </button>
-        <button
-          type="button"
-          onClick={onApply}
-          disabled={!anyRecsApplied || isPredictionStale}
-          title={
-            isPredictionStale
-              ? "Recalculate this draft before applying recommendations from the old result"
-              : !anyRecsApplied
-                ? "Toggle at least one change above to stage it"
-                : undefined
-          }
-          className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground transition-colors duration-200 hover:bg-primary/92 disabled:opacity-50"
-        >
-          Apply to Draft
-        </button>
+      <div className="sticky bottom-4 z-10 rounded-2xl border border-border bg-surface/90 p-4 shadow-[var(--shadow-elevated)] backdrop-blur-xl">
+        {planSaveMessage && (
+          <p
+            role={planSaveState === "error" ? "alert" : "status"}
+            className={cn("mb-3 text-xs font-semibold", planSaveState === "error" ? "text-destructive" : "text-emerald-700 dark:text-emerald-300")}
+          >
+            {planSaveMessage}
+          </p>
+        )}
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={onEditDraft}
+            className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-surface text-xs font-semibold transition-all hover:bg-surface-2 active:scale-[0.98]"
+          >
+            Edit Draft
+          </button>
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={!anyRecsApplied || isPredictionStale}
+            title={
+              isPredictionStale
+                ? "Recalculate this draft before applying recommendations from the old result"
+                : !anyRecsApplied
+                  ? "Toggle at least one change above to stage it"
+                  : undefined
+            }
+            className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-primary/25 bg-primary/10 text-xs font-bold text-primary transition-colors duration-200 hover:bg-primary/15 disabled:opacity-50"
+          >
+            Apply to Draft
+          </button>
+          {planSaveState === "saved" && contentPlanId ? (
+            <Link
+              href="/calendar"
+              className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground hover:bg-primary/92"
+            >
+              <Check className="h-3.5 w-3.5" /> Open Content Plan
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={onSaveToContentPlan}
+              disabled={!prediction.savedId || isPredictionStale || planSaveState === "saving"}
+              title={!prediction.savedId ? "A saved prediction is required before adding it to Content Plan" : undefined}
+              className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary text-xs font-bold text-primary-foreground transition-colors hover:bg-primary/92 disabled:opacity-50"
+            >
+              {planSaveState === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarPlus className="h-3.5 w-3.5" />}
+              {contentPlanId ? "Update Content Plan" : "Save to Content Plan"}
+            </button>
+          )}
+        </div>
       </div>
     </motion.div>
   );

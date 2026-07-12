@@ -190,10 +190,6 @@ export default function ModelHealthPage() {
   const recordedAccuracies = models
     .map((model) => model.baselineAccuracy)
     .filter((accuracy): accuracy is number => accuracy !== null);
-  const avgAccuracy = recordedAccuracies.length > 0
-    ? (recordedAccuracies.reduce((sum, accuracy) => sum + accuracy, 0) / recordedAccuracies.length).toFixed(1) + "%"
-    : "—";
-
   const trainingLabel: Record<TrainingState, string> = {
     idle: "READY",
     running: "RUNNING",
@@ -211,9 +207,9 @@ export default function ModelHealthPage() {
     >
       <motion.div variants={itemVariants}>
         <SectionHeader
-          eyebrow="Model Health"
-          title="AI Model Performance"
-          description="Validation accuracy for each trained classifier, recorded at training time. Retrain a model to refresh its metrics."
+          eyebrow="Advanced · Research Evidence"
+          title="Model & Data Readiness"
+          description="Inspect connection freshness and holdout evidence recorded at training time. Scheduled n8n sync/retrain is the normal source of truth."
         />
       </motion.div>
 
@@ -235,14 +231,14 @@ export default function ModelHealthPage() {
           tone="primary"
         />
         <SummaryCard
-          label="Average Model Accuracy"
-          value={avgAccuracy}
+          label="Models With Holdout Evidence"
+          value={recordedAccuracies.length.toString()}
           tone="lime"
         />
         <SummaryCard
-          label="Models Tracked"
-          value={models.length.toString()}
-          tone="destructive"
+          label="Connected Brands"
+          value={(connections || []).filter((connection) => connection.status === "connected").length.toString()}
+          tone="lime"
         />
       </motion.section>
 
@@ -283,7 +279,7 @@ export default function ModelHealthPage() {
                       ) : (
                         <span className="text-destructive" title={c.error}>
                           {c.status === "error"
-                            ? "Access token rejected — regenerate it in the Meta developer console."
+                            ? "Meta authorization needs administrator reconnection."
                             : "Instagram API unreachable."}
                         </span>
                       )}
@@ -322,8 +318,8 @@ export default function ModelHealthPage() {
                 <th className="w-[240px] px-6 py-5">Model ID</th>
                 <th className="w-[140px] px-6 py-5">Niche Scope</th>
                 <th className="w-[100px] px-6 py-5">Version</th>
-                <th className="w-[180px] px-6 py-5">Model Accuracy</th>
-                <th className="w-[120px] px-6 py-5">Status</th>
+                <th className="w-[220px] px-6 py-5">Holdout Evidence</th>
+                <th className="w-[140px] px-6 py-5">Scientific Status</th>
                 <th className="w-[170px] px-6 py-5 text-right" />
               </tr>
             </thead>
@@ -338,14 +334,19 @@ export default function ModelHealthPage() {
               {models.map((m) => {
                 const isPersonal = m.scope === "Personal";
 
-                // The API returns only the newest model for each owned scope.
-                // Drift/retirement telemetry is not captured, so do not invent
-                // an active/inactive state the database does not contain.
-                const statusBadge = (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-400">
-                    <CheckCircle2 className="h-3 w-3 shrink-0" />
-                    Current
+                const validated = m.evaluationStatus === "validated";
+                const statusBadge = m.evaluationStatus ? (
+                  <span className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold",
+                    validated
+                      ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                      : "border-warning/25 bg-warning/10 text-warning"
+                  )}>
+                    {validated ? <CheckCircle2 className="h-3 w-3 shrink-0" /> : <AlertTriangle className="h-3 w-3 shrink-0" />}
+                    {validated ? "Validated" : "Exploratory"}
                   </span>
+                ) : (
+                  <span className="text-xs font-semibold text-muted-foreground">Not recorded</span>
                 );
 
                 return (
@@ -380,7 +381,12 @@ export default function ModelHealthPage() {
                           {m.baselineAccuracy === null ? "Not recorded" : `${m.baselineAccuracy.toFixed(1)}%`}
                         </span>
                         <div className="mt-1 text-xs font-semibold leading-none text-muted-foreground">
-                          {m.baselineAccuracy === null ? "Retrain to capture validation" : "Validated on newest holdout"}
+                          {m.baselineAccuracy === null
+                            ? "Retrain to capture validation"
+                            : `Macro F1 ${m.macroF1?.toFixed(1) ?? "—"}% · Balanced ${m.balancedAccuracy?.toFixed(1) ?? "—"}%`}
+                        </div>
+                        <div className="mt-1 text-xs leading-none text-muted-foreground">
+                          Gain vs majority {m.accuracyGain == null ? "—" : `${m.accuracyGain >= 0 ? "+" : ""}${m.accuracyGain.toFixed(1)} pp`} · n={m.holdoutSamples ?? "—"}
                         </div>
                       </div>
                     </td>
@@ -388,11 +394,15 @@ export default function ModelHealthPage() {
                     <td className="px-6 py-5 align-middle text-right whitespace-nowrap">
                       <button
                         type="button"
-                        onClick={() => startRetrain(m)}
-                        className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition-all active:scale-95 border shrink-0 bg-surface text-muted-foreground border-border hover:bg-surface-2 hover:text-foreground hover:border-border-strong"
+                        onClick={() => isPersonal && startRetrain(m)}
+                        disabled={!isPersonal}
+                        title={isPersonal
+                          ? "Retrains from already synchronized rows; run the n8n sync first when freshness matters."
+                          : "Shared cohort retraining is owned by the scheduled all-brand sync/retrain workflow."}
+                        className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition-all active:scale-95 border shrink-0 bg-surface text-muted-foreground border-border hover:bg-surface-2 hover:text-foreground hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-55"
                       >
                         <RefreshCw className="h-3 w-3" />
-                        Retrain
+                        {isPersonal ? "Retrain stored data" : "Scheduled only"}
                       </button>
                     </td>
                   </tr>

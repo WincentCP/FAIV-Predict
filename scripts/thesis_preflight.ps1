@@ -92,13 +92,23 @@ try {
 }
 
 try {
-    $SchemaOutput = & docker compose exec -T ml-service python -c 'import os,psycopg2; connection=psycopg2.connect(os.environ["DATABASE_URL"]); cursor=connection.cursor(); cursor.execute("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s)", ("public", "posts", "media_product_type")); print(str(cursor.fetchone()[0]).lower()); connection.close()'
+    $SchemaOutput = & docker compose exec -T ml-service python -c 'import os,psycopg2; connection=psycopg2.connect(os.environ["DATABASE_URL"]); cursor=connection.cursor(); cursor.execute("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s), to_regclass(%s) IS NOT NULL, EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s), EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s), to_regprocedure(%s) IS NOT NULL, to_regprocedure(%s) IS NOT NULL, to_regprocedure(%s) IS NOT NULL", ("public", "posts", "media_product_type", "public.prediction_publications", "public", "predictions", "actual_er", "public", "brands", "instagram_account_id", "public.link_prediction_publication(uuid,uuid)", "public.reconcile_prediction_publication_outcomes(uuid)", "public.validate_prediction_observed_outcome()")); print("|".join(str(value).lower() for value in cursor.fetchone())); connection.close()'
     if ($LASTEXITCODE -ne 0) { throw "database schema command failed" }
-    $MediaProductTypeReady = ([string]($SchemaOutput | Select-Object -Last 1)).Trim().ToLowerInvariant()
-    if ($MediaProductTypeReady -ne "true") {
+    $SchemaFlags = ([string]($SchemaOutput | Select-Object -Last 1)).Trim().ToLowerInvariant().Split("|")
+    if ($SchemaFlags.Count -ne 7 -or $SchemaFlags[0] -ne "true") {
         throw "posts.media_product_type is missing; apply migration 202607120003 before rebuilding/retraining"
     }
-    Write-Pass "Meta media-product migration is applied"
+    if (
+        $SchemaFlags[1] -ne "true" -or
+        $SchemaFlags[2] -ne "true" -or
+        $SchemaFlags[3] -ne "true" -or
+        $SchemaFlags[4] -ne "true" -or
+        $SchemaFlags[5] -ne "true" -or
+        $SchemaFlags[6] -ne "true"
+    ) {
+        throw "prediction publication cohesion schema is missing; apply migration 202607120004"
+    }
+    Write-Pass "Meta media-product and Content Plan/publication-cohesion migrations are applied"
 } catch {
     Write-Fail "Database migration contract failed: $($_.Exception.Message)"
 }

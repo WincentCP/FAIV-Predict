@@ -32,6 +32,9 @@ def main() -> int:
     brand_patterns_migration = (
         ROOT / "supabase" / "migrations" / "202607120003_brand_patterns_and_media_product.sql"
     ).read_text(encoding="utf-8")
+    cohesion_migration = (
+        ROOT / "supabase" / "migrations" / "202607120004_content_lifecycle_integration.sql"
+    ).read_text(encoding="utf-8")
     brand_patterns_bff = (
         ROOT / "frontend" / "app" / "api" / "brand-patterns" / "route.ts"
     ).read_text(encoding="utf-8")
@@ -58,6 +61,15 @@ def main() -> int:
     ).read_text(encoding="utf-8")
     calendar_ui = (
         ROOT / "frontend" / "app" / "(dashboard)" / "calendar" / "page.tsx"
+    ).read_text(encoding="utf-8")
+    calendar_bff = (
+        ROOT / "frontend" / "app" / "api" / "calendar" / "route.ts"
+    ).read_text(encoding="utf-8")
+    publication_links_bff = (
+        ROOT / "frontend" / "app" / "api" / "publication-links" / "route.ts"
+    ).read_text(encoding="utf-8")
+    predict_ui = (
+        ROOT / "frontend" / "app" / "(dashboard)" / "predict" / "page.tsx"
     ).read_text(encoding="utf-8")
     classify_bff = (
         ROOT / "frontend" / "app" / "api" / "classify" / "route.ts"
@@ -200,6 +212,67 @@ def main() -> int:
         and "build_brand_patterns" in inference_source,
         "ML service must preserve Meta product type and expose aggregate brand patterns",
     )
+    for required_cohesion_contract in (
+        "ADD COLUMN IF NOT EXISTS instagram_account_id",
+        "brands_profile_summary_length_check",
+        "brands_timezone_wib_check",
+        "idx_brands_instagram_account_unique",
+        "CREATE TABLE IF NOT EXISTS public.prediction_publications",
+        "prevent_brand_instagram_identity_change",
+        "validate_prediction_publication",
+        "link_prediction_publication",
+        "verified_media_confirmation",
+        "Verified outcomes store continuous ER only; actual_class is not derived.",
+        "validate_prediction_observed_outcome",
+        "reconcile_prediction_publication_outcomes",
+        "GRANT EXECUTE ON FUNCTION public.link_prediction_publication",
+        "publication.linked",
+        "previous_prediction UUID := OLD.prediction_id",
+        "old_prediction_id",
+        "new_prediction_id",
+    ):
+        require(
+            required_cohesion_contract in cohesion_migration,
+            f"content-lifecycle migration is missing {required_cohesion_contract}",
+        )
+    require(
+        "prediction_publications" in schema_source
+        and "instagram_account_id" in schema_source
+        and "validate_prediction_observed_outcome" in schema_source
+        and "actual_class is not derived" in schema_source,
+        "canonical schema must include immutable account/publication and honest outcome contracts",
+    )
+    require(
+        "_bind_instagram_identity" in inference_source
+        and "instagram_account_id = COALESCE" in inference_source
+        and "_reconcile_prediction_publications" in inference_source
+        and "reconcile_prediction_publication_outcomes" in inference_source
+        and '"prediction_outcomes_reconciled"' in inference_source,
+        "Graph sync must enforce immutable account binding and reconcile mature linked outcomes",
+    )
+    require(
+        "verified_publication_link" in inference_source
+        and 'match_method="verified_media_id"' in inference_source
+        and inference_source.find("verified_publication_link")
+        < inference_source.find("if prediction is None and isinstance(verified_caption"),
+        "immutable publication identity must resolve before mutable caption fallback",
+    )
+    require(
+        "confirmed !== true" in publication_links_bff
+        and 'eq("created_by", user.id)' in publication_links_bff
+        and 'eq("source", "instagram_graph")' in publication_links_bff
+        and "prediction_publications" in publication_links_bff
+        and '"link_prediction_publication"' in publication_links_bff
+        and "p_prediction_id" in publication_links_bff
+        and "p_post_id" in publication_links_bff,
+        "publication-link BFF must require explicit confirmation and same-user verified media",
+    )
+    require(
+        "validatePredictionLinks" in calendar_bff
+        and "Content Plan and prediction must use the same brand" in calendar_bff
+        and "prediction_publications" in calendar_bff,
+        "Content Plan BFF must preserve same-owner/brand prediction and publication cohesion",
+    )
     for required_pattern_contract in (
         "MIN_GROUP_SAMPLES = 5",
         "DIRECTIONAL_GROUP_SAMPLES = 15",
@@ -247,11 +320,28 @@ def main() -> int:
         "Calendar import must not guess that a generic video is a Reel",
     )
     require(
+        "Predict" in calendar_ui
+        and "pending_maturity" in calendar_ui
+        and "observed_er" in calendar_ui
+        and "plan_id" in predict_ui
+        and "persistContentPlan" in predict_ui
+        and "/api/publication-links" in insights_ui
+        and "Confirm this publication" in insights_ui,
+        "Content Plan UI must support prediction handoff and verified publication outcome states",
+    )
+    require(
         "comparison_eligible" in inference_source
         and "comparison_eligible" in instagram_posts_bff
         and "comparison_eligible" in instagram_post_insights_bff
         and "comparison_eligible" in insights_ui,
         "post-to-history comparisons must expose and preserve eligibility",
+    )
+    require(
+        "actual_tier" not in instagram_post_insights_bff
+        and "actual_tier" not in insights_ui
+        and "actual_er" in instagram_post_insights_bff
+        and "Observed ER" in insights_ui,
+        "verified publications must expose continuous ER without inventing actual_class",
     )
     require(
         "recent_median_er" not in inference_source
@@ -292,6 +382,13 @@ def main() -> int:
         "cumulative ER",
         "external trend",
         "not scored by Random Forest",
+        "operator-assisted",
+        "public OAuth",
+        "Content Plan",
+        "immutable Instagram media ID",
+        "actual_class",
+        "rejects every new",
+        "new versioned schema/migration",
     ):
         require(
             required_disclosure.lower() in combined_thesis_docs.lower(),
@@ -321,8 +418,13 @@ def main() -> int:
     require(
         "posts.media_product_type" in powershell_preflight
         and "202607120003" in powershell_preflight
-        and "Meta media-product migration is applied" in powershell_preflight,
-        "runtime preflight must verify the Meta product-type database migration",
+        and "prediction_publications" in powershell_preflight
+        and "predictions" in powershell_preflight
+        and "actual_er" in powershell_preflight
+        and "validate_prediction_observed_outcome" in powershell_preflight
+        and "202607120004" in powershell_preflight
+        and "Content Plan/publication-cohesion migrations are applied" in powershell_preflight,
+        "runtime preflight must verify migrations 003 and 004",
     )
     for private_evidence_path in ("docs/FINAL_MODEL_EVIDENCE.md",):
         require(
@@ -339,7 +441,7 @@ def main() -> int:
     ):
         require((ROOT / required_path).is_file(), f"missing required document: {required_path}")
 
-    print("PASS thesis repository contract: ML evidence, observed brand patterns, secure n8n template, docs, and demo artifacts are present")
+    print("PASS thesis repository contract: ML evidence, observed brand patterns, content lifecycle cohesion, secure n8n template, docs, and demo artifacts are present")
     return 0
 
 

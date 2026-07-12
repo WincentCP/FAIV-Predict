@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import Link from "next/link";
 import { Film, LayoutGrid, Image as ImageIcon, Activity, AlertTriangle, RefreshCw, Sparkles } from "lucide-react";
 import { DatePicker, TimePicker } from "@/components/DateTimePicker";
 import { ModelMaturity } from "@/components/ModelMaturity";
@@ -40,6 +41,8 @@ export function ComposeView(props: {
   visualConcept: string;
   setVisualConcept: (v: string) => void;
   predictError: string | null;
+  contentPlanId: string | null;
+  planLoadError: string | null;
   optimizationsApplied: boolean;
   isFormValid: boolean;
   isPredictionStale: boolean;
@@ -52,7 +55,7 @@ export function ComposeView(props: {
     contentFormat, setContentFormat, scheduledAt, setScheduledAt,
     hasPostTime, setHasPostTime,
     caption, setCaption, visualConcept, setVisualConcept,
-    predictError, optimizationsApplied, isFormValid, isPredictionStale,
+    predictError, contentPlanId, planLoadError, optimizationsApplied, isFormValid, isPredictionStale,
     submitting, tooLong, onAnalyze,
   } = props;
   const stats = analyzeCaption(caption);
@@ -66,6 +69,20 @@ export function ComposeView(props: {
       transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
       className="mx-auto max-w-3xl space-y-5"
     >
+      {contentPlanId && (
+        <div className="rounded-xl border border-primary/20 bg-primary/[0.03] p-4 text-xs leading-relaxed text-muted-foreground">
+          <strong className="text-foreground">Loaded from Content Plan.</strong>{" "}
+          Re-evaluation keeps the earlier prediction as audit evidence and updates this plan to the new saved result.
+          <Link href="/calendar" className="ml-2 font-bold text-primary hover:underline">Back to Content Plan</Link>
+        </div>
+      )}
+
+      {planLoadError && (
+        <div role="alert" className="rounded-xl border border-warning/30 bg-warning/[0.04] p-4 text-xs font-semibold text-warning">
+          Content Plan could not be loaded: {planLoadError}
+        </div>
+      )}
+
       {predictError && (
         <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 flex items-start gap-3">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
@@ -127,6 +144,16 @@ export function ComposeView(props: {
                     activeScope={account.active_model_scope}
                     variant="compact"
                   />
+                  {account.active_model_scope === "cohort" && (
+                    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                      Prediction uses the verified <strong className="text-foreground">{account.niche} cohort model</strong>. Brand patterns and the Creative Brief are planning context; they are not blended into that score.
+                    </p>
+                  )}
+                  {account.active_model_scope === "none" && (
+                    <p className="mt-2 text-xs font-semibold leading-relaxed text-warning">
+                      No eligible personal or cohort model is active. You can continue planning, but Analyze Post stays disabled until sync/retraining produces a usable model.
+                    </p>
+                  )}
                 </div>
               )
             )}
@@ -232,7 +259,11 @@ export function ComposeView(props: {
       {/* Sticky action bar */}
       <div className="sticky bottom-4 z-10 flex flex-col gap-3 rounded-2xl border border-border bg-surface/90 p-4 shadow-[var(--shadow-elevated)] backdrop-blur-xl md:flex-row md:items-center md:justify-between">
         <div className="text-xs text-muted-foreground">
-          {!isFormValid ? (
+          {account?.active_model_scope === "none" ? (
+            <span className="text-warning font-semibold">
+              Planning-only mode: no active model is available for this brand.
+            </span>
+          ) : !isFormValid ? (
             <span className="text-warning font-semibold">
               Select a brand and write a caption to run the analysis.
             </span>

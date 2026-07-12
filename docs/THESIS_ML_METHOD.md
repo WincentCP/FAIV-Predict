@@ -76,6 +76,51 @@ Thresholds are never calculated from the held-out test period. This prevents tes
 Training is rejected unless `LOW`, `AVERAGE`, and `HIGH` are all represented in
 the training split; a binary artifact is never presented as a three-tier model.
 
+## Prediction-to-publication outcome linkage
+
+A prediction does not become evaluated merely because a later Instagram post
+has a similar caption. The thesis lifecycle requires an explicit chain:
+
+```text
+owned Content Plan
+  → immutable prediction ID for the same owner and brand
+  → deliberately linked Instagram media ID for that same brand
+  → verified Graph post observation
+  → seven-day minimum maturity gate
+  → observed cumulative ER
+```
+
+Instagram media ID, together with brand ID, is the publication identity.
+Captions can be duplicated or edited, timestamps can shift, and display names
+can change; none of those fields is sufficient to write a prediction/outcome
+link. The database therefore guards same-owner/same-brand references, uniqueness
+of the publication identity, and immutability after verification. Corrections
+must be explicit audited lifecycle operations rather than silent remapping.
+
+The realized numeric outcome is `observed_er` (the verified cumulative
+likes-plus-comments ER under the denominator policy above). This value may be
+shown after maturity. Migration 004 deliberately rejects every new or changed
+`actual_class`, so the current thesis always reports the categorical outcome as
+unavailable. A future categorical extension requires a new versioned
+schema/migration and must not be introduced unless all of the following are
+available:
+
+- the exact model artifact/version that produced the prediction;
+- its recorded training-split P33 and P67 thresholds;
+- a verified post linked by immutable media ID;
+- an observation satisfying the same documented maturity and denominator rule;
+  and
+- one versioned implementation that applies `LOW`, `AVERAGE`, and `HIGH`
+  boundaries consistently.
+
+The system must never derive `actual_class` from today's brand median, a later
+model's thresholds, a live cross-sectional percentile, or a UI-only formula.
+Until the consistent rule is implemented and verified end to end, reporting
+observed ER with “actual tier unavailable” is more scientifically defensible
+than manufacturing a categorical match. Observed prediction/outcome pairs may
+support later evaluation, but they are not causal proof that the recommendation
+created the engagement.
+
 ## Predictors
 
 The version-2 feature contract contains:
@@ -286,6 +331,11 @@ recalculate; the prior result remains immutable history.
   cannot fairly compare differently aged posts.
 - Audience demographics, content pillars, visual/video style,
   hooks/storytelling, seasonality, and external platform trends are not measured.
+- Manual publication linkage can establish identity, not treatment causality;
+  organic engagement remains affected by unobserved creative and campaign
+  factors.
+- Observed ER may exist while `actual_class` is null. This is intentional when
+  the prediction's exact threshold/outcome contract cannot be applied.
 - Cumulative engagement is gated to posts at least seven days old but is not a
   fixed-horizon label; older posts have had more time to accumulate engagement.
 - Initial imports of older posts use follower count at first observation as a

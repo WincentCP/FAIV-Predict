@@ -1,10 +1,15 @@
 # FAIV Predict thesis demonstration runbook
 
-This runbook is for the bachelor-thesis prototype on the Windows thesis machine. It assumes all three Supabase migrations, two brand bindings, n8n Header Auth credential, and SMTP credential have already been configured.
+This runbook is for the bachelor-thesis prototype on the Windows thesis machine. It assumes migrations 001–004, two operator-configured brand bindings, n8n Header Auth credential, and SMTP credential have already been configured.
 
 ## Scope statement for the examiner
 
 FAIV Predict is a Docker-based decision-support prototype that predicts Instagram content-performance tiers from verified historical post metadata. It demonstrates authenticated prediction, immutable lifecycle history, Instagram synchronization, and automated retraining. Public Instagram publishing, enterprise multi-tenancy, global high availability, and calibrated causal uplift are outside the research scope.
+
+Instagram connection is operator-assisted: credentials and immutable account IDs
+are obtained/rotated outside the product and bound to owned brands through
+`IG_BRANDS_JSON`. Do not describe this as public OAuth, Meta Login, end-user
+self-service onboarding, or direct publishing.
 
 Use the precise outcome description during the demonstration: the tier represents
 relative cumulative likes-and-comments engagement using a follower count captured
@@ -23,26 +28,30 @@ not a fixed-horizon metric snapshot.
    git pull origin main
    ```
 
-4. Rebuild after ML source changes, then wait for health checks:
+4. Apply repository migrations in filename order before the matching services
+   start. For this revision, explicitly confirm
+   `202607120003_brand_patterns_and_media_product.sql` and
+   `202607120004_content_lifecycle_integration.sql` succeeded in Supabase.
+   Migration 003 fixes video eligibility; migration 004 adds immutable account,
+   plan/publication link, and observed-outcome contracts.
+
+5. Rebuild after the migrations, then wait for health checks:
 
    ```powershell
    docker compose up -d --build --wait --wait-timeout 180
    docker compose ps
    ```
 
-5. Open `http://localhost:3000` and `http://localhost:5678`.
-6. Execute both n8n branches manually. Do not re-import the workflow when the existing one already works in the persistent volume.
-7. Ensure the final sync/retrain creates models using evaluation contract `faiv-thesis-v2`.
-   Confirm migration `202607120003_brand_patterns_and_media_product.sql` was
-   applied before that sync so Graph `media_product_type` distinguishes Reels
-   from Feed video.
-8. Export final model evidence:
+6. Open `http://localhost:3000` and `http://localhost:5678`.
+7. Execute both n8n branches manually. Do not re-import the workflow when the existing one already works in the persistent volume. Confirm sync reports `prediction_outcomes_reconciled` for each brand.
+8. Ensure the final sync/retrain creates models using evaluation contract `faiv-thesis-v2`.
+9. Export final model evidence:
 
    ```powershell
    docker compose exec -T ml-service python -m app.thesis_evidence --format markdown | Out-File -Encoding utf8 .\docs\FINAL_MODEL_EVIDENCE.md
    ```
 
-9. Run the automated machine preflight:
+10. Run the automated machine preflight:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\thesis_preflight.ps1
@@ -53,10 +62,10 @@ not a fixed-horizon metric snapshot.
    same `training_code_sha256()` function used at training time, so a model
    from before the Feed-video/Reels semantics change is not accepted.
 
-10. Complete A01–A12 in `docs/THESIS_TEST_REPORT.md`. Record date/time, exact
+11. Complete A01–A12 in `docs/THESIS_TEST_REPORT.md`. Record date/time, exact
     screenshot/log/query reference, and n8n execution IDs; retain unredacted
     evidence outside Git.
-11. Review every exported model's `scientific_gate` and `evaluation_status`.
+12. Review every exported model's `scientific_gate` and `evaluation_status`.
     Present a missing test class or zero class recall as `exploratory`, even if
     the artifact passed the separate operational promotion gate.
 
@@ -126,6 +135,9 @@ brand-scoped. If the active prediction model is a niche model, point out the
 separate labels: the snapshot describes only that brand's history while the
 classifier uses the named cohort.
 
+State that “connected” means the operator has configured and verified a
+brand-bound Meta credential. It is not evidence of an in-product OAuth flow.
+
 ### 3. Normal prediction
 
 1. Select a brand.
@@ -160,7 +172,18 @@ Run a second draft without posting time. Show that:
   training split (legacy artifacts visibly fall back to all 24 hours);
 - setting a time later requires recalculation.
 
-### 5. Immutable lifecycle
+### 5. Content Plan and immutable lifecycle
+
+1. Open Content Plan and create or select one owned entry with a supported
+   brand and format.
+2. Choose **Evaluate in Predict** (or **Re-evaluate in Predict**). Confirm that
+   brand, caption, format, date, and optional time are transferred as explicit
+   draft inputs.
+3. Analyze, choose **Save to Content Plan**, then use **Open Content Plan**.
+   Confirm that the plan references the saved immutable prediction rather than
+   copying/overwriting the scored snapshot.
+4. Change a model-used plan field and show that the old prediction becomes
+   stale while its original values remain available.
 
 Change caption, format, weekend status, or posting hour and recalculate. Show:
 
@@ -169,14 +192,35 @@ Change caption, format, weekend status, or posting hour and recalculate. Show:
 - successor has its own model/input hashes;
 - old recommendations cannot be applied as if still current.
 
-### 6. Instagram and automation
+### 6. Verified publication and observed outcome
+
+Use a post that is safe to link during rehearsal:
+
+1. In Published Content Analytics, select one Instagram media item verified
+   under the same connected brand.
+2. Explain that an exact-caption match is only an operator-assisted candidate,
+   not identity. Choose **Confirm this publication**, accept the explicit
+   confirmation, and show **Verified media-ID link**.
+3. Show that a duplicate, cross-brand, or conflicting identity is rejected.
+4. Run sync/reconciliation and show the immutable media ID, observation time,
+   maturity state, and observed cumulative ER.
+5. If the post is younger than seven days, show `pending maturity` rather than
+   an outcome. If a consistent original-model tier rule is unavailable, show
+   observed ER with `actual tier unavailable`; never calculate one manually.
+
+Caption similarity is not acceptable linkage evidence. The plan/prediction/media
+identity must be explicit and brand-consistent.
+
+### 7. Instagram automation
 
 Show verified Instagram insights, including correct Reels versus Feed-video
 product classification, then open the latest successful n8n execution. Explain
 that immutable Instagram media ID is the post identity and synchronization
-never maps outcomes using caption similarity alone.
+never maps outcomes using caption similarity alone. n8n schedules health,
+sync/reconciliation, retraining, and operator notifications; it does not select
+publication links, authorize tenants, or invent actual tiers.
 
-### 7. Academic evaluation
+### 8. Academic evaluation
 
 Open the locally exported `FINAL_MODEL_EVIDENCE.md` and present:
 
@@ -213,6 +257,8 @@ Only perform controlled, reversible demonstrations:
 - no trained model for a new brand → honest unavailable state;
 - unavailable or sparse Brand Performance Snapshot → honest empty/error state
   that does not block core prediction;
+- unlinked, conflicting, cross-brand, or immature publication → explicit
+  unlinked/error/pending state with no fabricated observed tier;
 - temporarily stop only `ml-service`, refresh prediction, show service error, then restore it:
 
   ```powershell

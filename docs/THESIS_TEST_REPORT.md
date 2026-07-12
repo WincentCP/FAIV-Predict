@@ -2,7 +2,7 @@
 
 Template revision date: 2026-07-12  
 Final verification date: _Pending final-revision rehearsal_  
-Scope: academic ML evidence, brand-scoped descriptive planning evidence, API behavior, secure automation template, documentation consistency, and repeatable local demonstration.
+Scope: academic ML evidence, brand-scoped descriptive planning evidence, Content Plan-to-observed-outcome cohesion, API behavior, secure automation template, documentation consistency, and repeatable local demonstration.
 
 ## Current verdict
 
@@ -15,13 +15,17 @@ replaced with estimated or invented values.
 
 Enterprise-scale queues, global high availability, public Instagram publishing, multi-region recovery, SSO, and formal SLA controls are explicitly outside this thesis acceptance scope.
 
+Public Meta OAuth is also outside scope. The thesis evidence covers an
+operator-assisted, brand-ID-bound Instagram connection configured outside the
+browser; it must not be presented as self-service social-account onboarding.
+
 ## Automated evidence
 
 | Gate | Command | Result on 2026-07-12 | Evidence covered |
 | --- | --- | --- | --- |
-| ML/API suite | `python -m pytest -q` in `ml-service` | PASS — 69 tests; one dependency deprecation warning | Authentication, validation, honest unavailable states, optional time, API successor request contract, maturity/provenance, Meta product-type mapping, brand-pattern aggregation/privacy, comparison-eligibility and fixed-horizon trend guards, sync identity, cursor-safe bounded historical pagination, fail-fast configuration and token-log redaction, feature parity, three-class and promotion gates, richer metrics/comparators, bounded rejection diagnostics, evaluation artifact and effective-model-scoped safe exporter. Real Supabase trigger/RLS behavior remains in A03/A06. |
-| Repository contract | `python scripts/verify_thesis_readiness.py` | PASS on current revision | Secure n8n template, blocked `$env`, documentation alignment and required thesis artifacts |
-| Thesis-machine preflight | `powershell -ExecutionPolicy Bypass -File .\scripts\thesis_preflight.ps1` | Required after final sync/retrain | Container health, endpoint readiness, n8n isolation, applied Meta product-type migration, complete model evidence, and exact match between each model's recorded training-code SHA-256 and the currently running preprocessing/training source |
+| ML/API suite | `python -m pytest -q` in `ml-service` | PASS — 76 tests; one dependency deprecation warning | Authentication, validation, honest unavailable states, optional time, API successor request contract, maturity/provenance, immutable Instagram-account binding, publication reconciliation, continuous observed outcomes without derived `actual_class`, Meta product-type mapping, brand-pattern aggregation/privacy, comparison-eligibility and fixed-horizon trend guards, cursor-safe bounded historical pagination, fail-fast configuration and token-log redaction, feature parity, three-class and promotion gates, richer metrics/comparators, bounded rejection diagnostics, evaluation artifact and safe exporter. Real Supabase trigger/RLS behavior remains in A03/A06/A08. |
+| Repository contract | `python scripts/verify_thesis_readiness.py` | PASS on current revision | Secure n8n template, blocked `$env`, Content Plan/publication cohesion, documentation alignment, and required thesis artifacts |
+| Thesis-machine preflight | `powershell -ExecutionPolicy Bypass -File .\scripts\thesis_preflight.ps1` | Required after final sync/retrain | Container health, endpoint readiness, n8n isolation, migrations 003/004 schema, complete model evidence, and exact match between each model's recorded training-code SHA-256 and the currently running preprocessing/training source |
 | Workflow JSON | `python -m json.tool n8n/workflow_sync_retrain.json` | PASS | JSON syntax only; Docker n8n import/node/runtime compatibility remains part of A09–A10 rehearsal |
 | Frontend compile gates | GitHub Actions: lint, TypeScript, production build | Required on every `main` push | Full repository frontend compilation |
 | Dependency gates | `npm audit --audit-level=moderate` in GitHub Actions | Required on every `main` push | Known moderate-or-higher npm advisories |
@@ -59,6 +63,30 @@ Every newly trained model now persists:
 - versioned `faiv-thesis-v2` evaluation contract.
 
 Raw captions, connection strings, Instagram tokens, and service secrets are excluded from evaluation evidence.
+
+## Content lifecycle evidence contract
+
+The cohesive thesis path is Content Plan → immutable Prediction → deliberately
+verified Instagram publication identity → mature observed ER. Acceptance
+evidence must prove:
+
+- plan, prediction, and publication references have the same owner and brand;
+- the publication identity is the immutable Instagram media ID, not caption,
+  display name, posting order, or approximate timestamp;
+- a conflicting or duplicate identity is rejected and the original link is not
+  silently rewritten;
+- changing model-used plan inputs preserves the scored snapshot and marks the
+  relevant prediction stale;
+- an unlinked or under-seven-day post has no realized outcome;
+- a mature verified link may expose observed cumulative ER and observation
+  provenance; and
+- migration 004 rejects every new/changed `actual_class`; this thesis exposes
+  continuous ER only. A future tier requires a new versioned schema/migration
+  and a validated original-model threshold/outcome contract.
+
+n8n evidence should show scheduling of health, sync/reconciliation, and
+retraining. It is not evidence that n8n chose the publication identity or
+authorized the tenant; those invariants belong to the BFF/database.
 
 ## Brand Performance Snapshot evidence contract
 
@@ -147,13 +175,13 @@ strings, credential values, or `.env` contents.
 | A01 | Start Docker stack | frontend, ml-service, and n8n become healthy | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A02 | Login | valid thesis user reaches Dashboard; invalid credentials fail safely | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A03 | Brand ownership | only brand records owned by the authenticated thesis user appear | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
-| A04 | Prediction with time | one current immutable result is saved with model/version hashes | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
+| A04 | Content Plan → prediction with time | one owned plan opens Predict with explicit inputs; one current immutable result is saved with model/version hashes and attached only to the same owner/brand plan | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A05 | Prediction without time | result is saved and visibly labelled provisional | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A06 | Input change | old result becomes stale/superseded; successor preserves history | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A07 | Prediction failure | unavailable model/backend produces an honest error and no fabricated score | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
-| A08 | Brand snapshot and Instagram insights | owned-brand aggregate patterns render with median/IQR/`n`, limitations, freshness, correct Reels/Feed-video classification, and verified media evidence; sparse/unavailable patterns do not block Predict | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
+| A08 | Snapshot, publication link, and observed outcome | brand patterns render with median/IQR/`n`; one same-brand media ID links immutably; conflicting links fail; mature verified ER renders while immature/unclassifiable outcomes remain pending/tier-unavailable | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A09 | n8n health branch | every configured brand binding reports connected | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
-| A10 | n8n sync/retrain | execution succeeds and produces current evaluation-contract evidence | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
+| A10 | n8n sync/reconcile/retrain | execution succeeds, reports each brand's `prediction_outcomes_reconciled`, and produces current evaluation-contract evidence; n8n does not create publication links | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A11 | Restart persistence | stop/start preserves Supabase data, workflow, and encrypted credentials | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 | A12 | Repository security | n8n has blocked `$env` access and receives no application token/ML URL variables | _Pending_ | _Pending_ | _Pending_ | _Pending_ |
 
@@ -177,4 +205,8 @@ The bachelor-thesis implementation is considered complete when:
 5. final model evidence is interpreted and every model is explicitly classified
    as `validated` or `exploratory`;
 6. the database, n8n volume, `.env`, and `N8N_ENCRYPTION_KEY` have a private backup;
-7. the thesis describes enterprise-only findings as limitations/future work rather than implemented capabilities.
+7. `202607120003_brand_patterns_and_media_product.sql` and
+   `202607120004_content_lifecycle_integration.sql` are present on the thesis
+   database and the final Content Plan/publication-link scenario is recorded;
+8. the thesis describes public OAuth and other enterprise-only findings as
+   limitations/future work rather than implemented capabilities.

@@ -15,6 +15,7 @@ const METRIC_KEYS = new Set([
 const TIERS = new Set(["High", "Average", "Low"]);
 const PREDICTION_MATCH_STATUSES = new Set([
   "not_found",
+  "verified_publication_link",
   "unique_verified_caption",
   "ambiguous_duplicate_caption",
 ]);
@@ -140,17 +141,29 @@ export async function POST(request: Request) {
     const predictionTier = rawPrediction && typeof rawPrediction.tier === "string" && TIERS.has(rawPrediction.tier)
       ? rawPrediction.tier
       : null;
-    const actualTier = rawPrediction && typeof rawPrediction.actual_tier === "string" && TIERS.has(rawPrediction.actual_tier)
-      ? rawPrediction.actual_tier
-      : null;
+    const rawMatchMethod = rawPrediction?.match_method;
     const prediction = rawPrediction && predictionTier ? {
+      prediction_id:
+        typeof rawPrediction.id === "string" && UUID_PATTERN.test(rawPrediction.id)
+          ? rawPrediction.id
+          : typeof rawPrediction.prediction_id === "string" && UUID_PATTERN.test(rawPrediction.prediction_id)
+            ? rawPrediction.prediction_id
+            : null,
       tier: predictionTier,
-      actual_tier: actualTier,
+      actual_er: finiteNumber(rawPrediction.actual_er),
       confidence: finiteNumber(rawPrediction.confidence, 100),
       model_version: typeof rawPrediction.model_version === "string" ? rawPrediction.model_version : null,
-      match_method: rawPrediction.match_method === "verified_graph_caption"
-        ? "verified_graph_caption"
-        : null,
+      match_method:
+        rawMatchMethod === "verified_media_id" || rawMatchMethod === "immutable_verified_publication"
+          ? "verified_media_id"
+          : rawMatchMethod === "verified_graph_caption_candidate" || rawMatchMethod === "verified_graph_caption"
+            ? "verified_graph_caption_candidate"
+            : null,
+      linked:
+        rawPrediction.publication_matches_selected_media === true || rawPrediction.linked === true,
+      linked_elsewhere:
+        rawPrediction.publication_linked === true &&
+        rawPrediction.publication_matches_selected_media !== true,
     } : null;
     const rawHistorical = data?.historical && typeof data.historical === "object"
       ? data.historical as Record<string, unknown>

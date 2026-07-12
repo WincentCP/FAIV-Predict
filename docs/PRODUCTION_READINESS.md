@@ -11,7 +11,7 @@ FAIV Predict performs real Random Forest inference and fails closed when no cert
 
 Enterprise readiness is a future-work review, not the acceptance contract for the bachelor-thesis prototype. The thesis release requires real-data provenance, leakage-resistant chronological evaluation, a transparent baseline, per-class/confusion-matrix evidence, reproducible dataset/code fingerprints, secure local integration, automated tests, and one recorded end-to-end demonstration. Those gates are maintained separately in `THESIS_TEST_REPORT.md` and `THESIS_DEMO_RUNBOOK.md`.
 
-The thesis does not claim public Instagram publishing, calibrated causal uplift, enterprise multi-user governance, globally distributed scaling, managed disaster recovery, or contractual SLA compliance.
+The thesis does not claim public Instagram OAuth/onboarding, Instagram publishing, calibrated causal uplift, enterprise multi-user governance, globally distributed scaling, managed disaster recovery, or contractual SLA compliance. Instagram credentials are configured and rotated by the thesis operator outside the browser.
 
 The Predict workflow is the strongest part of the product, but its current scores are uncalibrated, duplicate POST requests are not idempotent, and deployment has thesis-level operational/scientific gates rather than full enterprise champion/candidate control. The product also has no durable publication-job architecture. Calendar is a planning workspace, not an Instagram publishing engine.
 
@@ -40,6 +40,16 @@ This release adds a safety foundation:
   not measured rather than being invented by an LLM.
 - Meta product classification is retained so Feed video is not silently mapped
   to Reels.
+- A thesis-scope Content Plan can open Predict and retain the resulting
+  immutable prediction only under the same owner and brand.
+- Manual publication reconciliation uses one verified Instagram media ID as
+  immutable identity. Caption similarity cannot write the link.
+- A mature verified link may expose observed cumulative ER. Migration 004
+  rejects new `actual_class` values in this thesis; any categorical extension
+  requires a new versioned schema/migration and validated original-model
+  threshold/outcome rule.
+- n8n schedules connection health, sync/reconciliation, retraining, and alerts;
+  tenant authorization and publication identity remain BFF/database concerns.
 
 These changes are an important safety slice. They do not replace the remaining production architecture described below.
 
@@ -236,8 +246,9 @@ Current behavior:
   analysis and caption refinement routes. Only aggregate safe brand-pattern
   context is added; raw historical captions and media IDs are not sent.
 - Predict BFF, FastAPI, preprocessing, training, model bundle, sync, n8n, and prediction history do not use it.
-- Calendar content_details and visual_reference are separate planning fields.
-- Calendar does not load Visual Concept into Predict.
+- Content Plan `content_details` loads into Predict as Creative Brief/Visual
+  Concept and is saved back with the plan; `visual_reference` remains planning
+  metadata and is not inspected by Random Forest.
 - A concept-only change does not change the Random Forest result.
 - Applying a concept-conditioned caption rewrite can indirectly change prediction features.
 - Client request snapshots, cancellation, and stale-output guards prevent an
@@ -264,8 +275,10 @@ Recommended user copy:
 
 Critical or high:
 
-- Concept, analysis, prompt version, and accepted AI outputs are not persisted.
-- Calendar Content Details, Visual Reference, and Predict Visual Concept are disconnected.
+- The brief can persist in Content Plan, but AI analysis, prompt version, and
+  accepted AI outputs are not durable audit records.
+- Visual Reference is retained as planning metadata but is not an asset or
+  multimodal-analysis pipeline.
 - Gemini receives unpublished briefs without a tenant-level disable policy or explicit enterprise disclosure.
 - No direct tests verify that concept never enters the prediction payload.
 
@@ -313,7 +326,12 @@ One overloaded status column cannot safely represent all three.
 
 ## Publishing scenarios
 
-The current repository does not implement a production Meta publishing engine. Calendar records plans; n8n currently synchronizes and retrains. Do not show “scheduled publishing” as complete until these rules exist.
+The repository does not implement a production Meta publishing engine or public
+OAuth. It implements a narrower thesis workflow: an operator configures the
+Instagram connection, a user plans/predicts content, and a manually published
+post can be linked deliberately by verified immutable media ID before n8n sync
+refreshes the observed outcome. Do not describe this as automated publishing or
+self-service account connection.
 
 | Scenario | Frontend and notification | Backend, DB, automation, prediction, and training |
 | --- | --- | --- |
@@ -502,14 +520,18 @@ Initial Predict service target:
 
 1. Raw Random Forest scores are not calibrated probabilities and need abstention.
 2. Prediction POST lacks server-side idempotency and request recovery.
-3. No shared content item and immutable revision architecture connects Calendar, Predict, approval, and publication.
+3. No enterprise content-item/revision/approval architecture exists beyond the
+   thesis-scope Content Plan, immutable prediction reference, and verified
+   publication link.
 4. Calendar is not a publishing engine, despite schedule-like product language.
 5. Engagement observations are overwritten rather than maturity-versioned.
 6. Training runs in process-local background tasks instead of a durable queue.
 7. Model activation has an operational majority-baseline gate plus a separate thesis scientific gate, but still lacks explicit candidate/champion state, regression against the current champion, and one-click rollback.
 8. Unsigned joblib deserialization creates an artifact supply-chain risk.
 9. Browser and Python feature extraction can disagree.
-10. Exact prediction-to-publication linkage is incomplete end to end.
+10. Manual exact prediction-to-publication linkage exists for the thesis, but
+    automated publishing attempts, webhook reconciliation, and correction
+    workflow remain incomplete.
 11. No robust timezone contract exists across UI, sync, inference, and training.
 12. Core APIs lack enterprise idempotency, quotas, and rate limiting.
 
@@ -517,22 +539,28 @@ Initial Predict service target:
 
 1. Global MDI is insufficient as a local explanation.
 2. Counterfactuals need support checks and non-causal contracts.
-3. Calendar prediction_id is not wired by the product flow.
-4. Visual Concept and Calendar Content Details are disconnected and ephemeral.
+3. Content Plan can retain a prediction ID, but it is not a generalized
+   immutable content-revision or approval system.
+4. Creative Brief can round-trip through Content Plan, but AI analysis/output
+   lineage and visual-asset semantics remain ephemeral.
 5. AI outputs still lack durable prompt/model/input lineage across sessions;
    thesis-scope client request snapshots and stale-response guards are not an
    enterprise audit store.
 6. Sync uses current mutable metrics instead of observation snapshots.
-7. Meta credentials are not stored in a scalable connection registry.
+7. Instagram connection is operator-assisted through environment configuration;
+   there is no encrypted tenant connection registry or public OAuth lifecycle.
 8. One broad internal token creates a large trust boundary.
 9. No optimistic concurrency or workspace role model.
 10. APIs need typed errors, deadlines, cancellation, and correlation IDs.
 11. Model cache lacks bounded eviction, locks, checksum, and rollback invalidation.
 12. Niche cohorts need concentration and minimum-brand controls.
 13. History cannot yet guide a provisional result through time finalization.
-14. Calendar attachment needs same-owner, same-brand, and input-hash validation.
+14. Thesis plan/prediction/publication attachment has database identity guards,
+    but enterprise correction, approval, and concurrent-edit workflows remain.
 15. Audit storage needs a dedicated append-only writer and retention process.
-16. n8n currently permits Code nodes to read deployment environment variables and must be hardened before untrusted editors receive workflow access.
+16. n8n blocks process-environment access and uses encrypted credentials in the
+    thesis deployment; untrusted-editor roles, per-service identities, and a
+    managed secret lifecycle remain enterprise work.
 
 ### Medium
 
