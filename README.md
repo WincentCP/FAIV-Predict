@@ -13,7 +13,7 @@
 
 * **Real-time predictive classifier** — hierarchical Random Forest models (shared **niche model** → dedicated **personal model** once a brand accumulates 200 mature, verified, model-supported historical posts).
 * **Brand Performance Snapshot** — brand-scoped descriptive medians, interquartile ranges, and sample counts for observed format, posting-window, and structural-caption patterns before prediction. These are historical associations, not causal audience-preference claims.
-* **Structured Creative Brief** — captures the content goal, pillar or topic, intended hook, storytelling approach, visual direction, and CTA in a compact planning workflow. These user-authored fields give the creative review useful context; they are not silently treated as learned audience preferences or Random Forest features.
+* **Format-aware Creative Brief** — uses guided essentials for the goal, pillar, hook, story approach, execution direction, and CTA, then adapts its wording and production fields for Reel, Carousel, or Feed image. Users who already have a script, storyboard, design notes, bullets, or a rough idea can paste it into an optional AI intake that detects the material type and proposes normalized fields for confirmation. Existing answers are never overwritten, the pasted source is not stored, and these fields are not Random Forest features.
 * **Current context** — users may describe a timely campaign, event, or trend and attach its source and observation date. This is explicitly user-provided context, not a live or external trend signal, and is used only by the creative guidance layer.
 * **Separate decision signals** — the interface distinguishes the historical ML performance estimate from creative-review feedback and clearly marks creative or current context that has not been assessed.
 * **Traceable content lifecycle** — an owned Content Plan can seed Predict, retain the immutable prediction snapshot, and later be linked deliberately to one verified Instagram media identity so a mature observed ER can be traced without caption guessing.
@@ -62,6 +62,7 @@
 | `GET/POST /api/brands` | Brands with real per-brand post counts (`samples`) |
 | `GET/PATCH/DELETE /api/history` | Immutable prediction log: list, rename/restore, soft-archive |
 | `POST /api/analyze-concept` | Optional Gemini review of an unscored structured Creative Brief and user-provided Current context |
+| `POST /api/normalize-brief` | Detect pasted planning material and propose structured brief fields that require user confirmation |
 | `GET /api/brand-patterns` | Owned-brand descriptive performance snapshot from mature verified Graph history |
 | `GET/POST/PATCH/DELETE /api/calendar` | User-owned planning records and reviewed spreadsheet imports |
 | `POST /api/publication-links` | Explicitly confirm one owned prediction against one verified same-brand Instagram media ID |
@@ -98,7 +99,7 @@ The core flow lives on **`/predict`** as two focused views:
 Plan the direction → Complete the draft → Review separate decision signals
 ```
 
-* **Compose**: starts with the brand, format, and a structured Creative Brief so the content goal and execution direction are considered before caption polishing. A separate, optional **Current context** accepts a user-provided timely idea together with a source and observation date; it is never presented as automatically discovered or verified platform trend data. Brand Performance Snapshot says **observed**, not “audience prefers.” The date, optional posting time, and caption remain the inputs required by the historical model contract. With no time, the model frequency-weights only posting hours observed in its training split and stores an explicitly provisional result.
+* **Compose**: starts with the brand and one supported publishing format. Reel asks for an opening hook, video flow, pacing, and optional duration; Carousel asks for a cover hook, slide flow, and slide count; Feed image asks for a headline, focal point, and design direction. The same six guided essentials remain recognizable across formats, so the form is flexible without creating incompatible data. An optional **Paste script or notes** path classifies a script, storyboard, design notes, creative brief, bullets, or rough idea and fills only blank fields after the user approves the proposal. A separate **Current context** accepts a timely idea with a source and observation date. Brand Performance Snapshot says **observed**, not “audience prefers.” The date, optional posting time, and caption remain the inputs required by the historical model contract. With no time, the model frequency-weights only posting hours observed in its training split and stores an explicitly provisional result.
 * **Creative review**: Gemini may review the structured brief, user-provided Current context, brand profile, and safe historical aggregates. Its strengths and suggestions are planning guidance only. It does not inspect the actual media and does not directly affect the Random Forest score. If a user explicitly applies an AI caption rewrite, that new caption becomes a model input and must be scored again. Changing only the brief or current context makes the creative review stale without falsely invalidating an unchanged ML estimate.
 * **Insights**: keeps the **historical performance estimate** visually and semantically separate from the **creative review**. The primary estimate reports a relative tier and raw class scores expressed as `/100`; these are not calibrated probabilities. Model diagnostics and limitations remain available as secondary details. Edited model inputs make the ML result stale, while edited creative context requires only a new creative review.
 
@@ -162,7 +163,7 @@ source and date preserve provenance, but do not make the entry verified platform
 data and do not change the ML estimate. No automatic trend score is blended into
 the Random Forest output.
 
-Demographics, actual visual/video execution, live platform trends, and audience
+Demographics, actual visual/video execution, live platform trends, Stories, Feed video, and audience
 preference for semantic creative attributes remain explicitly unmeasured. A
 future quantitative trend claim requires append-only metric snapshots at the
 same post age (for example, 7-day ER), a sourced/versioned trend feed, historical

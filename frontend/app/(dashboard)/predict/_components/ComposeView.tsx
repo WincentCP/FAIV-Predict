@@ -23,7 +23,11 @@ import { AiToolsAccordion } from "./AiToolsAccordion";
 import { BrandPatterns } from "./BrandPatterns";
 import { type CreativeReviewSnapshot } from "./ConceptAssistant";
 
-const FORMATS: ContentFormat[] = ["Reels", "Carousel", "Single Image"];
+const FORMATS: Array<{ value: ContentFormat; label: string }> = [
+  { value: "Reels", label: "Reel" },
+  { value: "Carousel", label: "Carousel" },
+  { value: "Single Image", label: "Feed image" },
+];
 
 export function ComposeView(props: {
   brandsList: Brand[];
@@ -173,13 +177,13 @@ export function ComposeView(props: {
           <div className="xl:col-span-3">
             <Label id="predict-format-label">Format</Label>
             <div role="group" aria-labelledby="predict-format-label" className="grid grid-cols-3 gap-1 rounded-xl border border-border bg-surface-2/60 p-1">
-              {FORMATS.map((format) => {
-                const active = contentFormat === format;
+              {FORMATS.map((option) => {
+                const active = contentFormat === option.value;
                 return (
                   <button
-                    key={format}
+                    key={option.value}
                     type="button"
-                    onClick={() => setContentFormat(format)}
+                    onClick={() => setContentFormat(option.value)}
                     aria-pressed={active}
                     disabled={submitting}
                     className={cn(
@@ -187,11 +191,12 @@ export function ComposeView(props: {
                       active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-surface hover:text-foreground"
                     )}
                   >
-                    <span className="truncate">{format}</span>
+                    <span className="truncate">{option.label}</span>
                   </button>
                 );
               })}
             </div>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Story and Feed video are not available for prediction yet.</p>
           </div>
 
           <div className="xl:col-span-2">
@@ -228,6 +233,7 @@ export function ComposeView(props: {
         caption={caption}
         brandId={accountId}
         format={contentFormat}
+        onChangeFormat={setContentFormat}
         onReplaceCaption={setCaption}
         reviewSnapshot={creativeReview}
         onReviewComplete={onCreativeReview}

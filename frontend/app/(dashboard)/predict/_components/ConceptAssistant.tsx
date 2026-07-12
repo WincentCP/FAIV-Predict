@@ -11,7 +11,9 @@ import {
   serializeCreativeBrief,
   type CreativeBrief,
 } from "@/lib/creative-brief";
+import { type ContentFormat } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { BriefImporter } from "./BriefImporter";
 import { Label } from "./Panel";
 
 export interface ConceptAnalysis {
@@ -68,6 +70,36 @@ const CTA_LABELS: Record<(typeof CREATIVE_CTAS)[number], string> = {
   other: "Other",
 };
 
+const FORMAT_FIELDS: Record<ContentFormat, {
+  guidance: string;
+  hookLabel: string;
+  hookPlaceholder: string;
+  directionLabel: string;
+  directionPlaceholder: string;
+}> = {
+  Reels: {
+    guidance: "Plan the first seconds, flow, and pacing.",
+    hookLabel: "Opening hook",
+    hookPlaceholder: "What happens or is said in the first three seconds?",
+    directionLabel: "Video flow and visual direction",
+    directionPlaceholder: "Summarize scenes, dialogue, pacing, camera style, product visibility, or ending…",
+  },
+  Carousel: {
+    guidance: "Plan the cover, slide flow, and takeaway.",
+    hookLabel: "Cover hook",
+    hookPlaceholder: "What should make someone swipe past the cover?",
+    directionLabel: "Slide flow and design direction",
+    directionPlaceholder: "Describe the cover, key slides, visual system, proof points, and final slide…",
+  },
+  "Single Image": {
+    guidance: "Plan one clear message and focal point.",
+    hookLabel: "Headline or key message",
+    hookPlaceholder: "What should someone understand at a glance?",
+    directionLabel: "Design direction",
+    directionPlaceholder: "Describe the focal subject, composition, text density, visual style, and product placement…",
+  },
+};
+
 const fieldClass = "h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/15";
 
 export function ConceptAssistant({
@@ -76,6 +108,7 @@ export function ConceptAssistant({
   caption,
   brandId,
   format,
+  onChangeFormat,
   reviewSnapshot,
   onReviewComplete,
 }: {
@@ -83,7 +116,8 @@ export function ConceptAssistant({
   setVisualConcept: (v: string) => void;
   caption: string;
   brandId: string | null;
-  format: string;
+  format: ContentFormat;
+  onChangeFormat: (format: ContentFormat) => void;
   reviewSnapshot: CreativeReviewSnapshot | null;
   onReviewComplete: (review: CreativeReviewSnapshot) => void;
 }) {
@@ -113,6 +147,7 @@ export function ConceptAssistant({
   const completion = Math.round((completedFields / coreFields.length) * 100);
   const currentContextComplete = !brief.trendContext.trim() || Boolean(brief.trendSource.trim() && brief.trendObservedAt);
   const reviewReady = hasCreativeBriefContent(brief) && Boolean(brandId) && currentContextComplete;
+  const formatFields = FORMAT_FIELDS[format];
 
   useEffect(() => {
     latestInputSignatureRef.current = inputSignature;
@@ -155,6 +190,13 @@ export function ConceptAssistant({
       next.trendSource = "";
       next.trendObservedAt = "";
     }
+    setBrief(next);
+    const serialized = serializeCreativeBrief(next);
+    lastEmittedBriefRef.current = serialized;
+    setVisualConcept(serialized);
+  };
+
+  const applyImportedBrief = (next: CreativeBrief) => {
     setBrief(next);
     const serialized = serializeCreativeBrief(next);
     lastEmittedBriefRef.current = serialized;
@@ -207,6 +249,22 @@ export function ConceptAssistant({
 
   return (
     <div className="space-y-5">
+      <BriefImporter
+        brandId={brandId}
+        format={format}
+        currentBrief={brief}
+        onApply={applyImportedBrief}
+        onUseFormat={onChangeFormat}
+      />
+
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Guided essentials</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Add only what you know. You can refine the rest later.</p>
+        </div>
+        <p className="text-xs font-medium text-primary">{formatFields.guidance}</p>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <div>
           <Label htmlFor="brief-objective">Goal</Label>
@@ -230,8 +288,8 @@ export function ConceptAssistant({
         </div>
 
         <div className="md:col-span-2">
-          <Label htmlFor="brief-hook">Opening hook</Label>
-          <input id="brief-hook" value={brief.hook} onChange={(event) => updateBrief({ hook: event.target.value })} maxLength={240} className={fieldClass} placeholder="What should make someone stop scrolling?" />
+          <Label htmlFor="brief-hook">{formatFields.hookLabel}</Label>
+          <input id="brief-hook" value={brief.hook} onChange={(event) => updateBrief({ hook: event.target.value })} maxLength={240} className={fieldClass} placeholder={formatFields.hookPlaceholder} />
         </div>
 
         <div>
@@ -243,8 +301,8 @@ export function ConceptAssistant({
         </div>
 
         <div className="md:col-span-2 xl:col-span-2">
-          <Label htmlFor="brief-visual">Visual direction</Label>
-          <textarea id="brief-visual" value={brief.visualDirection} onChange={(event) => updateBrief({ visualDirection: event.target.value })} rows={4} maxLength={1600} className="w-full resize-y rounded-lg border border-border bg-surface p-3 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/15" placeholder="Describe the scenes, visual style, pacing, product visibility, or key moments…" />
+          <Label htmlFor="brief-visual">{formatFields.directionLabel}</Label>
+          <textarea id="brief-visual" value={brief.visualDirection} onChange={(event) => updateBrief({ visualDirection: event.target.value })} rows={4} maxLength={1600} className="w-full resize-y rounded-lg border border-border bg-surface p-3 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/15" placeholder={formatFields.directionPlaceholder} />
         </div>
 
         <div>

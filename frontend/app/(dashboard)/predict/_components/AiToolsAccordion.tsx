@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { type ContentFormat } from "@/lib/types";
 import { ConceptAssistant, type CreativeReviewSnapshot } from "./ConceptAssistant";
 import { CaptionRefine } from "./CaptionRefine";
 
@@ -18,6 +19,7 @@ export function AiToolsAccordion({
   caption,
   brandId,
   format,
+  onChangeFormat,
   onReplaceCaption,
   reviewSnapshot,
   onReviewComplete,
@@ -26,7 +28,8 @@ export function AiToolsAccordion({
   setVisualConcept: (v: string) => void;
   caption: string;
   brandId: string | null;
-  format: string;
+  format: ContentFormat;
+  onChangeFormat: (format: ContentFormat) => void;
   onReplaceCaption: (text: string) => void;
   reviewSnapshot: CreativeReviewSnapshot | null;
   onReviewComplete: (review: CreativeReviewSnapshot) => void;
@@ -47,6 +50,7 @@ export function AiToolsAccordion({
           caption={caption}
           brandId={brandId}
           format={format}
+          onChangeFormat={onChangeFormat}
           reviewSnapshot={reviewSnapshot}
           onReviewComplete={onReviewComplete}
         />

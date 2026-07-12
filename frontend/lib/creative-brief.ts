@@ -32,9 +32,20 @@ export const CREATIVE_CTAS = [
   "other",
 ] as const;
 
+export const CREATIVE_MATERIAL_TYPES = [
+  "video_script",
+  "storyboard",
+  "design_notes",
+  "creative_brief",
+  "bullet_ideas",
+  "rough_idea",
+  "other",
+] as const;
+
 export type CreativeObjective = (typeof CREATIVE_OBJECTIVES)[number];
 export type StorytellingStyle = (typeof STORYTELLING_STYLES)[number];
 export type CreativeCta = (typeof CREATIVE_CTAS)[number];
+export type CreativeMaterialType = (typeof CREATIVE_MATERIAL_TYPES)[number];
 
 export interface CreativeBrief {
   objective: CreativeObjective | "";
