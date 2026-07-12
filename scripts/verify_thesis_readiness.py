@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 
@@ -25,6 +26,7 @@ def main() -> int:
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     training_source = (ROOT / "ml-service" / "app" / "train_pipeline.py").read_text(encoding="utf-8")
     inference_source = (ROOT / "ml-service" / "app" / "main.py").read_text(encoding="utf-8")
+    powershell_preflight = (ROOT / "scripts" / "thesis_preflight.ps1").read_text(encoding="utf-8")
 
     require(workflow.get("active") is False, "workflow template must import inactive")
     require("$env" not in workflow_text, "workflow template must not read $env")
@@ -130,6 +132,10 @@ def main() -> int:
     require(
         '"empirical_training_distribution"' in inference_source,
         "optional-time inference must use empirical observed-hour support",
+    )
+    require(
+        re.search(r"\$[A-Za-z_][A-Za-z0-9_]*:", powershell_preflight) is None,
+        "PowerShell variables immediately followed by ':' must use ${Variable} syntax",
     )
 
     for required_path in (

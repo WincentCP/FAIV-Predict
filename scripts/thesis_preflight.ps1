@@ -119,7 +119,7 @@ if (-not $SkipModelEvidence) {
                 throw "model $Scope is missing runtime/dependency evidence"
             }
             if (@($Metrics.promotion_gate.warnings).Count -gt 0) {
-                Write-Host "WARN model $Scope: $($Metrics.promotion_gate.warnings -join ', ')" -ForegroundColor Yellow
+                Write-Host "WARN model ${Scope}: $($Metrics.promotion_gate.warnings -join ', ')" -ForegroundColor Yellow
             }
             Write-Pass "model evidence is complete for $Scope (version $($Model.version))"
         }
