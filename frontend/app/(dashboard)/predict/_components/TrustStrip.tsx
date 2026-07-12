@@ -1,6 +1,6 @@
 "use client";
 
-import { Cpu, Database, Tag, AlertTriangle, ChevronDown, FlaskConical } from "lucide-react";
+import { AlertTriangle, ChevronDown } from "lucide-react";
 
 const OOD_LABELS: Record<string, string> = {
   post_hour: "Posting time",
@@ -42,10 +42,10 @@ export function TrustStrip({
   outOfRange: string[];
 }) {
   const scopeLabel = isPersonalModel ? "Personal brand model" : "Shared niche model";
-  const scientificLabel = evaluationStatus === "validated"
-    ? "Validated for thesis use"
+  const qualityLabel = evaluationStatus === "validated"
+    ? "Passed evaluation"
     : evaluationStatus === "exploratory"
-      ? "Exploratory evidence"
+      ? "Limited evidence"
       : "Status unavailable";
 
   return (
@@ -53,7 +53,7 @@ export function TrustStrip({
       {(outOfRange.length > 0 || (trainedSamples !== null && trainedSamples < 50) || heldOutClassesComplete === false) && (
         <div className="space-y-2 border-b border-border p-4">
           {trainedSamples !== null && trainedSamples < 50 && (
-            <WarningLine>Limited training set: fewer than 50 eligible posts. Treat this score as exploratory.</WarningLine>
+            <WarningLine>Limited training set: fewer than 50 eligible posts. Treat this result with caution.</WarningLine>
           )}
           {heldOutClassesComplete === false && (
             <WarningLine>The chronological holdout is missing at least one performance tier.</WarningLine>
@@ -68,9 +68,9 @@ export function TrustStrip({
         <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 marker:hidden">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 id="prediction-evidence-title" className="text-sm font-semibold text-foreground">Model evidence</h3>
+              <h3 id="prediction-evidence-title" className="text-sm font-semibold text-foreground">Model quality</h3>
               <span className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-muted-foreground">
-                {scientificLabel}
+                {qualityLabel}
               </span>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -86,22 +86,10 @@ export function TrustStrip({
           </p>
 
           <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <EvidenceItem icon={<Cpu className="h-4 w-4" />} label="Model scope" value={scopeLabel} />
-            <EvidenceItem
-              icon={<Database className="h-4 w-4" />}
-              label="Training evidence"
-              value={trainedSamples !== null ? `${trainedSamples} eligible posts` : "Unavailable"}
-            />
-            <EvidenceItem
-              icon={<FlaskConical className="h-4 w-4" />}
-              label="Chronological holdout"
-              value={testSamples !== null ? `${testSamples} posts` : "Unavailable"}
-            />
-            <EvidenceItem
-              icon={<Tag className="h-4 w-4" />}
-              label="Artifact version"
-              value={modelVersion ? `v${modelVersion}` : "Unavailable"}
-            />
+            <EvidenceItem label="Model scope" value={scopeLabel} />
+            <EvidenceItem label="Training data" value={trainedSamples !== null ? `${trainedSamples} eligible posts` : "Unavailable"} />
+            <EvidenceItem label="Chronological holdout" value={testSamples !== null ? `${testSamples} posts` : "Unavailable"} />
+            <EvidenceItem label="Model version" value={modelVersion ? `v${modelVersion}` : "Unavailable"} />
           </dl>
 
           <div className="mt-4 grid gap-x-8 gap-y-3 border-t border-border pt-4 text-sm sm:grid-cols-2">
@@ -122,10 +110,10 @@ export function TrustStrip({
   );
 }
 
-function EvidenceItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function EvidenceItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-border bg-surface-2/50 p-3">
-      <div className="flex items-center gap-2 text-muted-foreground">{icon}<dt className="text-xs font-semibold">{label}</dt></div>
+      <dt className="text-xs font-semibold text-muted-foreground">{label}</dt>
       <dd className="mt-2 text-sm font-semibold text-foreground">{value}</dd>
     </div>
   );
@@ -167,4 +155,3 @@ function WarningLine({ children }: { children: React.ReactNode }) {
 function formatMetric(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
-

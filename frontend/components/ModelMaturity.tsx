@@ -1,8 +1,6 @@
 "use client";
 
-import * as React from "react";
 import { motion } from "framer-motion";
-import { Brain, CheckCircle2, AlertCircle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type MaturityState = "low" | "learning" | "personal";
@@ -29,7 +27,6 @@ export function getMaturityState(samples: number, target = 200, low = 50): Matur
 const META: Record<MaturityState, {
   label: string;
   short: string;
-  Icon: React.ComponentType<{ className?: string }>;
   tone: string;
   ring: string;
   bg: string;
@@ -39,7 +36,6 @@ const META: Record<MaturityState, {
   low: {
     label: "Limited account history",
     short: "Cold start",
-    Icon: AlertCircle,
     tone: "text-[oklch(0.55_0.18_45)] dark:text-[oklch(0.82_0.16_75)]",
     ring: "ring-[color-mix(in_oklab,hsl(var(--warning))_40%,transparent)]",
     bg: "bg-[color-mix(in_oklab,hsl(var(--warning))_12%,transparent)]",
@@ -49,7 +45,6 @@ const META: Record<MaturityState, {
   learning: {
     label: "Building personal history",
     short: "Building history",
-    Icon: Brain,
     tone: "text-primary",
     ring: "ring-[color-mix(in_oklab,hsl(var(--primary))_35%,transparent)]",
     bg: "bg-[color-mix(in_oklab,hsl(var(--primary))_10%,transparent)]",
@@ -59,7 +54,6 @@ const META: Record<MaturityState, {
   personal: {
     label: "Personal model active",
     short: "Personalized",
-    Icon: CheckCircle2,
     tone: "text-[oklch(0.40_0.18_130)] dark:text-[oklch(0.85_0.20_130)]",
     ring: "ring-[color-mix(in_oklab,hsl(var(--accent-lime))_45%,transparent)]",
     bg: "bg-[color-mix(in_oklab,hsl(var(--accent-lime))_18%,transparent)]",
@@ -96,17 +90,11 @@ export function ModelMaturity({
   if (variant === "compact") {
     return (
       <span
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset",
-          m.bg,
-          m.tone,
-          m.ring,
-          className,
-        )}
+        className={cn("inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1 text-xs font-medium text-muted-foreground", className)}
         title={`${samples}/${target} training-eligible posts · ${m.label}. Model activation also requires a successful model evaluation. This is not a confidence score.`}
       >
-        <m.Icon className="h-3 w-3" />
-        {shortLabel} · <span className="font-mono tabular-nums">{samples}/{target}</span>
+        <span className={cn("h-1.5 w-1.5 rounded-full", m.dot)} aria-hidden />
+        {shortLabel} · <span className="font-mono tabular-nums text-foreground">{samples}/{target}</span>
       </span>
     );
   }
@@ -115,9 +103,6 @@ export function ModelMaturity({
     <div className={cn("rounded-2xl border border-border bg-surface p-4", className)}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <span className={cn("grid h-8 w-8 place-items-center rounded-lg ring-1 ring-inset", m.bg, m.ring, m.tone)}>
-            <m.Icon className="h-4 w-4" />
-          </span>
           <div className="leading-tight">
             <div className="flex items-center gap-1.5 text-[13px] font-semibold">
               {m.label}
@@ -133,10 +118,7 @@ export function ModelMaturity({
             </div>
           </div>
         </div>
-        <Info
-          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
-          aria-label="This indicates data maturity, not prediction confidence"
-        />
+        <span className="text-xs font-medium text-muted-foreground" title="This indicates data maturity, not prediction confidence">Data maturity</span>
       </div>
 
       <div

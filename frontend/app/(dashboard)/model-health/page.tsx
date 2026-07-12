@@ -4,13 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  CircleHelp,
-  Clock3,
-  Database,
   RefreshCw,
-  ShieldCheck,
 } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { fetchWithRetry } from "@/lib/fetch-retry";
@@ -80,7 +74,7 @@ export default function ModelHealthPage() {
       setModels([]);
       setConnections([]);
       setState("error");
-      setLoadError(error instanceof Error ? error.message : "Research evidence is temporarily unavailable.");
+      setLoadError(error instanceof Error ? error.message : "Model quality is temporarily unavailable.");
     }
   }, []);
 
@@ -99,9 +93,8 @@ export default function ModelHealthPage() {
   return (
     <div className="mx-auto min-h-dvh max-w-[1400px] space-y-7 px-4 py-6 md:px-8 md:py-8">
       <SectionHeader
-        eyebrow="Methods & evidence"
-        title="Research Evidence"
-        description="Review the data provenance and held-out evaluation recorded when each model was trained. This is thesis evidence, not live production monitoring."
+        title="Model quality"
+        description="Review evaluation results and data freshness for each active model."
         actions={
           <button
             type="button"
@@ -110,7 +103,7 @@ export default function ModelHealthPage() {
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-foreground outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
           >
             <RefreshCw className={cn("h-4 w-4", state === "loading" && "animate-spin")} aria-hidden="true" />
-            Refresh evidence
+            Refresh
           </button>
         }
       />
@@ -141,12 +134,12 @@ export default function ModelHealthPage() {
         <>
           <section aria-labelledby="evidence-summary-title" className="overflow-hidden rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]">
             <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
-              <EvidenceSummary label="Current models" value={models.length} helper="Latest version per scope" icon={Database} />
-              <EvidenceSummary label="Thesis-validated" value={summary.validated} helper={`${summary.evaluated} with evaluation records`} icon={ShieldCheck} />
-              <EvidenceSummary label="Exploratory" value={summary.exploratory} helper="Interpret with stated limitations" icon={AlertTriangle} tone="warning" />
-              <EvidenceSummary label="Connected brands" value={summary.freshConnections} helper="Live identity check passed" icon={CheckCircle2} />
+              <EvidenceSummary label="Current models" value={models.length} helper="Latest active versions" />
+              <EvidenceSummary label="Passed checks" value={summary.validated} helper={`${summary.evaluated} evaluated`} />
+              <EvidenceSummary label="Limited evidence" value={summary.exploratory} helper="Review before use" />
+              <EvidenceSummary label="Connected brands" value={summary.freshConnections} helper="Instagram verified" />
             </div>
-            <h2 id="evidence-summary-title" className="sr-only">Research evidence summary</h2>
+            <h2 id="evidence-summary-title" className="sr-only">Model quality summary</h2>
           </section>
 
           <section aria-labelledby="model-evidence-title" className="space-y-4">
@@ -154,7 +147,7 @@ export default function ModelHealthPage() {
               <div>
                 <h2 id="model-evidence-title" className="text-xl font-semibold tracking-tight">Model evaluation records</h2>
                 <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                  Scores below come from held-out data recorded at training time. Green status means the thesis criteria passed; it does not imply universal production validity.
+                  Held-out metrics recorded when each model was trained.
                 </p>
               </div>
               <span className="text-sm text-muted-foreground">{models.length} current record{models.length === 1 ? "" : "s"}</span>
@@ -177,8 +170,8 @@ export default function ModelHealthPage() {
                   Connection status confirms identity and access. Model evaluation changes only after the synchronized dataset is retrained.
                 </p>
               </div>
-              <Link href="/niches" className="inline-flex min-h-10 items-center gap-1.5 self-start rounded-lg px-2 text-sm font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40">
-                Manage brands <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              <Link href="/niches" className="inline-flex min-h-10 items-center self-start rounded-lg px-2 text-sm font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40">
+                Manage brands
               </Link>
             </div>
 
@@ -204,10 +197,7 @@ export default function ModelHealthPage() {
                           label={connected ? "Verified" : connection.status === "error" ? "Reconnect" : "Unavailable"}
                         />
                       </div>
-                      <div className="mt-4 flex items-center gap-2 border-t border-border pt-3 text-sm text-muted-foreground">
-                        <Clock3 className="h-4 w-4 shrink-0" aria-hidden="true" />
-                        <span>Latest synced post: {formatRelativeTime(connection.last_synced)}</span>
-                      </div>
+                      <p className="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">Latest sync: {formatRelativeTime(connection.last_synced)}</p>
                     </li>
                   );
                 })}
@@ -217,7 +207,6 @@ export default function ModelHealthPage() {
 
           <details className="group rounded-2xl border border-border bg-surface p-5">
             <summary className="flex min-h-10 cursor-pointer list-none items-center gap-3 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
-              <CircleHelp className="h-5 w-5 text-primary" aria-hidden="true" />
               How to read these metrics
               <span className="ml-auto text-sm font-normal text-muted-foreground group-open:hidden">Show definitions</span>
             </summary>
@@ -226,8 +215,8 @@ export default function ModelHealthPage() {
               <MetricDefinition term="Macro F1" description="F1 calculated for each class and averaged equally, so weak minority-class performance remains visible." />
               <MetricDefinition term="Balanced accuracy" description="Average recall across classes. This gives each observed class equal importance." />
               <MetricDefinition term="Gain vs majority" description="Held-out accuracy minus a simple classifier that always predicts the most common class." />
-              <MetricDefinition term="Validated for thesis evidence" description="The recorded evaluation passed this project's declared scientific checks; it is not a claim of universal validity." />
-              <MetricDefinition term="Exploratory" description="The model can support a demonstration, but its recorded limitations must be disclosed when interpreting predictions." />
+              <MetricDefinition term="Passed evaluation" description="The recorded model met the configured evaluation checks; this is not a guarantee for every future post." />
+              <MetricDefinition term="Limited evidence" description="The model is available, but its recorded limitations should be considered when interpreting predictions." />
             </dl>
           </details>
         </>
@@ -240,7 +229,7 @@ function ModelEvidenceCard({ model }: { model: MlModel }) {
   const validated = model.evaluationStatus === "validated";
   const evaluated = model.evaluationStatus !== null;
   const holdoutAccuracy = model.baselineAccuracy;
-  const scopeLabel = model.scope === "Personal" ? "Brand-specific model" : "Industry cohort model";
+  const scopeLabel = model.scope === "Personal" ? "Brand model" : "Niche model";
 
   return (
     <article className="rounded-3xl border border-border bg-surface p-5 shadow-[var(--shadow-soft)] md:p-6">
@@ -252,7 +241,7 @@ function ModelEvidenceCard({ model }: { model: MlModel }) {
         </div>
         <StatusBadge
           tone={validated ? "success" : evaluated ? "warning" : "neutral"}
-          label={validated ? "Validated for thesis" : evaluated ? "Exploratory" : "Not evaluated"}
+          label={validated ? "Passed evaluation" : evaluated ? "Limited evidence" : "Not evaluated"}
         />
       </div>
 
@@ -289,17 +278,12 @@ function ModelEvidenceCard({ model }: { model: MlModel }) {
   );
 }
 
-function EvidenceSummary({ label, value, helper, icon: Icon, tone = "default" }: { label: string; value: number; helper: string; icon: typeof Database; tone?: "default" | "warning" }) {
+function EvidenceSummary({ label, value, helper }: { label: string; value: number; helper: string }) {
   return (
-    <div className="flex min-h-32 items-start justify-between gap-4 bg-surface p-5">
-      <div>
-        <p className="text-sm font-medium text-muted-foreground">{label}</p>
-        <p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight">{value}</p>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{helper}</p>
-      </div>
-      <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", tone === "warning" ? "bg-warning/10 text-warning" : "bg-primary/10 text-primary")}>
-        <Icon className="h-5 w-5" aria-hidden="true" />
-      </span>
+    <div className="min-h-32 bg-surface p-5">
+      <p className="text-sm font-medium text-muted-foreground">{label}</p>
+      <p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight">{value}</p>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{helper}</p>
     </div>
   );
 }
@@ -337,13 +321,12 @@ function StatusBadge({ label, tone }: { label: string; tone: "success" | "warnin
 function EmptyEvidence() {
   return (
     <div className="rounded-3xl border border-dashed border-border bg-surface p-8 text-center">
-      <Database className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden="true" />
-      <h3 className="mt-4 text-lg font-semibold">No evaluation record yet</h3>
+      <h3 className="text-lg font-semibold">No evaluation record yet</h3>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
         Models appear after verified Instagram data has been synchronized and the sync/retrain workflow completes.
       </p>
-      <Link href="/niches" className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-foreground px-4 text-sm font-semibold text-background">
-        Review brand readiness <ArrowRight className="h-4 w-4" aria-hidden="true" />
+      <Link href="/niches" className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+        Review brands
       </Link>
     </div>
   );
@@ -351,7 +334,7 @@ function EmptyEvidence() {
 
 function EvidenceSkeleton() {
   return (
-    <div role="status" aria-label="Loading research evidence" className="space-y-6">
+    <div role="status" aria-label="Loading model quality" className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[0, 1, 2, 3].map((item) => <div key={item} className="h-32 motion-safe:animate-pulse rounded-2xl bg-surface-2" />)}
       </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, FileText, Loader2, PenTool } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
 type AiState = "idle" | "loading" | "enriched" | "unavailable";
@@ -91,7 +91,7 @@ export function CaptionRefine({
     <div className="space-y-3">
       <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Refine the current caption using the brief and safe historical context. Applying it changes a model input, so run a new prediction.
+          Rewrite the current caption with the creative brief and brand context.
         </p>
         <button
           type="button"
@@ -112,9 +112,7 @@ export function CaptionRefine({
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Refining…
             </>
           ) : (
-            <>
-              <PenTool className="h-3.5 w-3.5" /> AI Refine Caption
-            </>
+            "Refine caption"
           )}
         </button>
       </div>
@@ -131,10 +129,7 @@ export function CaptionRefine({
             className="relative space-y-4 overflow-hidden rounded-2xl border border-border bg-surface-2/60 p-5 text-left shadow-sm"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5">
-                <FileText className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-wider text-primary">AI Suggested Caption</span>
-              </div>
+              <span className="text-xs font-bold uppercase tracking-wider text-primary">Suggested caption</span>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-bold text-muted-foreground">
                   {historicalContextUsed ? "Brand-history context used" : "Brief-only context"}
@@ -162,7 +157,7 @@ export function CaptionRefine({
               {suggestedCaption}
             </div>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              This is AI writing guidance, not a predicted audience preference or a live trend recommendation.
+              Applying this changes the caption. Predict again for an updated result.
             </p>
           </motion.div>
         )}

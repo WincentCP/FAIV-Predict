@@ -129,7 +129,7 @@ export async function POST(request: Request) {
     }
     if (!(NICHES as readonly string[]).includes(niche.trim())) {
       return NextResponse.json(
-        { status: "error", message: "Select a supported industry cohort." },
+        { status: "error", message: "Select a supported industry niche." },
         { status: 400 }
       );
     }
@@ -145,7 +145,7 @@ export async function POST(request: Request) {
     const resolvedTimezone = timezone === undefined ? "Asia/Jakarta" : timezone;
     if (typeof resolvedTimezone !== "string" || resolvedTimezone !== "Asia/Jakarta") {
       return NextResponse.json(
-        { status: "error", message: "This thesis deployment currently supports the Asia/Jakarta timezone." },
+        { status: "error", message: "Only the Asia/Jakarta timezone is currently supported." },
         { status: 400 }
       );
     }

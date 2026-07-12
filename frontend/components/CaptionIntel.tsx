@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Hash, AtSign, Smile, MessageCircleQuestion, Target, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const CAPTION_MAX = 2200;
@@ -102,56 +102,30 @@ export function CaptionSignals({
   const items = [
     {
       key: "hashtags",
-      icon: Hash,
       value: stats.hashtags.length,
       label: "hashtags",
-      tone:
-        stats.hashtags.length === 0
-          ? "muted"
-          : stats.hashtags.length > 10
-          ? "warning"
-          : stats.hashtags.length >= 3
-          ? "good"
-          : "info",
     },
     {
       key: "mentions",
-      icon: AtSign,
       value: stats.mentions.length,
       label: "mentions",
-      tone: "muted",
     },
     {
       key: "emoji",
-      icon: Smile,
       value: stats.emojiCount,
       label: "emoji",
-      tone: stats.emojiCount === 0 ? "muted" : stats.emojiCount > 6 ? "warning" : "info",
     },
     {
       key: "cta",
-      icon: Target,
       value: stats.hasCTA ? "✓" : "—",
       label: stats.hasCTA ? `CTA · ${stats.ctaTerms[0]}` : "no CTA",
-      tone: stats.hasCTA ? "good" : "warning",
     },
     {
       key: "question",
-      icon: MessageCircleQuestion,
       value: stats.hasQuestion ? "✓" : "—",
       label: stats.hasQuestion ? "question" : "no question",
-      tone: stats.hasQuestion ? "good" : "muted",
     },
   ] as const;
-
-  const toneClass = (t: string) =>
-    t === "good"
-      ? "text-[oklch(0.40_0.18_130)] dark:text-[oklch(0.85_0.20_130)] bg-[color-mix(in_oklab,hsl(var(--accent-lime))_14%,transparent)]"
-      : t === "warning"
-      ? "text-[oklch(0.50_0.16_75)] dark:text-[oklch(0.85_0.16_75)] bg-[color-mix(in_oklab,hsl(var(--warning))_14%,transparent)]"
-      : t === "info"
-      ? "text-primary bg-[color-mix(in_oklab,hsl(var(--primary))_10%,transparent)]"
-      : "text-muted-foreground bg-surface-2";
 
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
@@ -165,13 +139,11 @@ export function CaptionSignals({
             exit={{ opacity: 0, scale: 0.9 }}
             transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
-              toneClass(it.tone),
+              "inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-medium text-muted-foreground",
             )}
           >
-            <it.icon className="h-3 w-3" />
-            <span className="font-mono tabular-nums">{it.value}</span>
-            <span className="text-muted-foreground/80">{it.label}</span>
+            <span className="font-mono tabular-nums text-foreground">{it.value}</span>
+            <span>{it.label}</span>
           </motion.span>
         ))}
       </AnimatePresence>

@@ -3,14 +3,9 @@
 import { motion } from "framer-motion";
 import Link from "next/link";
 import {
-  Activity,
   AlertTriangle,
-  Film,
-  Image as ImageIcon,
-  LayoutGrid,
   Loader2,
   RefreshCw,
-  Sparkles,
 } from "lucide-react";
 import { DatePicker, TimePicker } from "@/components/DateTimePicker";
 import { ModelMaturity } from "@/components/ModelMaturity";
@@ -27,11 +22,7 @@ import { Panel, Label } from "./Panel";
 import { AiToolsAccordion } from "./AiToolsAccordion";
 import { BrandPatterns } from "./BrandPatterns";
 
-const FORMATS: { id: ContentFormat; icon: typeof Film }[] = [
-  { id: "Reels", icon: Film },
-  { id: "Carousel", icon: LayoutGrid },
-  { id: "Single Image", icon: ImageIcon },
-];
+const FORMATS: ContentFormat[] = ["Reels", "Carousel", "Single Image"];
 
 export function ComposeView(props: {
   brandsList: Brand[];
@@ -104,18 +95,18 @@ export function ComposeView(props: {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
-      className="mx-auto max-w-[1380px] space-y-5"
+      className="mx-auto max-w-[1320px] space-y-5"
     >
       {contentPlanId && (
         <div className="flex flex-col gap-2 rounded-2xl border border-primary/20 bg-primary/[0.03] p-4 text-sm leading-relaxed text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <span><strong className="text-foreground">Loaded from Content Plan.</strong> A new prediction preserves the earlier result as version history.</span>
-          <Link href="/calendar" className="shrink-0 font-semibold text-foreground underline-offset-4 hover:underline">Back to Content Plan</Link>
+          <span><strong className="text-foreground">Loaded from Plan.</strong> Predicting again keeps the earlier version.</span>
+          <Link href="/calendar" className="shrink-0 font-semibold text-primary underline-offset-4 hover:underline">Back to Plan</Link>
         </div>
       )}
 
       {planLoadError && (
         <div role="alert" className="rounded-2xl border border-warning/30 bg-warning/[0.04] p-4 text-sm font-medium text-warning">
-          Content Plan could not be loaded: {planLoadError}
+          The plan could not be loaded: {planLoadError}
         </div>
       )}
 
@@ -134,15 +125,13 @@ export function ComposeView(props: {
 
       {optimizationsApplied && (
         <div role="status" className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/[0.03] p-4">
-          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-          <p className="text-sm font-medium text-foreground">The selected posting-hour change is now in the draft. Predict again to create a new result.</p>
+          <p className="text-sm font-medium text-foreground">Posting time updated. Predict again to refresh the result.</p>
         </div>
       )}
 
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        {/* Understand: first in the DOM for mobile, right rail on desktop. */}
-        <aside className="order-1 space-y-5 xl:col-start-2 xl:row-start-1" aria-label="Brand decision context">
-          <Panel title="Understand the brand" subtitle="Choose the account whose verified history should anchor this decision.">
+      <Panel title="Prediction setup" subtitle="Choose the brand and publishing context.">
+        <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-12">
+          <div className="xl:col-span-4">
             <Label htmlFor="predict-brand">Active brand</Label>
             <select
               id="predict-brand"
@@ -163,38 +152,73 @@ export function ComposeView(props: {
                 {brandsError || "No brand account is available. Add one from Brands."}
               </p>
             ) : account ? (
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 space-y-1.5">
                 <ModelMaturity samples={account.samples ?? 0} activeScope={account.active_model_scope} variant="compact" />
-                <p className="text-sm leading-relaxed text-muted-foreground">
+                <p className="text-xs leading-relaxed text-muted-foreground">
                   {account.active_model_scope === "personal"
-                    ? "This prediction uses a separately trained model from this brand’s eligible post history."
+                    ? "Uses this brand’s model."
                     : account.active_model_scope === "cohort"
-                      ? `This prediction uses the verified ${account.niche} cohort model while the brand builds personal evidence.`
-                      : "Planning remains available, but prediction requires a successful sync and retraining run."}
+                      ? `Uses the ${account.niche} niche model while personal history grows.`
+                      : "Sync and train a model before predicting."}
                 </p>
               </div>
             ) : null}
-          </Panel>
+          </div>
 
-          <BrandPatterns brandId={accountId} brandName={account?.name} activeModelScope={account?.active_model_scope} compact />
-        </aside>
-
-        {/* Plan: the creative draft stays visually dominant. */}
-        <main className="order-2 space-y-5 xl:col-start-1 xl:row-start-1 xl:row-span-2">
-          {submitting && (
-            <div role="status" aria-live="polite" className="flex items-start gap-3 rounded-2xl border border-primary/25 bg-primary/[0.04] p-4">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Loader2 className="h-4 w-4 animate-spin" /></span>
-              <div>
-                <p className="text-sm font-semibold text-foreground">Predicting performance</p>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Scoring the draft with the saved model and testing supported one-input alternatives. Your draft remains unchanged.</p>
-              </div>
+          <div className="xl:col-span-3">
+            <Label id="predict-format-label">Format</Label>
+            <div role="group" aria-labelledby="predict-format-label" className="grid grid-cols-3 gap-1 rounded-xl border border-border bg-surface-2/60 p-1">
+              {FORMATS.map((format) => {
+                const active = contentFormat === format;
+                return (
+                  <button
+                    key={format}
+                    type="button"
+                    onClick={() => setContentFormat(format)}
+                    aria-pressed={active}
+                    disabled={submitting}
+                    className={cn(
+                      "min-h-11 rounded-lg px-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-surface hover:text-foreground"
+                    )}
+                  >
+                    <span className="truncate">{format}</span>
+                  </button>
+                );
+              })}
             </div>
-          )}
+          </div>
 
-          <Panel
-            title="Plan the draft"
-            subtitle="The caption is the central creative input. Live signals below mirror the exact text features used by the model."
-          >
+          <div className="xl:col-span-2">
+            <Label htmlFor="predict-date">Publish date</Label>
+            <DatePicker id="predict-date" aria-label="Target publish date" value={scheduledAt} onChange={setScheduledAt} />
+          </div>
+
+          <div className="xl:col-span-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="predict-time">Publish time <span className="font-normal text-muted-foreground">(optional)</span></Label>
+              <button
+                type="button"
+                onClick={() => setHasPostTime(!hasPostTime)}
+                disabled={submitting}
+                className="mb-2 min-h-8 rounded-md px-1 text-xs font-semibold text-primary underline-offset-4 hover:underline disabled:opacity-50"
+              >
+                {hasPostTime ? "Remove" : "Add time"}
+              </button>
+            </div>
+            {hasPostTime ? (
+              <TimePicker id="predict-time" aria-label="Target posting hour in WIB" value={scheduledAt} onChange={setScheduledAt} />
+            ) : (
+              <div id="predict-time" role="status" className="flex min-h-11 items-center rounded-lg border border-dashed border-border bg-surface-2/50 px-3 text-sm text-muted-foreground">
+                Not set · provisional result
+              </div>
+            )}
+          </div>
+        </div>
+      </Panel>
+
+      <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
+        <Panel title="Caption" subtitle="Write the caption you plan to publish." className="h-full">
             <div className="mb-2 flex items-end justify-between gap-3">
               <Label htmlFor="predict-caption">Instagram caption</Label>
               <CaptionMeter count={stats.charCount} />
@@ -204,10 +228,10 @@ export function ComposeView(props: {
                 id="predict-caption"
                 value={caption}
                 onChange={(event) => setCaption(event.target.value)}
-                rows={12}
+                rows={14}
                 maxLength={CAPTION_MAX + 100}
                 disabled={submitting}
-                className="min-h-[280px] w-full resize-y bg-transparent p-4 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-70 sm:text-sm"
+                className="min-h-[320px] w-full resize-y bg-transparent p-4 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-70 sm:text-sm"
                 placeholder="Write the caption you plan to publish…"
               />
               <div className="border-t border-border bg-surface-2/50 px-4 py-3">
@@ -215,93 +239,38 @@ export function ComposeView(props: {
               </div>
             </div>
             <CaptionLimitWarning count={stats.charCount} />
-          </Panel>
+        </Panel>
 
-          <AiToolsAccordion
-            visualConcept={visualConcept}
-            setVisualConcept={setVisualConcept}
-            caption={caption}
-            brandId={accountId}
-            format={contentFormat}
-            onReplaceCaption={setCaption}
-          />
-        </main>
-
-        {/* Predict: variables and action follow the creative plan on mobile. */}
-        <section className="order-3 space-y-5 xl:col-start-2 xl:row-start-2" aria-label="Prediction setup">
-          <Panel title="Prediction inputs" subtitle="Only these structured choices and the caption affect the model score.">
-            <div className="space-y-5">
-              <div>
-                <Label id="predict-format-label">Content format</Label>
-                <div role="group" aria-labelledby="predict-format-label" className="grid grid-cols-3 gap-1 rounded-xl border border-border bg-surface-2/60 p-1">
-                  {FORMATS.map((format) => {
-                    const active = contentFormat === format.id;
-                    return (
-                      <button
-                        key={format.id}
-                        type="button"
-                        onClick={() => setContentFormat(format.id)}
-                        aria-pressed={active}
-                        disabled={submitting}
-                        className={cn(
-                          "flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          active ? "bg-foreground text-background shadow-sm" : "text-muted-foreground hover:bg-surface hover:text-foreground"
-                        )}
-                      >
-                        <format.icon className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{format.id}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="predict-date">Target publish date</Label>
-                <DatePicker id="predict-date" aria-label="Target publish date" value={scheduledAt} onChange={setScheduledAt} />
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">The model uses weekday versus weekend; the exact date is kept for planning and version history.</p>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="predict-time">Target hour <span className="font-normal text-muted-foreground">(optional)</span></Label>
-                  <button
-                    type="button"
-                    onClick={() => setHasPostTime(!hasPostTime)}
-                    disabled={submitting}
-                    className="min-h-10 rounded-lg px-2 text-sm font-semibold text-foreground underline-offset-4 hover:underline disabled:opacity-50"
-                  >
-                    {hasPostTime ? "Remove hour" : "Add hour"}
-                  </button>
-                </div>
-                {hasPostTime ? (
-                  <TimePicker id="predict-time" aria-label="Target posting hour in WIB" value={scheduledAt} onChange={setScheduledAt} />
-                ) : (
-                  <div id="predict-time" role="status" className="flex min-h-11 items-center rounded-lg border border-dashed border-border bg-surface-2/50 px-3 text-sm text-muted-foreground">
-                    Not set · result will be provisional
-                  </div>
-                )}
-              </div>
-            </div>
-          </Panel>
-
-          <div className="rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-elevated)] xl:sticky xl:bottom-4">
-            <p className={cn("text-sm leading-relaxed", isFormValid && !tooLong ? "text-muted-foreground" : "font-medium text-warning")}>{readinessMessage}</p>
-            {isPredictionStale && <p className="mt-2 text-sm font-medium text-warning">Draft inputs changed after the previous prediction. Running again creates a new version.</p>}
-            <button
-              type="button"
-              onClick={onAnalyze}
-              disabled={submitting || tooLong || !isFormValid}
-              aria-busy={submitting}
-              className="mt-4 flex min-h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-foreground px-6 text-sm font-semibold text-background shadow-sm hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}
-              {submitting ? "Predicting…" : "Predict performance"}
-            </button>
-            <p className="mt-3 text-xs leading-relaxed text-muted-foreground">The result is decision support, not a guarantee of reach, sales, or engagement.</p>
-          </div>
-        </section>
+        <BrandPatterns brandId={accountId} brandName={account?.name} activeModelScope={account?.active_model_scope} compact />
       </div>
+
+      <AiToolsAccordion
+        visualConcept={visualConcept}
+        setVisualConcept={setVisualConcept}
+        caption={caption}
+        brandId={accountId}
+        format={contentFormat}
+        onReplaceCaption={setCaption}
+      />
+
+      <section aria-label="Run prediction" className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-soft)] sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="min-w-0">
+          <p className={cn("text-sm leading-relaxed", isFormValid && !tooLong ? "text-muted-foreground" : "font-medium text-warning")}>{readinessMessage}</p>
+          {submitting && <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-primary">Scoring the draft and supported alternatives…</p>}
+          {isPredictionStale && <p className="mt-1 text-xs font-medium text-warning">Inputs changed. Predict again to create a new version.</p>}
+          <p className="mt-1 text-xs text-muted-foreground">Decision support, not a guarantee of engagement or business results.</p>
+        </div>
+        <button
+          type="button"
+          onClick={onAnalyze}
+          disabled={submitting || tooLong || !isFormValid}
+          aria-busy={submitting}
+          className="flex min-h-12 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto sm:min-w-56"
+        >
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+          {submitting ? "Predicting…" : "Predict performance"}
+        </button>
+      </section>
     </motion.div>
   );
 }

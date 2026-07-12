@@ -1,6 +1,5 @@
 "use client";
 
-import { PenLine, ChartNoAxesCombined } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type PredictView = "compose" | "insights";
@@ -19,9 +18,9 @@ export function ViewSwitch({
   onChange: (v: PredictView) => void;
   insightsEnabled: boolean;
 }) {
-  const segments: { id: PredictView; label: string; icon: typeof PenLine; disabled?: boolean }[] = [
-    { id: "compose", label: "Draft", icon: PenLine },
-    { id: "insights", label: "Prediction result", icon: ChartNoAxesCombined, disabled: !insightsEnabled },
+  const segments: { id: PredictView; label: string; disabled?: boolean }[] = [
+    { id: "compose", label: "Draft" },
+    { id: "insights", label: "Result", disabled: !insightsEnabled },
   ];
   return (
     <div className="flex items-center gap-1 rounded-xl border border-border bg-surface p-1" aria-label="Prediction workspace view">
@@ -36,13 +35,12 @@ export function ViewSwitch({
             aria-pressed={active}
             aria-describedby={s.disabled ? "prediction-result-disabled" : undefined}
             className={cn(
-              "inline-flex min-h-10 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors",
+              "inline-flex min-h-10 items-center rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors",
               active
-                ? "bg-foreground text-background shadow-sm"
+                ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             )}
           >
-            <s.icon className="h-3.5 w-3.5" />
             {s.label}
           </button>
         );

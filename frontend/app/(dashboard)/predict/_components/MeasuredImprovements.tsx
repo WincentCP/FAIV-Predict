@@ -97,7 +97,7 @@ export function MeasuredImprovements({
                       aria-label={`${isApplied ? "Remove" : "Stage"} posting-hour change: ${c.change}`}
                       className={cn(
                         "relative inline-flex h-11 w-14 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent p-1 transition-colors duration-200 ease-in-out outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                        isApplied ? "bg-foreground" : "bg-surface-3"
+                        isApplied ? "bg-primary" : "bg-surface-3"
                       )}
                     >
                       <span

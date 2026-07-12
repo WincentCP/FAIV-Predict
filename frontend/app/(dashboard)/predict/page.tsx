@@ -452,15 +452,10 @@ export default function PredictPage() {
 
   return (
     <div className="relative mx-auto min-h-screen max-w-[1480px] px-4 py-6 md:px-8 md:py-8">
-      <div className="mb-8 flex flex-col justify-between gap-5 border-b border-border/60 pb-6 md:flex-row md:items-end">
+      <div className="mb-6 flex flex-col justify-between gap-4 border-b border-border/60 pb-5 md:flex-row md:items-end">
         <div>
-          <p className="mb-2 text-xs font-semibold text-primary">Predict workspace</p>
-          <h1 className="font-display text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
-            Make the next post a better decision
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground md:text-base">
-            Use verified brand history to plan a draft, predict its performance tier, and test supported improvements before publishing.
-          </p>
+          <h1 className="font-display text-3xl font-semibold tracking-tight text-foreground md:text-4xl">Predict content performance</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Evaluate a draft before publishing.</p>
         </div>
         <ViewSwitch view={view} onChange={setView} insightsEnabled={prediction !== null} />
       </div>

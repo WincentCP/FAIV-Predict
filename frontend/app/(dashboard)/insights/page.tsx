@@ -11,28 +11,19 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
 import { type Tier, type Brand } from "@/lib/types";
 import {
-  Activity,
   AlertTriangle,
-  ArrowRight,
-  BarChart3,
-  Bookmark,
   CalendarDays,
   CheckCircle2,
   Clock3,
   Database,
   ExternalLink,
   Film,
-  Heart,
   Image as ImageIcon,
   Info,
   LayoutGrid,
-  MessageCircle,
   RefreshCw,
-  Share2,
   TrendingDown,
   TrendingUp,
-  Users,
-  Eye,
   Link2,
   X,
 } from "lucide-react";
@@ -123,13 +114,13 @@ function mediaBadge(post: IgPost): { label: string; icon: typeof Film; modeled: 
 }
 
 const METRICS = [
-  { key: "reach", label: "Reach", icon: Users },
-  { key: "impressions", label: "Impressions", icon: Eye },
-  { key: "views", label: "Views", icon: Eye },
-  { key: "saved", label: "Saves", icon: Bookmark },
-  { key: "shares", label: "Shares", icon: Share2 },
-  { key: "accounts_engaged", label: "Accounts engaged", icon: Activity },
-  { key: "total_interactions", label: "Total interactions", icon: BarChart3 },
+  { key: "reach", label: "Reach" },
+  { key: "impressions", label: "Impressions" },
+  { key: "views", label: "Views" },
+  { key: "saved", label: "Saves" },
+  { key: "shares", label: "Shares" },
+  { key: "accounts_engaged", label: "Accounts engaged" },
+  { key: "total_interactions", label: "Total interactions" },
 ] as const;
 
 const METRIC_LABELS: Record<string, string> = Object.fromEntries(
@@ -291,9 +282,8 @@ export default function InsightsPage() {
   return (
     <div className="mx-auto min-h-dvh max-w-[1500px] space-y-7 px-4 py-6 md:px-8 md:py-8">
       <SectionHeader
-        eyebrow="Verified learning"
-        title="Published Results"
-        description="Connect planned decisions to the exact Instagram publication, then learn from mature outcomes without replacing creative judgment."
+        title="Results"
+        description="Review published performance and connect it to earlier predictions."
         actions={brandSelector}
       />
 
@@ -305,9 +295,8 @@ export default function InsightsPage() {
 
       {!brandsLoading && !brandsError && brands.length === 0 && (
         <EmptyState
-          icon={Database}
           title="No brand workspace yet"
-          description="Register a brand before reviewing published Instagram content. No example accounts or posts are inserted."
+          description="Add a brand before reviewing Instagram content."
           action={<Link href="/niches" className={primaryButtonClass}>Register a brand</Link>}
         />
       )}
@@ -355,9 +344,8 @@ export default function InsightsPage() {
 
           {posts?.length === 0 && !postsLoading && !postsError && (
             <EmptyState
-              icon={ImageIcon}
               title="No published posts returned"
-              description="This connected account has no accessible Instagram media yet. Nothing is substituted with demo content."
+              description="This account has no accessible Instagram media yet."
               action={brandId ? <button type="button" onClick={() => loadPosts(brandId)} className={secondaryButtonClass}><RefreshCw className="h-4 w-4" />Refresh</button> : undefined}
             />
           )}
@@ -367,7 +355,7 @@ export default function InsightsPage() {
               <aside aria-label="Published posts" className="overflow-hidden rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]">
                 <div className="border-b border-border px-5 py-4">
                   <h2 className="font-semibold">Choose a publication</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">Review one verified post at a time.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Select a post to review.</p>
                 </div>
                 <div className="grid auto-cols-[minmax(260px,82vw)] grid-flow-col gap-2 overflow-x-auto p-3 lg:max-h-[720px] lg:auto-cols-auto lg:grid-flow-row lg:overflow-y-auto">
                   {posts.map((post) => (
@@ -412,7 +400,7 @@ function PostListItem({ post, active, onSelect }: { post: IgPost; active: boolea
       className={cn(
         "flex w-full gap-3 rounded-xl border p-3 text-left outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary/40 active:translate-y-px",
         active
-          ? "border-foreground bg-foreground/[0.04] shadow-sm"
+          ? "border-primary bg-primary/[0.04] shadow-sm"
           : "border-transparent hover:border-border hover:bg-surface-2/60"
       )}
     >
@@ -566,10 +554,10 @@ function PostAnalysis({
             <p className="mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{post.caption || "No caption supplied."}</p>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {post.likes !== null ? <MetricCard label="Likes" value={post.likes} icon={Heart} /> : <UnavailableMetric label="Likes" message="Not returned by Meta." />}
-            {post.comments !== null ? <MetricCard label="Comments" value={post.comments} icon={MessageCircle} /> : <UnavailableMetric label="Comments" message="Not returned by Meta." />}
+            {post.likes !== null ? <MetricCard label="Likes" value={post.likes} /> : <UnavailableMetric label="Likes" message="Not returned by Meta." />}
+            {post.comments !== null ? <MetricCard label="Comments" value={post.comments} /> : <UnavailableMetric label="Comments" message="Not returned by Meta." />}
             {post.er !== null ? (
-              <MetricCard label="Synced ER" value={post.er} suffix="%" decimals={2} icon={Activity} />
+              <MetricCard label="Synced ER" value={post.er} suffix="%" decimals={2} />
             ) : (
               <UnavailableMetric label="Synced ER" message="Awaiting verified sync." />
             )}
@@ -594,8 +582,8 @@ function PostAnalysis({
                   <h3 id="prediction-trace-heading" className="font-semibold">Prediction trace</h3>
                   <p className="mt-1 text-sm text-muted-foreground">Connect the pre-publish decision to this exact media ID.</p>
                 </div>
-                <Link href={detail.prediction?.prediction_id ? `/history?prediction_id=${encodeURIComponent(detail.prediction.prediction_id)}` : "/history"} className="inline-flex min-h-10 items-center gap-1.5 self-start rounded-lg px-2 text-sm font-semibold text-foreground hover:bg-surface-2">
-                  Prediction ledger <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                <Link href={detail.prediction?.prediction_id ? `/history?prediction_id=${encodeURIComponent(detail.prediction.prediction_id)}` : "/history"} className="inline-flex min-h-10 items-center self-start rounded-lg px-2 text-sm font-semibold text-foreground hover:bg-surface-2">
+                  Prediction history
                 </Link>
               </div>
               {detail.prediction ? (
@@ -625,9 +613,8 @@ function PostAnalysis({
                         ref={linkButtonRef}
                         type="button"
                         onClick={() => setShowLinkDialog(true)}
-                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-semibold text-background"
+                        className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
                       >
-                        <Link2 className="h-4 w-4" aria-hidden="true" />
                         Verify publication
                       </button>
                     )}
@@ -648,7 +635,6 @@ function PostAnalysis({
 
             <details className="group rounded-2xl border border-border bg-surface">
               <summary className="flex min-h-14 cursor-pointer list-none items-center gap-2 px-5 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">
-                <BarChart3 className="h-5 w-5 text-primary" aria-hidden="true" />
                 Detailed metrics and methodology
                 <span className="ml-auto text-sm font-normal text-muted-foreground group-open:hidden">{availableMetrics.length} additional metrics</span>
               </summary>
@@ -658,7 +644,7 @@ function PostAnalysis({
                     <h3 id="verified-metrics-heading" className="font-semibold">Verified Meta metrics</h3>
                     <p className="mt-1 text-sm text-muted-foreground">Lifetime fields appear only when Meta supports them for this media type.</p>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      {availableMetrics.map((metric) => <MetricCard key={metric.key} label={metric.label} value={detail.metrics[metric.key]} icon={metric.icon} />)}
+                      {availableMetrics.map((metric) => <MetricCard key={metric.key} label={metric.label} value={detail.metrics[metric.key]} />)}
                     </div>
                   </section>
                 ) : (
@@ -680,13 +666,13 @@ function PostAnalysis({
               </div>
             </details>
 
-            <div className="flex flex-col gap-3 rounded-2xl bg-foreground p-5 text-background sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 rounded-2xl bg-primary p-5 text-primary-foreground sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="font-semibold">Use verified learning in the next decision</p>
-                <p className="mt-1 text-sm text-background/70">Treat this result as evidence, not a substitute for creative judgment.</p>
+                <p className="mt-1 text-sm text-primary-foreground/75">Use the result as guidance, not a creative verdict.</p>
               </div>
-              <Link href="/predict" className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-background px-4 text-sm font-semibold text-foreground">
-                Predict next draft <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              <Link href="/predict" className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-primary-foreground px-4 text-sm font-semibold text-primary">
+                Predict next draft
               </Link>
             </div>
           </>
@@ -803,7 +789,7 @@ function PublicationLinkDialog({ post, prediction, acknowledged, onAcknowledged,
         </div>
         <div className="flex flex-col-reverse gap-2 border-t border-border p-4 sm:flex-row sm:justify-end">
           <button type="button" onClick={onCancel} disabled={saving} className="min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2 disabled:opacity-50">Cancel</button>
-          <button type="button" onClick={onConfirm} disabled={!acknowledged || saving} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-semibold text-background disabled:opacity-50">{saving ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Link2 className="h-4 w-4" aria-hidden="true" />}{saving ? "Saving immutable link…" : "Create verified link"}</button>
+          <button type="button" onClick={onConfirm} disabled={!acknowledged || saving} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{saving && <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />}{saving ? "Saving link…" : "Create verified link"}</button>
         </div>
       </div>
     </div>
@@ -959,10 +945,10 @@ function SummaryMetric({ label, value, helper }: { label: string; value: string;
   );
 }
 
-function MetricCard({ label, value, suffix = "", decimals = 0, icon: Icon }: { label: string; value: number; suffix?: string; decimals?: number; icon: typeof Activity }) {
+function MetricCard({ label, value, suffix = "", decimals = 0 }: { label: string; value: number; suffix?: string; decimals?: number }) {
   return (
     <div className="rounded-xl border border-border bg-surface p-3">
-      <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground"><Icon aria-hidden="true" className="h-3.5 w-3.5" />{label}</div>
+      <div className="text-xs font-semibold text-muted-foreground">{label}</div>
       <p className="mt-2 font-mono text-lg font-semibold tabular-nums">{value.toLocaleString(undefined, { maximumFractionDigits: decimals, minimumFractionDigits: decimals })}{suffix}</p>
     </div>
   );
@@ -1019,11 +1005,10 @@ function ErrorState({ title, message, compact = false, onRetry }: { title: strin
   );
 }
 
-function EmptyState({ icon: Icon, title, description, action }: { icon: typeof Database; title: string; description: string; action?: React.ReactNode }) {
+function EmptyState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {
   return (
     <div className="rounded-2xl border border-border bg-surface p-8 text-center sm:p-12">
-      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-surface-2 text-muted-foreground"><Icon aria-hidden="true" className="h-5 w-5" /></div>
-      <h2 className="mt-4 font-display text-lg font-semibold">{title}</h2>
+      <h2 className="font-display text-lg font-semibold">{title}</h2>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">{description}</p>
       {action && <div className="mt-5 flex justify-center">{action}</div>}
     </div>
@@ -1052,7 +1037,7 @@ function DetailSkeleton() {
   );
 }
 
-const primaryButtonClass = "inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-foreground px-4 text-sm font-semibold text-background outline-none transition-transform duration-150 hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary/40 active:translate-y-px";
+const primaryButtonClass = "inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition-colors duration-150 hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary/40 active:translate-y-px";
 const secondaryButtonClass = "inline-flex min-h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-foreground outline-none transition-colors duration-150 hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-primary/40 active:translate-y-px";
 
 function errorMessage(error: unknown, fallback: string): string {

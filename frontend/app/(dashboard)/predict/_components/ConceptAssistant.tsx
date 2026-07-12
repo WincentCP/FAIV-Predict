@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, Check, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Label } from "./Panel";
 
@@ -114,12 +114,12 @@ export function ConceptAssistant({
           rows={5}
           maxLength={4000}
           className="w-full resize-y bg-transparent p-4 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground sm:text-sm"
-          placeholder={`Content pillar, visual style, opening hook, story flow, shots, CTA, campaign or seasonal context…\nExample: Educational Reel · close-up demo · two-second problem hook · before/after story · Ramadan campaign.`}
+          placeholder="Visual style, hook, story flow, shots, CTA, or campaign context…"
         />
       </div>
       <div className="mt-2 flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
         <p id="visual-concept-help" className="max-w-xl text-sm leading-relaxed text-muted-foreground">
-          This user-supplied context can guide the optional AI review. It does not change the Random Forest score and is not treated as a measured audience preference.
+          Guides the AI review; it does not change the prediction score.
         </p>
         <button
           type="button"
@@ -140,10 +140,7 @@ export function ConceptAssistant({
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Reviewing…
             </>
           ) : (
-            <>
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
-              {conceptState === "done" ? "Review again" : "Review direction"}
-            </>
+            conceptState === "done" ? "Review again" : "Review direction"
           )}
         </button>
       </div>
@@ -157,9 +154,7 @@ export function ConceptAssistant({
       {conceptState === "done" && conceptAnalysis && (
         <div className={cn("mt-4 space-y-3 rounded-xl border border-border bg-surface-2/50 p-4", isStale && "opacity-75")}>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-primary">
-              <Sparkles className="h-3 w-3" /> AI Creative Review
-            </div>
+            <div className="text-xs font-bold uppercase tracking-wider text-primary">AI creative review</div>
             <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-bold text-muted-foreground">
               {historicalContextUsed ? "Brand-history context used" : "Brief-only context"}
             </span>
@@ -171,7 +166,7 @@ export function ConceptAssistant({
             </div>
           )}
           <p className="text-sm leading-relaxed text-muted-foreground">
-            Creative guidance is a planning hypothesis, not part of the ML score. It does not use audience demographics or a live external trend feed.
+            Planning guidance only; audience demographics and live trends are not measured.
           </p>
           <div className="flex flex-wrap gap-1.5">
             <ConceptChip label={conceptAnalysis.content_type} highlight />
@@ -196,14 +191,10 @@ export function ConceptAssistant({
           {(conceptAnalysis.strengths.length > 0 || conceptAnalysis.suggestions.length > 0) && (
             <ul className="space-y-1">
               {conceptAnalysis.strengths.map((strength, index) => (
-                <li key={`s${index}`} className="flex items-start gap-1.5 text-sm leading-relaxed text-muted-foreground">
-                  <Check className="mt-px h-3 w-3 shrink-0 text-emerald-500" /> {strength}
-                </li>
+                <li key={`s${index}`} className="pl-4 text-sm leading-relaxed text-muted-foreground before:-ml-4 before:mr-2 before:text-primary before:content-['•']">{strength}</li>
               ))}
               {conceptAnalysis.suggestions.map((suggestion, index) => (
-                <li key={`i${index}`} className="flex items-start gap-1.5 text-sm leading-relaxed text-muted-foreground">
-                  <ArrowRight className="mt-px h-3 w-3 shrink-0 text-primary" /> {suggestion}
-                </li>
+                <li key={`i${index}`} className="pl-4 text-sm leading-relaxed text-muted-foreground before:-ml-4 before:mr-2 before:text-primary before:content-['•']">{suggestion}</li>
               ))}
             </ul>
           )}

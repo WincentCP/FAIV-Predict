@@ -4,16 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
-  ArrowRight,
-  BarChart3,
-  Building2,
-  CalendarDays,
-  CheckCircle2,
-  ChevronRight,
-  Clock3,
-  Instagram,
   RefreshCw,
-  Sparkles,
 } from "lucide-react";
 import { TierBadge } from "@/components/TierBadge";
 import { fetchWithRetry } from "@/lib/fetch-retry";
@@ -190,8 +181,6 @@ export default function DashboardPage() {
     detail: string;
     href: string;
     action: string;
-    icon: typeof Sparkles;
-    tone: DecisionTone;
   }> = [
     {
       label: "Ready to evaluate",
@@ -199,8 +188,6 @@ export default function DashboardPage() {
       detail: needsPrediction === 1 ? "planned post has no prediction" : "planned posts have no prediction",
       href: "/calendar",
       action: "Review plan",
-      icon: Sparkles,
-      tone: "primary",
     },
     {
       label: "Needs re-evaluation",
@@ -208,8 +195,6 @@ export default function DashboardPage() {
       detail: stalePlans === 1 ? "prediction changed after its inputs" : "predictions changed after their inputs",
       href: "/calendar",
       action: "Review changes",
-      icon: RefreshCw,
-      tone: "warning",
     },
     {
       label: "Awaiting learning",
@@ -217,8 +202,6 @@ export default function DashboardPage() {
       detail: awaitingOutcome === 1 ? "linked post is waiting for an outcome" : "linked posts are waiting for outcomes",
       href: "/insights",
       action: "Open insights",
-      icon: Clock3,
-      tone: "neutral",
     },
     {
       label: "Observed outcomes",
@@ -226,8 +209,6 @@ export default function DashboardPage() {
       detail: "mature results available for comparison",
       href: "/history",
       action: "View evidence",
-      icon: CheckCircle2,
-      tone: "success",
     },
   ];
 
@@ -236,33 +217,25 @@ export default function DashboardPage() {
       <header className="overflow-hidden rounded-[1.4rem] border border-border bg-surface shadow-[var(--shadow-soft)]">
         <div className="grid gap-7 p-6 md:p-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 text-xs font-bold text-primary">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10">
-                <Sparkles className="h-3.5 w-3.5" />
-              </span>
-              Content decision workspace
-            </div>
-            <h1 className="mt-4 font-display text-3xl font-semibold tracking-[-0.035em] text-foreground md:text-4xl">
+            <h1 className="font-display text-3xl font-semibold tracking-[-0.035em] text-foreground md:text-4xl">
               Decide what to publish next.
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground md:text-[15px]">
-              Use verified brand history to evaluate a real content idea before publishing, then learn from the result without replacing creative judgment.
+              Plan content, evaluate drafts, and learn from published results.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
             <Link
               href="/calendar"
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border-strong bg-surface px-4 text-sm font-semibold text-foreground hover:bg-surface-2"
+              className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border-strong bg-surface px-4 text-sm font-semibold text-foreground hover:bg-surface-2"
             >
-              <CalendarDays className="h-4 w-4" />
               Plan content
             </Link>
             <Link
               href="/predict"
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-5 text-sm font-bold text-background shadow-[var(--shadow-soft)] hover:opacity-90"
+              className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-5 text-sm font-bold text-primary-foreground shadow-[var(--shadow-soft)] hover:bg-primary/90"
             >
               Evaluate a draft
-              <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
         </div>
@@ -271,10 +244,7 @@ export default function DashboardPage() {
           <span>{connectionHealthAvailable ? `${connectedCount} verified Instagram connection${connectedCount === 1 ? "" : "s"}` : "Instagram connection status unavailable"}</span>
           <span>{summary.totalPredictions} active prediction{summary.totalPredictions === 1 ? "" : "s"}</span>
           {summary.provisionalCount > 0 && (
-            <span className="inline-flex items-center gap-1.5 text-warning-foreground">
-              <Clock3 className="h-3.5 w-3.5" />
-              {summary.provisionalCount} provisional without a confirmed posting time
-            </span>
+            <span className="text-warning-foreground">{summary.provisionalCount} provisional without a confirmed posting time</span>
           )}
         </div>
       </header>
@@ -296,18 +266,12 @@ export default function DashboardPage() {
 
       {brands.length === 0 && !loading && (
         <section className="flex flex-col gap-4 rounded-2xl border border-primary/25 bg-primary/[0.045] p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-              <Building2 className="h-5 w-5" />
-            </span>
-            <div>
+          <div>
               <h2 className="text-sm font-bold">Start with a brand workspace</h2>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">Register the brand context, verify its Instagram connection, and confirm an available model before evaluating content.</p>
-            </div>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Add the brand, connect Instagram, and confirm model readiness.</p>
           </div>
-          <Link href="/niches" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-xs font-bold text-background hover:opacity-90">
+          <Link href="/niches" className="inline-flex min-h-10 items-center justify-center rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground hover:bg-primary/90">
             Set up a brand
-            <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </section>
       )}
@@ -316,10 +280,10 @@ export default function DashboardPage() {
         <div className="mb-3 flex items-end justify-between gap-4">
           <div>
             <h2 id="attention-title" className="font-display text-xl font-semibold tracking-tight">What needs attention</h2>
-            <p className="mt-1 text-sm text-muted-foreground">A practical queue for moving planned content toward a verified learning outcome.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Your next content decisions.</p>
           </div>
-          <Link href="/calendar" className="hidden items-center gap-1 text-xs font-bold text-primary hover:underline sm:inline-flex">
-            Open Content Plan <ChevronRight className="h-3.5 w-3.5" />
+          <Link href="/calendar" className="hidden items-center text-xs font-bold text-primary hover:underline sm:inline-flex">
+            Open plan
           </Link>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -336,15 +300,14 @@ export default function DashboardPage() {
               <h2 id="upcoming-title" className="font-display text-lg font-semibold">Upcoming content decisions</h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">The next planned posts, prioritized by schedule.</p>
             </div>
-            <Link href="/calendar" className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-bold text-primary hover:bg-primary/[0.06]">
-              View plan <ChevronRight className="h-3.5 w-3.5" />
+            <Link href="/calendar" className="inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-bold text-primary hover:bg-primary/[0.06]">
+              View plan
             </Link>
           </div>
           {loading ? (
             <LoadingRows />
           ) : upcomingPlans.length === 0 ? (
             <EmptyPanel
-              icon={CalendarDays}
               title="Nothing planned yet"
               description="Add a content idea so its creative direction can be evaluated before publishing."
               href="/calendar"
@@ -381,10 +344,9 @@ export default function DashboardPage() {
                       </div>
                       <Link
                         href={decision.href(entry.id)}
-                        className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3 text-xs font-bold text-background hover:opacity-90"
+                        className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90"
                       >
                         {decision.action}
-                        <ArrowRight className="h-3.5 w-3.5" />
                       </Link>
                     </div>
                   </li>
@@ -400,15 +362,14 @@ export default function DashboardPage() {
               <h2 id="recent-title" className="font-display text-lg font-semibold">Recent decisions</h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">Latest classified drafts in this workspace.</p>
             </div>
-            <Link href="/history" className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-bold text-primary hover:bg-primary/[0.06]">
-              History <ChevronRight className="h-3.5 w-3.5" />
+            <Link href="/history" className="inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-bold text-primary hover:bg-primary/[0.06]">
+              History
             </Link>
           </div>
           {loading ? (
             <LoadingRows count={3} />
           ) : summary.recent.length === 0 ? (
             <EmptyPanel
-              icon={BarChart3}
               title="No predictions yet"
               description="Evaluate a draft to create the first versioned decision record."
               href="/predict"
@@ -444,8 +405,8 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-muted-foreground">
             {connectionIssues > 0 && <span className="text-warning-foreground">{connectionIssues} connection{connectionIssues === 1 ? "" : "s"} need attention</span>}
-            <Link href="/niches" className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 font-bold text-primary hover:bg-primary/[0.06]">
-              Manage brands <ChevronRight className="h-3.5 w-3.5" />
+            <Link href="/niches" className="inline-flex min-h-9 items-center rounded-lg px-2 font-bold text-primary hover:bg-primary/[0.06]">
+              Manage brands
             </Link>
           </div>
         </div>
@@ -461,13 +422,10 @@ export default function DashboardPage() {
               const modelLabel = brand.active_model_scope === "personal"
                 ? "Personal model"
                 : brand.active_model_scope === "cohort"
-                  ? "Cohort model"
+                  ? "Niche model"
                   : "No serving model";
               return (
                 <li key={brand.id} className="flex items-center gap-3 border-border/70 p-5 sm:border-r sm:[&:nth-child(2n)]:border-r-0 lg:[&:nth-child(2n)]:border-r lg:[&:nth-child(3n)]:border-r-0">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted-foreground">
-                    <Instagram className="h-4 w-4" />
-                  </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-bold text-foreground">{brand.name}</p>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">{brand.niche} · {modelLabel}</p>
@@ -495,8 +453,6 @@ function DecisionCard({
   detail,
   href,
   action,
-  icon: Icon,
-  tone,
   loading,
 }: {
   label: string;
@@ -504,29 +460,14 @@ function DecisionCard({
   detail: string;
   href: string;
   action: string;
-  icon: typeof Sparkles;
-  tone: DecisionTone;
   loading: boolean;
 }) {
-  const tones: Record<DecisionTone, string> = {
-    primary: "bg-primary/10 text-primary",
-    warning: "bg-warning/15 text-warning-foreground",
-    success: "bg-success/15 text-success-foreground",
-    neutral: "bg-surface-2 text-muted-foreground",
-  };
-
   return (
     <Link href={href} className="group rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-soft)] hover:-translate-y-px hover:border-primary/20 hover:shadow-[var(--shadow-elevated)]">
-      <div className="flex items-start justify-between gap-3">
-        <span className={cn("grid h-9 w-9 place-items-center rounded-xl", tones[tone])}>
-          <Icon className="h-4 w-4" />
-        </span>
-        <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
-      </div>
       {loading ? (
-        <div className="mt-4 h-8 w-14 motion-safe:animate-pulse rounded-lg bg-surface-2" aria-label={`Loading ${label}`} />
+        <div className="h-8 w-14 motion-safe:animate-pulse rounded-lg bg-surface-2" aria-label={`Loading ${label}`} />
       ) : (
-        <div className="mt-4 text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
+        <div className="text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
       )}
       <h3 className="mt-1 text-sm font-bold text-foreground">{label}</h3>
       <p className="mt-1 min-h-8 text-xs leading-4 text-muted-foreground">{detail}</p>
@@ -562,13 +503,11 @@ function LoadingRows({ count = 4 }: { count?: number }) {
 }
 
 function EmptyPanel({
-  icon: Icon,
   title,
   description,
   href,
   action,
 }: {
-  icon: typeof CalendarDays;
   title: string;
   description: string;
   href: string;
@@ -576,11 +515,10 @@ function EmptyPanel({
 }) {
   return (
     <div className="flex flex-col items-center px-6 py-10 text-center">
-      <span className="grid h-11 w-11 place-items-center rounded-xl bg-surface-2 text-muted-foreground"><Icon className="h-5 w-5" /></span>
-      <h3 className="mt-3 text-sm font-bold">{title}</h3>
+      <h3 className="text-sm font-bold">{title}</h3>
       <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">{description}</p>
-      <Link href={href} className="mt-4 inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-bold hover:bg-surface-2">
-        {action} <ArrowRight className="h-3.5 w-3.5" />
+      <Link href={href} className="mt-4 inline-flex min-h-10 items-center rounded-lg border border-border bg-surface px-3 text-xs font-bold hover:bg-surface-2">
+        {action}
       </Link>
     </div>
   );
@@ -606,7 +544,7 @@ function getPlanDecision(entry: PlanEntry) {
   if (entry.publication?.observed_er != null) {
     return {
       label: "Outcome observed",
-      action: "View evidence",
+      action: "View result",
       tone: "success" as const,
       href: () => "/history",
     };
@@ -614,7 +552,7 @@ function getPlanDecision(entry: PlanEntry) {
   if (entry.publication) {
     return {
       label: entry.publication.outcome_status === "pending_maturity" ? "Publication maturing" : "Awaiting outcome",
-      action: "View evidence",
+      action: "View result",
       tone: "neutral" as const,
       href: () => "/history",
     };

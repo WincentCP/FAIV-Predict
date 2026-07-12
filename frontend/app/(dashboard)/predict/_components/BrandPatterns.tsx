@@ -4,11 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  BarChart3,
   ChevronDown,
-  Clock3,
-  Database,
-  ExternalLink,
   RefreshCw,
 } from "lucide-react";
 import type {
@@ -49,14 +45,14 @@ function signedPoints(value: number): string {
 }
 
 function evidenceLabel(level: BrandPatternEvidenceLevel): string {
-  if (level === "directional") return "Directional";
-  if (level === "exploratory") return "Exploratory";
+  if (level === "directional") return "Stronger signal";
+  if (level === "exploratory") return "Early signal";
   return "Limited";
 }
 
 function PatternRow({ title, group }: { title: string; group: BrandPatternGroup }) {
   return (
-    <article className="rounded-xl border border-border bg-surface p-3.5">
+    <article className="rounded-xl bg-surface-2/70 p-3.5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold text-muted-foreground">{title}</p>
@@ -132,24 +128,16 @@ export function BrandPatterns({
     );
   }, [data]);
 
-  const highlights = data?.highlights.slice(0, compact ? 3 : 4) ?? [];
+  const highlights = data?.highlights.slice(0, compact ? 2 : 4) ?? [];
 
   return (
-    <section aria-labelledby="brand-patterns-title" className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
-      <div className="flex items-start gap-3 border-b border-border px-4 py-4">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-foreground text-background">
-          <BarChart3 className="h-4 w-4" />
-        </span>
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-primary">Brand Performance Snapshot</p>
-          <h2 id="brand-patterns-title" className="text-sm font-semibold text-foreground">What has worked for this brand</h2>
-          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-            Descriptive patterns from mature, verified posts—not causal audience preferences.
-          </p>
-        </div>
+    <section aria-labelledby="brand-patterns-title" className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
+      <div className="border-b border-border px-5 py-5 sm:px-6">
+        <h2 id="brand-patterns-title" className="text-base font-semibold text-foreground">Brand Performance Snapshot</h2>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Patterns from verified posts—not causal preferences.</p>
       </div>
 
-      <div className="space-y-4 p-4">
+      <div className="flex flex-1 flex-col space-y-4 p-5 sm:p-6">
         {!brandId && <p className="text-sm text-muted-foreground">Select a brand to see its historical signals.</p>}
 
         {loading && (
@@ -173,20 +161,15 @@ export function BrandPatterns({
 
         {data && !loading && (
           <>
-            <div className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-              <div className="rounded-xl bg-surface-2/70 p-3">
-                <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground"><Database className="h-3.5 w-3.5" /> Evidence</div>
-                <p className="mt-1.5 font-semibold text-foreground">{data.evidence.eligible_posts} eligible posts</p>
-              </div>
-              <div className="rounded-xl bg-surface-2/70 p-3">
-                <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground"><Clock3 className="h-3.5 w-3.5" /> Freshness</div>
-                <p className="mt-1.5 font-semibold capitalize text-foreground">{data.freshness.status}</p>
-              </div>
-            </div>
+            <p className="text-xs font-semibold text-muted-foreground">
+              <span className="text-foreground">{data.evidence.eligible_posts} eligible posts</span>
+              <span className="mx-2" aria-hidden>·</span>
+              <span className="capitalize">{data.freshness.status} data</span>
+            </p>
 
             {activeModelScope === "cohort" && (
               <p className="rounded-xl border border-border bg-surface-2/40 p-3 text-sm leading-relaxed text-muted-foreground">
-                These signals use {brandName || data.brand.name}&apos;s history. The score uses the shared {data.brand.niche} model; the evidence scopes are different.
+                These patterns use {brandName || data.brand.name}&apos;s history. The score uses the shared {data.brand.niche} niche model.
               </p>
             )}
 
@@ -195,11 +178,11 @@ export function BrandPatterns({
                 Not enough comparable history yet. A supported highlight needs {data.evidence.minimum_highlight_total} eligible posts overall and {data.evidence.minimum_group_samples} in each compared group.
               </p>
             ) : (
-              <div className="space-y-2">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {highlights.map((item) => (
                   <PatternRow key={`${item.dimension}-${item.key}`} title={DIMENSION_LABELS[item.dimension] || item.dimension} group={item} />
                 ))}
-                <p className="text-xs leading-relaxed text-muted-foreground">
+                <p className="text-xs leading-relaxed text-muted-foreground sm:col-span-2">
                   Higher historical medians are planning clues, not proof that a creative change will cause better engagement.
                 </p>
               </div>
@@ -207,7 +190,7 @@ export function BrandPatterns({
 
             <details className="group rounded-xl border border-border bg-surface-2/30">
               <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3.5 py-3 text-sm font-semibold text-foreground marker:hidden">
-                Evidence details and limitations
+                Data and limits
                 <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
               </summary>
               <div className="space-y-4 border-t border-border p-3.5">
@@ -245,8 +228,8 @@ export function BrandPatterns({
                   </p>
                 </div>
 
-                <Link href="/insights" className="inline-flex min-h-10 items-center gap-1.5 text-sm font-semibold text-foreground underline-offset-4 hover:underline">
-                  Open detailed post insights <ExternalLink className="h-3.5 w-3.5" />
+                <Link href="/insights" className="inline-flex min-h-10 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline">
+                  View published results
                 </Link>
               </div>
             </details>

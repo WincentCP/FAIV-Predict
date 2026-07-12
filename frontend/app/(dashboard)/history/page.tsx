@@ -4,17 +4,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  ArrowRight,
   CalendarClock,
   CheckCircle2,
   ChevronDown,
-  FileClock,
-  Filter,
-  History as HistoryIcon,
   Link2,
   RefreshCw,
   Search,
-  Sparkles,
 } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
@@ -82,12 +77,12 @@ export default function HistoryPage() {
       const response = await fetchWithRetry("/api/history");
       const payload = await response.json().catch(() => null);
       if (!response.ok || !Array.isArray(payload)) {
-        throw new Error("The prediction ledger could not be loaded.");
+        throw new Error("Prediction history could not be loaded.");
       }
       setHistory(payload);
     } catch (error: unknown) {
       setHistory([]);
-      setLoadError(error instanceof Error ? error.message : "The prediction ledger could not be loaded.");
+      setLoadError(error instanceof Error ? error.message : "Prediction history could not be loaded.");
     } finally {
       setIsLoading(false);
     }
@@ -161,12 +156,10 @@ export default function HistoryPage() {
   return (
     <div className="mx-auto min-h-dvh max-w-[1400px] space-y-7 px-4 py-6 md:px-8 md:py-8">
       <SectionHeader
-        eyebrow="Decision record"
-        title="Prediction Ledger"
-        description="Trace each immutable prediction, its successor versions, and the mature Instagram outcome linked to the exact published media."
+        title="History"
+        description="Review prediction versions and published outcomes."
         actions={
-          <Link href="/predict" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-semibold text-background outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary/40">
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
+          <Link href="/predict" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary/40">
             New prediction
           </Link>
         }
@@ -180,11 +173,11 @@ export default function HistoryPage() {
         </div>
       )}
 
-      <section aria-label="Prediction ledger filters" className="rounded-2xl border border-border bg-surface p-3 shadow-[var(--shadow-soft)]">
+      <section aria-label="Prediction history filters" className="rounded-2xl border border-border bg-surface p-3 shadow-[var(--shadow-soft)]">
         <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_180px_auto]">
           <label className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-background px-3 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15">
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <span className="sr-only">Search prediction ledger</span>
+            <span className="sr-only">Search prediction history</span>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -215,7 +208,7 @@ export default function HistoryPage() {
                 onClick={() => setScope(value)}
                 className={cn(
                   "min-h-9 rounded-lg px-3 text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                  scope === value ? "bg-foreground text-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  scope === value ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 {value === "latest" ? "Latest versions" : "All versions"}
@@ -251,8 +244,7 @@ export default function HistoryPage() {
 
       <section aria-labelledby="ledger-results-title" className="space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-primary" aria-hidden="true" />
+          <div>
             <h2 id="ledger-results-title" className="text-sm font-semibold">
               {isLoading ? "Loading decision records" : `${filtered.length} record${filtered.length === 1 ? "" : "s"}`}
             </h2>
@@ -356,15 +348,14 @@ function PredictionRecord({
                   type="button"
                   onClick={onRecalculate}
                   disabled={reEvaluating || anotherRecalculationRunning}
-                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-foreground px-3 text-sm font-semibold text-background disabled:opacity-50"
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
                   <RefreshCw className={cn("h-4 w-4", reEvaluating && "animate-spin")} aria-hidden="true" />
                   {reEvaluating ? "Creating successor…" : "Recalculate"}
                 </button>
               ) : item.status !== "superseded" ? (
-                <Link href={publicationHref} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-foreground px-3 text-sm font-semibold text-background">
+                <Link href={publicationHref} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
                   {item.publication_linked ? "View result" : "Find publication"}
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </Link>
               ) : null}
             </div>
@@ -373,8 +364,7 @@ function PredictionRecord({
 
         <details className="group border-t border-border">
           <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-5 text-sm font-semibold text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 md:px-6">
-            <HistoryIcon className="h-4 w-4" aria-hidden="true" />
-            Audit details
+            Technical details
             <ChevronDown className="ml-auto h-4 w-4 transition-transform group-open:rotate-180" aria-hidden="true" />
           </summary>
           <dl className="grid gap-4 border-t border-border bg-surface-2/30 px-5 py-5 text-sm sm:grid-cols-2 lg:grid-cols-4 md:px-6">
@@ -465,7 +455,7 @@ function AuditField({ term, value, mono = false }: { term: string; value: string
 
 function LedgerSkeleton() {
   return (
-    <div role="status" aria-label="Loading prediction ledger" className="space-y-3">
+    <div role="status" aria-label="Loading prediction history" className="space-y-3">
       {[0, 1, 2].map((row) => <div key={row} className="h-48 motion-safe:animate-pulse rounded-3xl bg-surface-2" />)}
       <span className="sr-only">Loading prediction records</span>
     </div>
@@ -475,16 +465,15 @@ function LedgerSkeleton() {
 function EmptyLedger({ hasHistory, onClear }: { hasHistory: boolean; onClear: () => void }) {
   return (
     <div className="rounded-3xl border border-dashed border-border bg-surface p-10 text-center">
-      <FileClock className="mx-auto h-7 w-7 text-muted-foreground" aria-hidden="true" />
-      <h3 className="mt-4 text-lg font-semibold">{hasHistory ? "No records match these filters" : "No predictions recorded yet"}</h3>
+      <h3 className="text-lg font-semibold">{hasHistory ? "No records match these filters" : "No predictions recorded yet"}</h3>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
         {hasHistory ? "Adjust the filters to return to your decision history." : "Analyze a real content draft to create the first immutable prediction record."}
       </p>
       {hasHistory ? (
         <button type="button" onClick={onClear} className="mt-5 min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2">Clear filters</button>
       ) : (
-        <Link href="/predict" className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-foreground px-4 text-sm font-semibold text-background">
-          Create prediction <ArrowRight className="h-4 w-4" aria-hidden="true" />
+        <Link href="/predict" className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+          Create prediction
         </Link>
       )}
     </div>

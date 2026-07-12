@@ -5,17 +5,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  BarChart3,
-  Building2,
-  CalendarRange,
   ChevronDown,
-  ClipboardList,
-  History,
-  LayoutDashboard,
   LogOut,
   Menu,
   Moon,
-  Sparkles,
   Sun,
   X,
 } from "lucide-react";
@@ -25,37 +18,37 @@ import { cn } from "@/lib/utils";
 
 const NAV_GROUPS = [
   {
-    label: "Decide",
+    label: "Workspace",
     items: [
-      { to: "/dashboard", label: "Overview", icon: LayoutDashboard },
-      { to: "/predict", label: "Predict", icon: Sparkles, core: true },
-      { to: "/calendar", label: "Content plan", icon: CalendarRange },
+      { to: "/dashboard", label: "Overview" },
+      { to: "/predict", label: "Predict" },
+      { to: "/calendar", label: "Plan" },
     ],
   },
   {
-    label: "Learn",
+    label: "Review",
     items: [
-      { to: "/insights", label: "Published results", icon: BarChart3 },
-      { to: "/history", label: "Prediction ledger", icon: History },
+      { to: "/insights", label: "Results" },
+      { to: "/history", label: "History" },
     ],
   },
   {
     label: "Manage",
     items: [
-      { to: "/niches", label: "Brands", icon: Building2 },
-      { to: "/model-health", label: "Research evidence", icon: ClipboardList },
+      { to: "/niches", label: "Brands" },
+      { to: "/model-health", label: "Models" },
     ],
   },
 ] as const;
 
 const PAGE_CONTEXT: Record<string, { title: string; description: string }> = {
-  "/dashboard": { title: "Overview", description: "Your content decision workspace" },
-  "/predict": { title: "Predict", description: "Evaluate a draft before publishing" },
-  "/calendar": { title: "Content plan", description: "Plan, evaluate, and learn" },
-  "/insights": { title: "Published results", description: "Learn from verified outcomes" },
-  "/history": { title: "Prediction ledger", description: "Review every decision version" },
-  "/niches": { title: "Brands", description: "Connections, data, and readiness" },
-  "/model-health": { title: "Research evidence", description: "Scientific evaluation records" },
+  "/dashboard": { title: "Overview", description: "Priorities at a glance" },
+  "/predict": { title: "Predict", description: "Evaluate before publishing" },
+  "/calendar": { title: "Plan", description: "Plan upcoming content" },
+  "/insights": { title: "Results", description: "Review published performance" },
+  "/history": { title: "History", description: "Track prediction versions" },
+  "/niches": { title: "Brands", description: "Manage brand data" },
+  "/model-health": { title: "Models", description: "Review model quality" },
 };
 
 const THEME_STORAGE_KEY = "faiv-theme";
@@ -67,13 +60,10 @@ function isActive(pathname: string, to: string) {
 
 function BrandLockup({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="flex min-w-0 items-center gap-3">
-      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[11px] bg-foreground text-sm font-bold text-background shadow-sm">
-        F
-      </div>
+    <div className="min-w-0 leading-tight">
+      <div className="font-display text-sm font-bold tracking-[-0.025em] text-foreground">FAIV Predict</div>
       {!compact && (
-        <div className="min-w-0 leading-tight">
-          <div className="font-display text-sm font-bold tracking-[-0.02em]">FAIV Predict</div>
+        <div>
           <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Content intelligence</div>
         </div>
       )}
@@ -90,7 +80,6 @@ function Navigation({ pathname, onNavigate }: { pathname: string; onNavigate?: (
           <ul className="space-y-1">
             {group.items.map((item) => {
               const active = isActive(pathname, item.to);
-              const Icon = item.icon;
               return (
                 <li key={item.to}>
                   <Link
@@ -98,23 +87,13 @@ function Navigation({ pathname, onNavigate }: { pathname: string; onNavigate?: (
                     onClick={onNavigate}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "group flex min-h-11 items-center gap-3 rounded-xl px-3 text-[13px] font-semibold transition-[background-color,color,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
+                      "group flex min-h-11 items-center rounded-xl px-3 text-[13px] font-semibold transition-[background-color,color,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
                       active
                         ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
                         : "text-sidebar-foreground/72 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                     )}
                   >
-                    <Icon
-                      aria-hidden="true"
-                      className={cn(
-                        "h-[17px] w-[17px] shrink-0",
-                        active ? "text-sidebar-primary-foreground" : "text-muted-foreground group-hover:text-sidebar-foreground",
-                      )}
-                    />
                     <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                    {"core" in item && item.core && !active && (
-                      <span className="text-[10px] font-semibold text-primary">Core</span>
-                    )}
                   </Link>
                 </li>
               );
@@ -265,7 +244,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-[100dvh] bg-background text-foreground">
       <a
         href="#main-content"
-        className="sr-only fixed left-3 top-3 z-[100] rounded-lg bg-foreground px-4 py-2 text-sm font-semibold text-background focus:not-sr-only"
+        className="sr-only fixed left-3 top-3 z-[100] rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground focus:not-sr-only"
       >
         Skip to main content
       </a>
@@ -340,7 +319,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-controls="sidebar-account-panel"
               className="flex min-h-12 w-full items-center gap-3 rounded-xl px-2 text-left hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-foreground text-xs font-bold text-background">{avatarInitial}</div>
+              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-primary text-xs font-bold text-primary-foreground">{avatarInitial}</div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-semibold text-sidebar-foreground">{displayName}</div>
                 <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{userEmail || "Signed in"}</div>
@@ -375,11 +354,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {pathname !== "/predict" && (
                 <Link
                   href="/predict"
-                  className={cn(buttonVariants({ size: "sm" }), "h-10 px-3 sm:px-4")}
+                  className={cn(buttonVariants({ size: "sm" }), "hidden h-10 px-4 sm:inline-flex")}
                   aria-label="Start a new content prediction"
                 >
-                  <Sparkles aria-hidden="true" className="h-4 w-4" />
-                  <span className="hidden sm:inline">New prediction</span>
+                  <span>New prediction</span>
                 </Link>
               )}
               <button
@@ -396,7 +374,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   onClick={() => setTopbarUserOpen((open) => !open)}
                   aria-expanded={topbarUserOpen}
                   aria-controls="mobile-account-panel"
-                  className="grid h-10 w-10 place-items-center rounded-[10px] bg-foreground text-xs font-bold text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  className="grid h-10 w-10 place-items-center rounded-[10px] bg-primary text-xs font-bold text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
                   <span aria-hidden="true">{avatarInitial}</span>
                   <span className="sr-only">Open account menu</span>

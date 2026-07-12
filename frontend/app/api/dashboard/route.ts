@@ -87,7 +87,7 @@ export async function GET() {
           accuracy: Number(model.accuracy) * 100,
           scope: model.model_type === "account"
             ? `Personal: ${model.brands?.name || "Owned brand"}`
-            : `Cohort: ${model.niche || "Unknown"}`,
+            : `Niche: ${model.niche || "Unknown"}`,
         };
       });
     const modelScopes = new Set(

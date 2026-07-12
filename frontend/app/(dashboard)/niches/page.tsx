@@ -4,19 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  ArrowRight,
-  Building2,
-  Check,
   ChevronDown,
-  CircleHelp,
-  Database,
-  Instagram,
   Loader2,
-  Plus,
   RefreshCw,
-  ShieldCheck,
-  Sparkles,
-  Users,
   X,
 } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -112,16 +102,14 @@ export default function NichesPage() {
   return (
     <div className="mx-auto min-h-dvh max-w-[1400px] space-y-7 px-4 py-6 md:px-8 md:py-8">
       <SectionHeader
-        eyebrow="Brand setup"
         title="Brands"
-        description="Set up each brand, verify its Instagram data source, and understand which model can support the next content decision."
+        description="Manage Instagram connections, data readiness, and active models."
         actions={
           <button
             type="button"
             onClick={() => setShowAddBrand(true)}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-semibold text-background outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary/40"
           >
-            <Plus className="h-4 w-4" aria-hidden="true" />
             Add brand
           </button>
         }
@@ -142,9 +130,9 @@ export default function NichesPage() {
           <section aria-labelledby="brand-readiness-summary" className="overflow-hidden rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]">
             <h2 id="brand-readiness-summary" className="sr-only">Brand readiness summary</h2>
             <div className="grid gap-px bg-border sm:grid-cols-3">
-              <SummaryMetric label="Brand workspaces" value={brands.length} helper="Identity and planning context" icon={Building2} />
-              <SummaryMetric label="Instagram verified" value={connectionState === "error" ? "—" : summary.connected} helper={connectionState === "error" ? "Health check unavailable" : "Live identity check passed"} icon={Instagram} />
-              <SummaryMetric label="Ready to predict" value={summary.ready} helper={`${summary.personal} using a personal model`} icon={Sparkles} />
+              <SummaryMetric label="Brands" value={brands.length} helper="Planning profiles" />
+              <SummaryMetric label="Instagram verified" value={connectionState === "error" ? "—" : summary.connected} helper={connectionState === "error" ? "Health unavailable" : "Identity confirmed"} />
+              <SummaryMetric label="Ready to predict" value={summary.ready} helper={`${summary.personal} with a personal model`} />
             </div>
           </section>
 
@@ -152,9 +140,7 @@ export default function NichesPage() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 id="brand-list-title" className="text-xl font-semibold tracking-tight">Brand readiness</h2>
-                <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                  Connection, mature data, and model availability are separate checks. Follow the next action shown for each brand.
-                </p>
+                <p className="mt-1 text-sm text-muted-foreground">Connection, mature data, and model status by brand.</p>
               </div>
               <button
                 type="button"
@@ -192,16 +178,12 @@ export default function NichesPage() {
 
           <details className="group rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]">
             <summary className="flex min-h-16 cursor-pointer list-none items-center gap-3 px-5 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 md:px-6">
-              <Users className="h-5 w-5 text-primary" aria-hidden="true" />
-              Industry cohort fallback evidence
-              <span className="ml-auto hidden text-sm font-normal text-muted-foreground sm:inline group-open:hidden">{cohortRows.filter((row) => row.model).length} trained cohorts</span>
+              Niche fallback models
+              <span className="ml-auto hidden text-sm font-normal text-muted-foreground sm:inline group-open:hidden">{cohortRows.filter((row) => row.model).length} trained niches</span>
               <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden="true" />
             </summary>
             <div className="border-t border-border p-5 md:p-6">
-              <div className="mb-4 flex items-start gap-3 rounded-2xl bg-surface-2/55 p-4 text-sm leading-relaxed text-muted-foreground">
-                <CircleHelp className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-                <p>A cohort model supports a cold-start brand only when no verified personal model exists. It is a fallback, not a claim that every brand in the industry behaves identically.</p>
-              </div>
+              <p className="mb-4 rounded-2xl bg-surface-2/55 p-4 text-sm leading-relaxed text-muted-foreground">A niche model supports a new brand until a verified personal model is available. It does not imply every brand behaves identically.</p>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {cohortRows.map((row) => (
                   <div key={row.name} className="rounded-2xl border border-border p-4">
@@ -216,8 +198,8 @@ export default function NichesPage() {
                   </div>
                 ))}
               </div>
-              <Link href="/model-health" className="mt-5 inline-flex min-h-10 items-center gap-2 rounded-lg px-2 text-sm font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40">
-                Review scientific evidence <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              <Link href="/model-health" className="mt-5 inline-flex min-h-10 items-center rounded-lg px-2 text-sm font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40">
+                Review model quality
               </Link>
             </div>
           </details>
@@ -269,21 +251,18 @@ function BrandReadinessCard({ brand, connection, connectionState }: { brand: Bra
                 <p className="mt-0.5 truncate text-sm text-muted-foreground">{brand.niche} · {brand.timezone || "Asia/Jakarta"}</p>
               </div>
             </div>
-            <StatusPill tone={modelReady ? "success" : "warning"} label={personal ? "Personal model" : cohort ? "Cohort model" : "Model unavailable"} />
+            <StatusPill tone={modelReady ? "success" : "warning"} label={personal ? "Personal model" : cohort ? "Niche model" : "Model unavailable"} />
           </div>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl border border-border bg-surface-2/40 p-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Instagram className="h-4 w-4 text-primary" aria-hidden="true" />
-                Instagram source
-              </div>
+              <div className="text-sm font-semibold text-foreground">Instagram source</div>
               <p className={cn("mt-2 text-sm leading-relaxed", connected ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground")}>{connectionLabel}</p>
             </div>
 
             <div className="rounded-2xl border border-border bg-surface-2/40 p-4">
               <div className="flex items-center justify-between gap-2 text-sm font-semibold text-foreground">
-                <span className="flex items-center gap-2"><Database className="h-4 w-4 text-primary" aria-hidden="true" />Mature data</span>
+                <span>Mature data</span>
                 <span className="tabular-nums text-muted-foreground">{samples}/{SAMPLE_TARGET}</span>
               </div>
               <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-label={`${brand.name} personal model data maturity`} aria-valuemin={0} aria-valuemax={SAMPLE_TARGET} aria-valuenow={Math.min(samples, SAMPLE_TARGET)}>
@@ -295,17 +274,17 @@ function BrandReadinessCard({ brand, connection, connectionState }: { brand: Bra
 
           <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-5">
             {modelReady ? (
-              <Link href="/predict" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-semibold text-background">
-                Predict a draft <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              <Link href="/predict" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+                Predict a draft
               </Link>
             ) : (
               <Link href="/model-health" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-foreground hover:bg-surface-2">
-                Review model readiness <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                Review model
               </Link>
             )}
             {connected && (
               <Link href={`/insights?brand_id=${encodeURIComponent(brand.id)}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-foreground hover:bg-surface-2">
-                Published results
+                Results
               </Link>
             )}
           </div>
@@ -314,12 +293,11 @@ function BrandReadinessCard({ brand, connection, connectionState }: { brand: Bra
         {!connected && connectionState !== "error" && (
           <details className="group border-t border-border bg-surface-2/25">
             <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-5 text-sm font-semibold text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 md:px-6">
-              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
               Connection instructions
               <ChevronDown className="ml-auto h-4 w-4 transition-transform group-open:rotate-180" aria-hidden="true" />
             </summary>
             <div className="border-t border-border px-5 py-4 text-sm leading-relaxed text-muted-foreground md:px-6">
-              An administrator must authorize the Meta account server-side and run the verified sync/retrain workflow. This thesis deployment does not present a misleading self-service OAuth button.
+              Ask an administrator to authorize the Meta account, then run the verified sync and retrain workflow.
             </div>
           </details>
         )}
@@ -379,7 +357,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !Array.isArray(payload) || payload.length === 0) {
-        throw new Error(payload?.message || "AI cohort suggestion is unavailable.");
+        throw new Error(payload?.message || "AI niche suggestion is unavailable.");
       }
       setSuggestions(payload);
       if (typeof payload[0]?.niche === "string") setCohort(payload[0].niche);
@@ -387,7 +365,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
     } catch (error: unknown) {
       setSuggestions([]);
       setAiState("unavailable");
-      setAiError(error instanceof Error ? error.message : "AI cohort suggestion is unavailable. Select a cohort manually.");
+      setAiError(error instanceof Error ? error.message : "AI niche suggestion is unavailable. Select a niche manually.");
     }
   };
 
@@ -434,16 +412,15 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
         {saved ? (
           <div className="overflow-y-auto p-6 sm:p-8">
             <div className="rounded-3xl border border-emerald-500/25 bg-emerald-500/[0.06] p-6 text-center">
-              <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="h-6 w-6" aria-hidden="true" /></span>
-              <h3 className="mt-4 text-xl font-semibold">Planning workspace created</h3>
-              <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">The profile and cohort are saved. An administrator can now authorize the exact Instagram account and run the initial verified sync.</p>
+              <h3 className="text-xl font-semibold">Brand created</h3>
+              <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">The profile and niche are saved. An administrator can now connect Instagram and run the first verified sync.</p>
               <ol className="mx-auto mt-6 max-w-md space-y-3 text-left text-sm">
                 <SetupStep done label="Brand identity saved" />
                 <SetupStep label="Administrator authorizes Meta account" />
                 <SetupStep label="Verified posts synchronize" />
                 <SetupStep label="Model readiness becomes visible" />
               </ol>
-              <button type="button" onClick={onClose} className="mt-6 min-h-11 rounded-xl bg-foreground px-5 text-sm font-semibold text-background">Done</button>
+              <button type="button" onClick={onClose} className="mt-6 min-h-11 rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Done</button>
             </div>
           </div>
         ) : (
@@ -464,7 +441,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
               </div>
 
               <div>
-                <label htmlFor="brand-cohort" className="text-sm font-semibold text-foreground">Industry cohort</label>
+                <label htmlFor="brand-cohort" className="text-sm font-semibold text-foreground">Industry niche</label>
                 <div className="relative mt-2">
                   <select id="brand-cohort" value={cohort} onChange={(event) => setCohort(event.target.value)} className="min-h-11 w-full appearance-none rounded-xl border border-border bg-background px-3 pr-10 text-sm font-medium outline-none focus:border-primary focus:ring-2 focus:ring-primary/15">
                     {NICHES.map((niche) => <option key={niche} value={niche}>{niche}</option>)}
@@ -477,12 +454,12 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
               <div className="rounded-2xl border border-border bg-surface-2/40 p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-foreground">Optional AI cohort suggestion</p>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Requires at least 10 profile characters. You remain in control of the final cohort.</p>
+                    <p className="text-sm font-semibold text-foreground">Suggest a niche</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Add at least 10 profile characters. You choose the final niche.</p>
                   </div>
                   <button type="button" onClick={suggestCohort} disabled={profile.trim().length < 10 || aiState === "loading"} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 text-sm font-semibold hover:bg-surface-2 disabled:opacity-50">
-                    {aiState === "loading" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />}
-                    {aiState === "loading" ? "Analyzing…" : "Suggest cohort"}
+                    {aiState === "loading" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                    {aiState === "loading" ? "Analyzing…" : "Suggest niche"}
                   </button>
                 </div>
                 {aiError && <p role="status" className="mt-3 text-sm text-warning">{aiError}</p>}
@@ -503,7 +480,7 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
 
             <div className="flex flex-col-reverse gap-2 border-t border-border bg-surface px-5 py-4 sm:flex-row sm:justify-end md:px-6">
               <button type="button" onClick={onClose} disabled={saving} className="min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2 disabled:opacity-50">Cancel</button>
-              <button type="submit" disabled={!name.trim() || !cohort || saving} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-5 text-sm font-semibold text-background disabled:opacity-50">
+              <button type="submit" disabled={!name.trim() || !cohort || saving} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
                 {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                 {saving ? "Creating workspace…" : "Create workspace"}
               </button>
@@ -516,14 +493,13 @@ function AddBrandDialog({ onClose, onSaveSuccess }: { onClose: () => void; onSav
 }
 
 function SetupStep({ label, done = false }: { label: string; done?: boolean }) {
-  return <li className="flex items-center gap-3"><span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-full border", done ? "border-emerald-500 bg-emerald-500 text-white" : "border-border bg-surface text-muted-foreground")}>{done ? <Check className="h-4 w-4" aria-hidden="true" /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}</span><span className={done ? "font-semibold text-foreground" : "text-muted-foreground"}>{label}</span></li>;
+  return <li className="flex items-center gap-3"><span className={cn("h-2 w-2 shrink-0 rounded-full", done ? "bg-success" : "bg-border-strong")} aria-hidden /><span className={done ? "font-semibold text-foreground" : "text-muted-foreground"}>{label}</span></li>;
 }
 
-function SummaryMetric({ label, value, helper, icon: Icon }: { label: string; value: number | string; helper: string; icon: typeof Building2 }) {
+function SummaryMetric({ label, value, helper }: { label: string; value: number | string; helper: string }) {
   return (
-    <div className="flex min-h-32 items-start justify-between gap-4 bg-surface p-5">
-      <div><p className="text-sm font-medium text-muted-foreground">{label}</p><p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight">{value}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{helper}</p></div>
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Icon className="h-5 w-5" aria-hidden="true" /></span>
+    <div className="min-h-32 bg-surface p-5">
+      <p className="text-sm font-medium text-muted-foreground">{label}</p><p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight">{value}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{helper}</p>
     </div>
   );
 }
@@ -535,10 +511,9 @@ function StatusPill({ label, tone }: { label: string; tone: "success" | "warning
 function EmptyBrands({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="rounded-3xl border border-dashed border-border bg-surface p-10 text-center">
-      <Building2 className="mx-auto h-7 w-7 text-muted-foreground" aria-hidden="true" />
-      <h3 className="mt-4 text-lg font-semibold">Set up your first brand</h3>
+      <h3 className="text-lg font-semibold">Set up your first brand</h3>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">Create the planning profile now, then let the administrator authorize the exact Instagram Business account and synchronize verified history.</p>
-      <button type="button" onClick={onAdd} className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-foreground px-4 text-sm font-semibold text-background"><Plus className="h-4 w-4" aria-hidden="true" />Add brand</button>
+      <button type="button" onClick={onAdd} className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Add brand</button>
     </div>
   );
 }

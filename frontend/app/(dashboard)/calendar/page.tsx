@@ -6,7 +6,6 @@ import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { type ContentFormat, type Brand, type Tier, normalizeBrandReference } from "@/lib/types";
 import {
-  ArrowRight,
   UploadCloud,
   Download,
   ChevronLeft,
@@ -15,13 +14,11 @@ import {
   List,
   X,
   Plus,
-  Save,
   Loader2,
   AlertTriangle,
   CheckCircle2,
   MoreHorizontal,
   RefreshCw,
-  Sparkles,
   Clock3,
   Link2,
 } from "lucide-react";
@@ -681,9 +678,8 @@ export default function CalendarPage() {
   return (
     <div className="px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto">
       <SectionHeader
-        eyebrow="Decision workflow"
-        title="Plan, evaluate, and learn"
-        description="Shape the creative direction, evaluate the planned post before publishing, then connect its verified Instagram outcome. Predictions support the decision; they do not replace it."
+        title="Content plan"
+        description="Plan and evaluate upcoming content."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -699,9 +695,8 @@ export default function CalendarPage() {
                 ymd(cursor.y, cursor.m, Math.min(today.getDate(), new Date(cursor.y, cursor.m + 1, 0).getDate())),
                 brandsList[0],
               ))}
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-foreground px-4 text-sm font-bold text-background hover:opacity-90"
+              className="inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90"
             >
-              <Plus className="h-3.5 w-3.5" />
               Plan content
             </button>
             <details className="group relative">
@@ -772,7 +767,7 @@ export default function CalendarPage() {
                 className={cn(
                   "inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl border px-3 text-xs font-bold",
                   planFilter === id
-                    ? "border-foreground bg-foreground text-background"
+                    ? "border-primary bg-primary text-primary-foreground"
                     : "border-border bg-surface text-muted-foreground hover:bg-surface-2 hover:text-foreground",
                 )}
               >
@@ -976,7 +971,7 @@ export default function CalendarPage() {
                 type="button"
                 onClick={runImport}
                 disabled={csvValidation.importable.length === 0}
-                className="min-h-11 rounded-lg bg-foreground px-4 text-xs font-bold text-background hover:opacity-90 disabled:opacity-50"
+                className="min-h-11 rounded-lg bg-primary px-4 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
                 Import {csvValidation.importable.length} post
                 {csvValidation.importable.length === 1 ? "" : "s"}
@@ -1032,7 +1027,7 @@ export default function CalendarPage() {
                 "flex-1 md:flex-none items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition active:scale-95",
                 v.id === "month" ? "hidden md:inline-flex" : "inline-flex",
                 view === v.id
-                  ? "bg-foreground text-background"
+                  ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -1086,7 +1081,7 @@ export default function CalendarPage() {
                       <span
                         className={cn(
                           "grid h-6 w-6 place-items-center rounded-full text-xs font-extrabold tabular-nums",
-                          isToday ? "bg-foreground text-background font-semibold" : "text-foreground/80"
+                          isToday ? "bg-primary text-primary-foreground font-semibold" : "text-foreground/80"
                         )}
                       >
                         {cell.day}
@@ -1205,8 +1200,8 @@ export default function CalendarPage() {
                       </button>
                       <div className="flex items-center justify-between gap-3 border-t border-border bg-surface-2/35 px-4 py-2.5">
                         <button type="button" onClick={() => setEditing(entry)} className="min-h-9 rounded-lg px-2 text-xs font-bold text-muted-foreground hover:bg-surface-2 hover:text-foreground">Edit plan</button>
-                        <Link href={decision.href(entry.id)} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-foreground px-3 text-xs font-bold text-background hover:opacity-90">
-                          {decision.action} <ArrowRight className="h-3.5 w-3.5" />
+                        <Link href={decision.href(entry.id)} className="inline-flex min-h-9 items-center rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90">
+                          {decision.action}
                         </Link>
                       </div>
                     </article>
@@ -1292,8 +1287,8 @@ export default function CalendarPage() {
                           <td className="px-5 py-4 align-middle text-right">
                             <div className="flex items-center justify-end gap-2">
                               <button type="button" onClick={() => setEditing(r)} className="min-h-10 rounded-lg border border-border bg-surface px-3 text-xs font-bold text-foreground hover:bg-surface-2">Edit</button>
-                              <Link href={decision.href(r.id)} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-foreground px-3 text-xs font-bold text-background hover:opacity-90">
-                                {decision.action} <ArrowRight className="h-3.5 w-3.5" />
+                              <Link href={decision.href(r.id)} className="inline-flex min-h-10 items-center rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90">
+                                {decision.action}
                               </Link>
                             </div>
                           </td>
@@ -1350,7 +1345,7 @@ function getDecisionState(entry: CalendarEntry) {
     return {
       label: "Outcome observed",
       tone: "success" as DecisionTone,
-      action: "View evidence",
+      action: "View result",
       href: () => "/history",
     };
   }
@@ -1358,7 +1353,7 @@ function getDecisionState(entry: CalendarEntry) {
     return {
       label: entry.publication.outcome_status === "pending_maturity" ? "Publication maturing" : "Awaiting outcome",
       tone: "neutral" as DecisionTone,
-      action: "View evidence",
+      action: "View result",
       href: () => "/history",
     };
   }
@@ -1392,15 +1387,15 @@ function PlanEmptyState({ filtered, onAdd }: { filtered: boolean; onAdd: () => v
   return (
     <div className="rounded-xl border border-dashed border-border p-8 text-center">
       <span className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-surface-2 text-muted-foreground">
-        {filtered ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+        {filtered && <RefreshCw className="h-4 w-4" />}
       </span>
       <h3 className="mt-3 text-sm font-bold text-foreground">{filtered ? "No matching decisions" : "Plan the first content idea"}</h3>
       <p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
         {filtered ? "Choose another decision-state filter to see this month’s content." : "Capture the creative direction first, then evaluate it before publishing."}
       </p>
       {filtered ? null : (
-        <button type="button" onClick={onAdd} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg bg-foreground px-3 text-xs font-bold text-background hover:opacity-90">
-          <Plus className="h-3.5 w-3.5" /> Plan content
+        <button type="button" onClick={onAdd} className="mt-4 inline-flex min-h-10 items-center rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90">
+          Plan content
         </button>
       )}
     </div>
@@ -1653,10 +1648,9 @@ function EntryModal({
               </p>
               <Link
                 href={`/predict?plan_id=${encodeURIComponent(draft.id)}`}
-                className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-lg bg-foreground px-3 font-bold text-background hover:opacity-90"
+                className="mt-3 inline-flex min-h-10 items-center rounded-lg bg-primary px-3 font-bold text-primary-foreground hover:bg-primary/90"
               >
                 {draft.prediction ? "Re-evaluate in Predict" : "Evaluate in Predict"}
-                <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             </div>
           )}
@@ -1701,9 +1695,9 @@ function EntryModal({
                   onClick={saveDraft}
                   disabled={mutation !== "idle"}
                   aria-busy={mutation === "saving"}
-                  className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-foreground px-4 text-sm font-semibold text-background hover:opacity-90 disabled:opacity-50"
+                  className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {mutation === "saving" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4" aria-hidden="true" />}
+                  {mutation === "saving" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                   {mutation === "saving" ? "Saving…" : draft.id.startsWith("new:") ? "Save plan" : "Save changes"}
                 </button>
               </div>

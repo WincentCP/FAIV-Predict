@@ -6,16 +6,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { format as formatDate } from "date-fns";
 import {
-  Activity,
   AlertTriangle,
-  Calendar,
-  CalendarPlus,
-  Check,
   ChevronDown,
-  Clock,
-  FileText,
   Loader2,
-  PencilLine,
 } from "lucide-react";
 import { WhyThisScore, type WhyReason } from "@/components/WhyThisScore";
 import { type Tier, type ContentFormat } from "@/lib/types";
@@ -69,7 +62,7 @@ function RawScoreBar({ tier, score, active }: { tier: Tier; score: number; activ
           initial={false}
           animate={{ width: `${value}%` }}
           transition={{ duration: 0.36, ease: [0.2, 0, 0, 1] }}
-          className={cn("h-full rounded-full", active ? "bg-foreground" : "bg-muted-foreground/45")}
+          className={cn("h-full rounded-full", active ? "bg-primary" : "bg-muted-foreground/45")}
         />
       </div>
     </div>
@@ -122,7 +115,7 @@ export function InsightsView(props: {
   const improvementProbes = prediction.counterfactuals.filter((probe) => probe.parameter !== "format");
   const comparisonScope = prediction.isPersonalModel
     ? `${brandName || "this brand"}'s own verified history`
-    : "the selected niche's verified cohort history";
+    : "the selected niche's verified history";
 
   return (
     <motion.div
@@ -145,8 +138,7 @@ export function InsightsView(props: {
 
       {isCreativeBriefChanged && !isPredictionStale && (
         <div role="status" className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/[0.03] p-4">
-          <PencilLine className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-          <p className="text-sm leading-relaxed text-muted-foreground"><strong className="text-foreground">Creative direction changed.</strong> The score remains current because semantic creative direction is planning context and is not an ML input. Any earlier AI guidance may need to be reviewed again.</p>
+          <p className="text-sm leading-relaxed text-muted-foreground"><strong className="text-foreground">Creative direction changed.</strong> The score remains current because this brief is not a model input. Review any earlier AI guidance.</p>
         </div>
       )}
 
@@ -154,9 +146,9 @@ export function InsightsView(props: {
         <div className="grid gap-8 p-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] lg:p-8">
           <div className="flex flex-col justify-center">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-foreground px-2.5 py-1 text-xs font-semibold text-background">Predicted tier</span>
-              {prediction.savedId && <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1 text-xs font-semibold text-muted-foreground"><Check className="h-3 w-3" /> Saved to history</span>}
-              {prediction.status === "provisional" && <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning"><Clock className="h-3 w-3" /> Provisional · hour unknown</span>}
+              <span className="rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">Predicted tier</span>
+              {prediction.savedId && <span className="rounded-full border border-border bg-surface-2 px-2.5 py-1 text-xs font-semibold text-muted-foreground">Saved to history</span>}
+              {prediction.status === "provisional" && <span className="rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">Provisional · time unknown</span>}
             </div>
 
             <h2 id="prediction-verdict" className="mt-5 font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
@@ -188,21 +180,16 @@ export function InsightsView(props: {
         </div>
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border bg-surface-2/35 px-6 py-4 text-sm text-muted-foreground lg:px-8">
-          <span className="inline-flex items-center gap-2 font-medium text-foreground"><FileText className="h-4 w-4" />{brandName || "Brand unavailable"}</span>
-          <span className="inline-flex items-center gap-2"><Calendar className="h-4 w-4" />{formatDate(scheduledAt, "MMM d, yyyy")}</span>
-          <span className="inline-flex items-center gap-2"><Clock className="h-4 w-4" />{hasPostTime ? `${formatDate(scheduledAt, "HH")}:00 WIB` : "Hour not set"}</span>
+          <span className="font-medium text-foreground">{brandName || "Brand unavailable"}</span>
+          <span>{formatDate(scheduledAt, "MMM d, yyyy")}</span>
+          <span>{hasPostTime ? `${formatDate(scheduledAt, "HH")}:00 WIB` : "Time not set"}</span>
           <span className="rounded-lg border border-border bg-surface px-2 py-1 text-xs font-semibold text-foreground">{contentFormat}</span>
         </div>
       </section>
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <main className="space-y-5">
-          <div className="flex items-end justify-between gap-4 px-1">
-            <div>
-              <p className="text-xs font-semibold text-primary">Improve the decision</p>
-              <h2 className="mt-1 font-display text-2xl font-semibold tracking-tight text-foreground">Turn the result into a decision</h2>
-            </div>
-          </div>
+          <h2 className="px-1 font-display text-2xl font-semibold tracking-tight text-foreground">Recommendations</h2>
 
           <MeasuredImprovements counterfactuals={improvementProbes} note={prediction.counterfactualsNote} appliedRecs={appliedRecs} onToggle={onToggleRec} />
           <FormatComparison formatProbes={formatProbes} currentFormat={contentFormat} />
@@ -244,7 +231,6 @@ export function InsightsView(props: {
                   <div className="mt-2 h-56 w-full">
                     {mdiChartData.length === 0 ? (
                       <div className="flex h-full w-full flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface-2/40 p-5 text-center">
-                        <Activity className="mb-2 h-7 w-7 text-muted-foreground/50" />
                         <p className="text-sm font-semibold text-foreground">Model weights unavailable</p>
                       </div>
                     ) : <FeatureAttributionChart data={mdiChartData} />}
@@ -261,7 +247,7 @@ export function InsightsView(props: {
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               {anyRecsApplied
                 ? "Apply the selected posting hour, then predict again to create a new version."
-                : "Save this result to the Content Plan, or return to the draft for a manual creative edit."}
+                : "Save this result to the plan, or return to the draft."}
             </p>
 
             {planSaveMessage && (
@@ -270,37 +256,33 @@ export function InsightsView(props: {
 
             <div className="mt-4 space-y-2.5">
               {anyRecsApplied && (
-                <button type="button" onClick={onApply} disabled={isPredictionStale} className="flex min-h-12 w-full items-center justify-center rounded-xl bg-foreground px-4 text-sm font-semibold text-background hover:opacity-90 disabled:opacity-45">
+                <button type="button" onClick={onApply} disabled={isPredictionStale} className="flex min-h-12 w-full items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-45">
                   Apply selected change
                 </button>
               )}
 
               {planSaveState === "saved" && contentPlanId ? (
-                <Link href="/calendar" className={cn("flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold", anyRecsApplied ? "border border-border bg-surface text-foreground hover:bg-surface-2" : "bg-foreground text-background hover:opacity-90")}>
-                  <Check className="h-4 w-4" /> Open Content Plan
+                <Link href="/calendar" className={cn("flex min-h-12 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold", anyRecsApplied ? "border border-border bg-surface text-foreground hover:bg-surface-2" : "bg-primary text-primary-foreground hover:bg-primary/90")}>
+                  Open plan
                 </Link>
               ) : (
                 <button
                   type="button"
                   onClick={onSaveToContentPlan}
                   disabled={!prediction.savedId || isPredictionStale || planSaveState === "saving"}
-                  className={cn("flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-45", anyRecsApplied ? "border border-border bg-surface text-foreground hover:bg-surface-2" : "bg-foreground text-background hover:opacity-90")}
+                  className={cn("flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-45", anyRecsApplied ? "border border-border bg-surface text-foreground hover:bg-surface-2" : "bg-primary text-primary-foreground hover:bg-primary/90")}
                 >
-                  {planSaveState === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarPlus className="h-4 w-4" />}
-                  {contentPlanId ? "Update Content Plan" : "Save to Content Plan"}
+                  {planSaveState === "saving" && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {contentPlanId ? "Update plan" : "Save to plan"}
                 </button>
               )}
 
-              <button type="button" onClick={onEditDraft} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-muted-foreground hover:bg-surface-2 hover:text-foreground">
-                <PencilLine className="h-4 w-4" /> Edit draft
+              <button type="button" onClick={onEditDraft} className="flex min-h-11 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold text-muted-foreground hover:bg-surface-2 hover:text-foreground">
+                Edit draft
               </button>
             </div>
           </section>
 
-          <section className="rounded-2xl border border-border bg-surface-2/40 p-4">
-            <p className="text-xs font-semibold text-primary">Interpretation rule</p>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Treat this result as evidence for a decision—not as creative approval, a probability of success, or a promise of future engagement.</p>
-          </section>
         </aside>
       </div>
     </motion.div>

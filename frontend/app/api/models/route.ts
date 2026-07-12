@@ -56,7 +56,7 @@ export async function GET() {
       return NextResponse.json([]);
     }
 
-    // Expose only the latest model version for each owned brand or cohort.
+    // Expose only the latest model version for each owned brand or niche.
     const seen = new Set<string>();
     const uniqueModels: any[] = [];
 

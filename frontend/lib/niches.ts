@@ -1,9 +1,5 @@
-// Controlled primary industry cohorts — the single source of truth for the UI
-// and AI-assisted suggestion. One brand belongs to one benchmark cohort so
-// small thesis datasets are not fragmented by multi-label or embedding-based
-// taxonomies. Values must match the `brands.niche` / `models.niche`
-// strings stored in Supabase: the ML service looks niche models up by this
-// exact string when selecting a shared cohort model.
+// Keep these values aligned with Supabase and ml-service/app/constants.py;
+// shared models are selected by the exact niche string.
 export const NICHES = [
   "Bakery",
   "Fitness",
