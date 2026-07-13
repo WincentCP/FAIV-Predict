@@ -43,10 +43,10 @@ export function TrustStrip({
 }) {
   const scopeLabel = isPersonalModel ? "Personalized model" : "Niche model";
   const qualityLabel = evaluationStatus === "validated"
-    ? "Ready"
+    ? "Reliable"
     : evaluationStatus === "exploratory"
-      ? "Use with caution"
-      : "Not ready";
+      ? "Still learning"
+      : "Not evaluated yet";
 
   return (
     <section aria-labelledby="prediction-evidence-title" className="rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">

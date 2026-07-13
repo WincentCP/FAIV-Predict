@@ -9,7 +9,6 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { SectionHeader } from "@/components/SectionHeader";
 import { fetchWithRetry } from "@/lib/fetch-retry";
 import { NICHES } from "@/lib/niches";
 import { type Brand, type MlModel, SAMPLE_TARGET } from "@/lib/types";
@@ -20,7 +19,7 @@ type LoadState = "loading" | "ready" | "error";
 type AiState = "idle" | "loading" | "done" | "unavailable";
 type NicheSuggestion = { niche: string; reason: string };
 
-export default function NichesPage() {
+export function BrandWorkspaces() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [models, setModels] = useState<MlModel[]>([]);
   const [connections, setConnections] = useState<Record<string, Connection>>({});
@@ -100,20 +99,20 @@ export default function NichesPage() {
   }, [brands, models]);
 
   return (
-    <div className="mx-auto min-h-dvh max-w-[1400px] space-y-7 px-4 py-6 md:px-8 md:py-8">
-      <SectionHeader
-        title="Brands"
-        description="Connect Instagram and check prediction readiness."
-        actions={
-          <button
-            type="button"
-            onClick={() => setShowAddBrand(true)}
-            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            Add brand
-          </button>
-        }
-      />
+    <div className="space-y-7">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight">Brand workspaces</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Connection status and prediction readiness per brand.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAddBrand(true)}
+          className="inline-flex min-h-11 items-center justify-center self-start rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          Add brand
+        </button>
+      </div>
 
       {loadError && (
         <div role="alert" className="flex flex-col gap-3 rounded-2xl border border-destructive/25 bg-destructive/[0.04] p-4 text-sm sm:flex-row sm:items-center">
@@ -198,9 +197,9 @@ export default function NichesPage() {
                   </div>
                 ))}
               </div>
-              <Link href="/model-health" className="mt-5 inline-flex min-h-10 items-center rounded-lg px-2 text-sm font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40">
-                Review prediction quality
-              </Link>
+              <a href="#model-evidence" className="mt-5 inline-flex min-h-10 items-center rounded-lg px-2 text-sm font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40">
+                Review model quality below
+              </a>
             </div>
           </details>
         </>
@@ -278,12 +277,12 @@ function BrandReadinessCard({ brand, connection, connectionState }: { brand: Bra
                 Predict a draft
               </Link>
             ) : (
-              <Link href="/model-health" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-foreground hover:bg-surface-2">
+              <a href="#model-evidence" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-foreground hover:bg-surface-2">
                 Check readiness
-              </Link>
+              </a>
             )}
             {connected && (
-              <Link href={`/insights?brand_id=${encodeURIComponent(brand.id)}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-foreground hover:bg-surface-2">
+              <Link href={`/results?tab=published&brand_id=${encodeURIComponent(brand.id)}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-foreground hover:bg-surface-2">
                 Results
               </Link>
             )}

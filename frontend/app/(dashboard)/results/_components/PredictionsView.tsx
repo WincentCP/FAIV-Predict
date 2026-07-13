@@ -11,7 +11,6 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
-import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
 import { OutcomeComparison } from "@/components/OutcomeComparison";
 import { fetchWithRetry } from "@/lib/fetch-retry";
@@ -66,7 +65,7 @@ type VersionMeta = {
   latestId: string;
 };
 
-export default function HistoryPage() {
+export function PredictionsView() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -169,17 +168,7 @@ export default function HistoryPage() {
   };
 
   return (
-    <div className="mx-auto min-h-dvh max-w-[1400px] space-y-7 px-4 py-6 md:px-8 md:py-8">
-      <SectionHeader
-        title="Previous predictions"
-        description="See earlier predictions and how published posts performed."
-        actions={
-          <Link href="/predict" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary/40">
-            New prediction
-          </Link>
-        }
-      />
-
+    <div className="space-y-7">
       {loadError && (
         <div role="alert" className="flex flex-col gap-3 rounded-2xl border border-destructive/25 bg-destructive/[0.04] p-4 text-sm sm:flex-row sm:items-center">
           <AlertTriangle className="h-5 w-5 shrink-0 text-destructive" aria-hidden="true" />
@@ -311,9 +300,9 @@ function PredictionRecord({
   const canRecalculate = Boolean(item.brand_id) && (item.status === "stale" || item.status === "provisional");
   const publicationHref = item.brand_id
     ? item.publication_media_id
-      ? `/insights?brand_id=${encodeURIComponent(item.brand_id)}&media_id=${encodeURIComponent(item.publication_media_id)}`
-      : `/insights?brand_id=${encodeURIComponent(item.brand_id)}&prediction_id=${encodeURIComponent(item.id)}`
-    : "/insights";
+      ? `/results?tab=published&brand_id=${encodeURIComponent(item.brand_id)}&media_id=${encodeURIComponent(item.publication_media_id)}`
+      : `/results?tab=published&brand_id=${encodeURIComponent(item.brand_id)}&prediction_id=${encodeURIComponent(item.id)}`
+    : "/results?tab=published";
 
   return (
     <li>
@@ -386,7 +375,7 @@ function PredictionRecord({
             <AuditField term="Model record" value={item.model_id || "Not recorded"} mono />
             <AuditField term="Feature schema" value={item.feature_schema_version || "Not recorded"} mono />
             <AuditField term="Input fingerprint" value={item.input_hash ? `${item.input_hash.slice(0, 16)}…` : "Not recorded"} mono />
-            <AuditField term="Posting time" value={item.time_known && item.post_hour != null ? `${String(item.post_hour).padStart(2, "0")}:00` : "Not set · provisional"} />
+            <AuditField term="Posting time" value={item.time_known && item.post_hour != null ? `${String(item.post_hour).padStart(2, "0")}:00` : "No time set yet"} />
             <AuditField term="Scheduled date" value={item.scheduled_date ? formatDate(item.scheduled_date) : "Not scheduled"} />
             <AuditField term="Supersedes" value={item.supersedes_prediction_id || "Original version"} mono />
             <AuditField term="Publication media ID" value={item.publication_media_id || "Not linked"} mono />
@@ -453,8 +442,8 @@ function OutcomeState({ item }: { item: HistoryItem }) {
 
 function PredictionStatusBadge({ item }: { item: HistoryItem }) {
   if (item.status === "current") return <StatusPill label="Current" tone="success" />;
-  if (item.status === "provisional") return <StatusPill label="Add publish time" tone="warning" />;
-  if (item.status === "stale") return <StatusPill label="Needs update" tone="warning" />;
+  if (item.status === "provisional") return <StatusPill label="No time set yet" tone="warning" />;
+  if (item.status === "stale") return <StatusPill label="Outdated — re-analyze" tone="warning" />;
   return <StatusPill label="Earlier version" tone="neutral" />;
 }
 
@@ -497,13 +486,13 @@ function EmptyLedger({ hasHistory, hasBrands, onClear }: { hasHistory: boolean; 
       {hasHistory ? (
         <button type="button" onClick={onClear} className="mt-5 min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2">Clear filters</button>
       ) : noBrand ? (
-        <Link href="/niches" className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+        <Link href="/brands" className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
           Set up a brand
         </Link>
       ) : (
         <div className="mt-5 flex flex-wrap justify-center gap-2">
           <Link href="/predict" className="inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Create prediction</Link>
-          <Link href="/niches" className="inline-flex min-h-11 items-center rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2">Manage brands</Link>
+          <Link href="/brands" className="inline-flex min-h-11 items-center rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2">Manage brands</Link>
         </div>
       )}
     </div>

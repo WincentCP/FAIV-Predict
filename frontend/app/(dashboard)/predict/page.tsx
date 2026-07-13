@@ -2,15 +2,14 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { format as formatDate } from "date-fns";
-import { AnimatePresence } from "framer-motion";
 import { fetchWithRetry } from "@/lib/fetch-retry";
 import { hasCreativeBriefContent, parseCreativeBrief } from "@/lib/creative-brief";
 import { analyzeCaption, CAPTION_MAX } from "@/components/CaptionIntel";
 import { type WhyReason } from "@/components/WhyThisScore";
 import { type ContentFormat, type Tier, type Brand } from "@/lib/types";
-import { ViewSwitch, type PredictView } from "./_components/ViewSwitch";
-import { ComposeView } from "./_components/ComposeView";
-import { InsightsView, type InsightsPrediction } from "./_components/InsightsView";
+import { ComposePanel } from "./_components/ComposePanel";
+import { ResultPanel, type InsightsPrediction } from "./_components/ResultPanel";
+import { BrandPatterns } from "./_components/BrandPatterns";
 import { type Counterfactual } from "./_components/MeasuredImprovements";
 import { type CreativeReviewSnapshot } from "./_components/ConceptAssistant";
 
@@ -43,8 +42,6 @@ function asPercentMetric(value: unknown): number | null {
 }
 
 export default function PredictPage() {
-  const [view, setView] = useState<PredictView>("compose");
-
   const [brandsList, setBrandsList] = useState<Brand[]>([]);
   const [brandsError, setBrandsError] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
@@ -336,7 +333,13 @@ export default function PredictPage() {
       if (contentPlan && data.prediction_id) {
         await persistContentPlan(data.prediction_id);
       }
-      setView("insights");
+      // On stacked (small) layouts the result renders below the form; bring it
+      // into view once so the user sees the outcome of their action.
+      requestAnimationFrame(() => {
+        if (window.matchMedia("(max-width: 1279px)").matches) {
+          document.getElementById("prediction-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      });
     } catch {
       setPredictError("Could not reach the prediction service. Please try again.");
     } finally {
@@ -359,7 +362,6 @@ export default function PredictPage() {
       setHasPostTime(true);
     }
     setOptimizationsApplied(true);
-    setView("compose");
   };
 
   const anyRecsApplied = Object.values(appliedRecs).some(Boolean);
@@ -466,76 +468,71 @@ export default function PredictPage() {
 
   return (
     <div className="relative mx-auto min-h-screen max-w-[1480px] px-4 py-6 md:px-8 md:py-8">
-      <div className="mb-6 flex flex-col justify-between gap-4 border-b border-border/60 pb-5 md:flex-row md:items-end">
-        <div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight text-foreground md:text-4xl">Predict content performance</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Evaluate a draft before publishing.</p>
-        </div>
-        <ViewSwitch view={view} onChange={setView} insightsEnabled={prediction !== null} />
+      <div className="mb-6 border-b border-border/60 pb-5">
+        <h1 className="font-display text-3xl font-semibold tracking-tight text-foreground md:text-4xl">Predict content performance</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Evaluate a draft before publishing — the estimate updates beside your inputs.</p>
       </div>
 
-      <AnimatePresence mode="wait">
-        {view === "compose" ? (
-          <ComposeView
-            brandsList={brandsList}
-            brandsError={brandsError}
-            accountId={accountId}
-            setAccountId={setAccountId}
-            account={account}
-            contentFormat={contentFormat}
-            setContentFormat={setContentFormat}
-            scheduledAt={scheduledAt}
-            setScheduledAt={setScheduledAt}
-            hasPostTime={hasPostTime}
-            setHasPostTime={setHasPostTime}
-            caption={caption}
-            setCaption={setCaption}
-            visualConcept={visualConcept}
-            setVisualConcept={setVisualConcept}
-            predictError={predictError}
-            contentPlanId={contentPlan?.id || null}
-            planLoadError={planLoadError}
-            optimizationsApplied={optimizationsApplied}
-            isFormValid={isFormValid}
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <ComposePanel
+          brandsList={brandsList}
+          brandsError={brandsError}
+          accountId={accountId}
+          setAccountId={setAccountId}
+          account={account}
+          contentFormat={contentFormat}
+          setContentFormat={setContentFormat}
+          scheduledAt={scheduledAt}
+          setScheduledAt={setScheduledAt}
+          hasPostTime={hasPostTime}
+          setHasPostTime={setHasPostTime}
+          caption={caption}
+          setCaption={setCaption}
+          visualConcept={visualConcept}
+          setVisualConcept={setVisualConcept}
+          predictError={predictError}
+          contentPlanId={contentPlan?.id || null}
+          planLoadError={planLoadError}
+          optimizationsApplied={optimizationsApplied}
+          isFormValid={isFormValid}
+          isPredictionStale={isPredictionStale}
+          submitting={submitting}
+          tooLong={tooLong}
+          onAnalyze={handlePredict}
+          creativeReview={creativeReview}
+          onCreativeReview={setCreativeReview}
+        />
+
+        <div className="min-w-0 space-y-5">
+          <ResultPanel
+            prediction={prediction}
             isPredictionStale={isPredictionStale}
-            submitting={submitting}
-            tooLong={tooLong}
-            onAnalyze={handlePredict}
+            isCreativeBriefChanged={isCreativeBriefChanged}
+            hasCreativeBrief={hasCreativeBrief}
+            hasCurrentContext={hasCurrentContext}
             creativeReview={creativeReview}
-            onCreativeReview={setCreativeReview}
+            isCreativeReviewStale={isCreativeReviewStale}
+            brandName={predictionSnapshot?.brandName ?? undefined}
+            scheduledAt={predictionScheduledAt}
+            hasPostTime={predictionSnapshot ? predictionSnapshot.postHour != null : hasPostTime}
+            contentFormat={predictionSnapshot?.contentFormat ?? contentFormat}
+            whyReasons={whyReasons}
+            mdiChartData={mdiChartData}
+            appliedRecs={appliedRecs}
+            onToggleRec={handleToggleRec}
+            anyRecsApplied={anyRecsApplied}
+            onApply={applyStagedRecommendations}
+            contentPlanId={contentPlan?.id || null}
+            planSaveState={planSaveState}
+            planSaveMessage={planSaveMessage}
+            onSaveToContentPlan={() => {
+              if (prediction?.savedId) void persistContentPlan(prediction.savedId);
+            }}
           />
-        ) : (
-          prediction && (
-            <InsightsView
-              prediction={prediction}
-              isPredictionStale={isPredictionStale}
-              isCreativeBriefChanged={isCreativeBriefChanged}
-              hasCreativeBrief={hasCreativeBrief}
-              hasCurrentContext={hasCurrentContext}
-              creativeReview={creativeReview}
-              isCreativeReviewStale={isCreativeReviewStale}
-              brandName={predictionSnapshot?.brandName ?? undefined}
-              brandId={predictionSnapshot?.accountId ?? null}
-              scheduledAt={predictionScheduledAt}
-              hasPostTime={predictionSnapshot?.postHour != null}
-              contentFormat={predictionSnapshot?.contentFormat ?? contentFormat}
-              whyReasons={whyReasons}
-              mdiChartData={mdiChartData}
-              appliedRecs={appliedRecs}
-              onToggleRec={handleToggleRec}
-              anyRecsApplied={anyRecsApplied}
-              onApply={applyStagedRecommendations}
-              onEditDraft={() => setView("compose")}
-              contentPlanId={contentPlan?.id || null}
-              planSaveState={planSaveState}
-              planSaveMessage={planSaveMessage}
-              onSaveToContentPlan={() => {
-                if (prediction.savedId) void persistContentPlan(prediction.savedId);
-              }}
-            />
-          )
-        )}
-      </AnimatePresence>
+
+          <BrandPatterns brandId={accountId} brandName={account?.name} activeModelScope={account?.active_model_scope} compact />
+        </div>
+      </div>
     </div>
   );
 }

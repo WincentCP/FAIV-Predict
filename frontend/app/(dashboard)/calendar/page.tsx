@@ -698,7 +698,7 @@ export default function CalendarPage() {
   return (
     <div className="px-4 py-6 md:px-8 md:py-8 max-w-[1400px] mx-auto">
       <SectionHeader
-        title="Content plan"
+        title="Planner"
         description="Organize ideas, production, and predictions."
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -1355,7 +1355,7 @@ function getDecisionState(entry: CalendarEntry) {
   }
   if (entry.prediction.status === "stale" || entry.prediction.status === "superseded") {
     return {
-      label: entry.prediction.status === "stale" ? "Needs update" : "Earlier version",
+      label: entry.prediction.status === "stale" ? "Outdated — re-analyze" : "Earlier version",
       tone: "warning" as DecisionTone,
       action: "Update",
       href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
@@ -1366,7 +1366,7 @@ function getDecisionState(entry: CalendarEntry) {
       label: "Result ready",
       tone: "success" as DecisionTone,
       action: "View result",
-      href: () => "/history",
+      href: () => "/results?tab=predictions",
     };
   }
   if (entry.publication) {
@@ -1374,12 +1374,12 @@ function getDecisionState(entry: CalendarEntry) {
       label: entry.publication.outcome_status === "pending_maturity" ? "Collecting results" : "Waiting for result",
       tone: "neutral" as DecisionTone,
       action: "View result",
-      href: () => "/history",
+      href: () => "/results?tab=predictions",
     };
   }
   if (entry.prediction.status === "provisional") {
     return {
-      label: "Add publish time",
+      label: "No time set yet",
       tone: "neutral" as DecisionTone,
       action: "Update",
       href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
@@ -1389,7 +1389,7 @@ function getDecisionState(entry: CalendarEntry) {
     label: "Predicted",
     tone: "success" as DecisionTone,
     action: "Review",
-    href: () => "/history",
+    href: () => "/results?tab=predictions",
   };
 }
 

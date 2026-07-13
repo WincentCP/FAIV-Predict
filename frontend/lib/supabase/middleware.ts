@@ -5,6 +5,10 @@ const PROTECTED_PREFIXES = [
   "/dashboard",
   "/predict",
   "/calendar",
+  "/results",
+  "/brands",
+  // Retired routes stay protected so their permanent redirects never leak a
+  // flash of content to signed-out visitors.
   "/history",
   "/insights",
   "/niches",

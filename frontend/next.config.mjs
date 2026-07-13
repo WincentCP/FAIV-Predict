@@ -18,6 +18,26 @@ const nextConfig = {
         destination: "/predict",
         permanent: true,
       },
+      {
+        source: "/insights",
+        destination: "/results?tab=published",
+        permanent: true,
+      },
+      {
+        source: "/history",
+        destination: "/results?tab=predictions",
+        permanent: true,
+      },
+      {
+        source: "/niches",
+        destination: "/brands",
+        permanent: true,
+      },
+      {
+        source: "/model-health",
+        destination: "/brands",
+        permanent: true,
+      },
     ];
   },
 };

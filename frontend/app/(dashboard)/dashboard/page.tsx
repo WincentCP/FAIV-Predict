@@ -18,6 +18,8 @@ type DashboardSummary = {
   staleCount: number;
   provisionalCount: number;
   observedCount: number;
+  exactTierMatchRate: number | null;
+  linkedMaturePredictions: number;
   recent: Array<{
     id: string;
     brand: string;
@@ -61,6 +63,8 @@ const EMPTY_SUMMARY: DashboardSummary = {
   staleCount: 0,
   provisionalCount: 0,
   observedCount: 0,
+  exactTierMatchRate: null,
+  linkedMaturePredictions: 0,
   recent: [],
 };
 
@@ -97,6 +101,10 @@ export default function DashboardPage() {
           staleCount: Number(data.staleCount || 0),
           provisionalCount: Number(data.provisionalCount || 0),
           observedCount: Number(data.observedCount || 0),
+          exactTierMatchRate: typeof data.outcomeVerification?.exactTierMatchRate === "number"
+            ? data.outcomeVerification.exactTierMatchRate
+            : null,
+          linkedMaturePredictions: Number(data.outcomeVerification?.linkedMaturePredictions || 0),
           recent: Array.isArray(data.recent)
             ? data.recent.map((item: any) => ({
                 id: String(item.id),
@@ -202,14 +210,14 @@ export default function DashboardPage() {
       label: "Awaiting learning",
       value: awaitingOutcome,
       detail: awaitingOutcome === 1 ? "linked post is waiting for an outcome" : "linked posts are waiting for outcomes",
-      href: "/insights",
-      action: "Open insights",
+      href: "/results?tab=published",
+      action: "Open results",
     },
     {
       label: "Observed outcomes",
       value: summary.observedCount,
       detail: "mature results available for comparison",
-      href: "/history",
+      href: "/results?tab=predictions",
       action: "View evidence",
     },
   ];
@@ -245,8 +253,16 @@ export default function DashboardPage() {
           <span>{brands.length} brand workspace{brands.length === 1 ? "" : "s"}</span>
           <span>{connectionHealthAvailable ? `${connectedCount} verified Instagram connection${connectedCount === 1 ? "" : "s"}` : "Instagram connection status unavailable"}</span>
           <span>{summary.totalPredictions} active prediction{summary.totalPredictions === 1 ? "" : "s"}</span>
+          {summary.linkedMaturePredictions > 0 && summary.exactTierMatchRate != null && (
+            <span
+              className="text-primary"
+              title={`Share of ${summary.linkedMaturePredictions} verified outcome${summary.linkedMaturePredictions === 1 ? "" : "s"} whose predicted tier matched the published result`}
+            >
+              {summary.exactTierMatchRate.toFixed(0)}% tier match on {summary.linkedMaturePredictions} verified outcome{summary.linkedMaturePredictions === 1 ? "" : "s"}
+            </span>
+          )}
           {summary.provisionalCount > 0 && (
-            <span className="text-warning-foreground">{summary.provisionalCount} need a publish time</span>
+            <span className="text-warning-foreground">{summary.provisionalCount} with no time set yet</span>
           )}
         </div>
       </header>
@@ -272,7 +288,7 @@ export default function DashboardPage() {
               <h2 className="text-sm font-bold">Start with a brand workspace</h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">Add the brand, connect Instagram, and confirm model readiness.</p>
           </div>
-          <Link href="/niches" className="inline-flex min-h-10 items-center justify-center rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground hover:bg-primary/90">
+          <Link href="/brands" className="inline-flex min-h-10 items-center justify-center rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground hover:bg-primary/90">
             Set up a brand
           </Link>
         </section>
@@ -364,7 +380,7 @@ export default function DashboardPage() {
               <h2 id="recent-title" className="font-display text-lg font-semibold">Recent decisions</h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">Latest classified drafts in this workspace.</p>
             </div>
-            <Link href="/history" className="inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-bold text-primary hover:bg-primary/[0.06]">
+            <Link href="/results?tab=predictions" className="inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-bold text-primary hover:bg-primary/[0.06]">
               History
             </Link>
           </div>
@@ -407,7 +423,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-muted-foreground">
             {connectionIssues > 0 && <span className="text-warning-foreground">{connectionIssues} connection{connectionIssues === 1 ? "" : "s"} need attention</span>}
-            <Link href="/niches" className="inline-flex min-h-9 items-center rounded-lg px-2 font-bold text-primary hover:bg-primary/[0.06]">
+            <Link href="/brands" className="inline-flex min-h-9 items-center rounded-lg px-2 font-bold text-primary hover:bg-primary/[0.06]">
               Manage brands
             </Link>
           </div>
@@ -537,7 +553,7 @@ function getPlanDecision(entry: PlanEntry) {
   }
   if (entry.prediction.status === "stale" || entry.prediction.status === "superseded") {
     return {
-      label: entry.prediction.status === "stale" ? "Prediction stale" : "Prediction superseded",
+      label: entry.prediction.status === "stale" ? "Outdated — re-analyze" : "Replaced by newer version",
       action: "Re-evaluate",
       tone: "warning" as const,
       href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
@@ -548,7 +564,7 @@ function getPlanDecision(entry: PlanEntry) {
       label: "Result ready",
       action: "View result",
       tone: "success" as const,
-      href: () => "/history",
+      href: () => "/results?tab=predictions",
     };
   }
   if (entry.publication) {
@@ -556,12 +572,12 @@ function getPlanDecision(entry: PlanEntry) {
       label: entry.publication.outcome_status === "pending_maturity" ? "Collecting results" : "Waiting for result",
       action: "View result",
       tone: "neutral" as const,
-      href: () => "/history",
+      href: () => "/results?tab=predictions",
     };
   }
   if (entry.prediction.status === "provisional") {
     return {
-      label: "Add publish time",
+      label: "No time set yet",
       action: "Update",
       tone: "neutral" as const,
       href: (id: string) => `/predict?plan_id=${encodeURIComponent(id)}`,
@@ -571,7 +587,7 @@ function getPlanDecision(entry: PlanEntry) {
     label: "Predicted",
     action: "Review",
     tone: "success" as const,
-    href: () => "/history",
+    href: () => "/results?tab=predictions",
   };
 }
 

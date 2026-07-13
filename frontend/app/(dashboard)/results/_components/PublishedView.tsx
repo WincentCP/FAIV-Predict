@@ -7,7 +7,6 @@
 import Link from "next/link";
 import { fetchWithRetry } from "@/lib/fetch-retry";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
 import { OutcomeComparison } from "@/components/OutcomeComparison";
 import { type Tier, type Brand } from "@/lib/types";
@@ -134,7 +133,7 @@ const METRIC_LABELS: Record<string, string> = Object.fromEntries(
   METRICS.map((metric) => [metric.key, metric.label])
 );
 
-export default function InsightsPage() {
+export function PublishedView() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandsLoading, setBrandsLoading] = useState(true);
   const [brandsError, setBrandsError] = useState<string | null>(null);
@@ -287,12 +286,8 @@ export default function InsightsPage() {
   ) : undefined;
 
   return (
-    <div className="mx-auto min-h-dvh max-w-[1500px] space-y-7 px-4 py-6 md:px-8 md:py-8">
-      <SectionHeader
-        title="Results"
-        description="See how published posts performed against earlier predictions."
-        actions={brandSelector}
-      />
+    <div className="space-y-7">
+      {brandSelector && <div className="flex justify-end">{brandSelector}</div>}
 
       {brandsLoading && <InsightsSkeleton />}
 
@@ -304,7 +299,7 @@ export default function InsightsPage() {
         <EmptyState
           title="No brand workspace yet"
           description="Add a brand before reviewing Instagram content."
-          action={<Link href="/niches" className={primaryButtonClass}>Add brand</Link>}
+          action={<Link href="/brands" className={primaryButtonClass}>Add brand</Link>}
         />
       )}
 
@@ -589,7 +584,7 @@ function PostAnalysis({
                   <h3 id="prediction-trace-heading" className="font-semibold">Before vs after</h3>
                   <p className="mt-1 text-sm text-muted-foreground">Compare the earlier prediction with this published post.</p>
                 </div>
-                <Link href={detail.prediction?.prediction_id ? `/history?prediction_id=${encodeURIComponent(detail.prediction.prediction_id)}` : "/history"} className="inline-flex min-h-10 items-center self-start rounded-lg px-2 text-sm font-semibold text-foreground hover:bg-surface-2">
+                <Link href={detail.prediction?.prediction_id ? `/results?tab=predictions&prediction_id=${encodeURIComponent(detail.prediction.prediction_id)}` : "/results?tab=predictions"} className="inline-flex min-h-10 items-center self-start rounded-lg px-2 text-sm font-semibold text-foreground hover:bg-surface-2">
                   Prediction history
                 </Link>
               </div>

@@ -59,6 +59,14 @@ const config: Config = {
           DEFAULT: "hsl(var(--border) / <alpha-value>)",
           strong: "hsl(var(--border-strong) / <alpha-value>)",
         },
+        tier: {
+          high: "hsl(var(--tier-high) / <alpha-value>)",
+          "high-bg": "hsl(var(--tier-high-bg) / <alpha-value>)",
+          average: "hsl(var(--tier-average) / <alpha-value>)",
+          "average-bg": "hsl(var(--tier-average-bg) / <alpha-value>)",
+          low: "hsl(var(--tier-low) / <alpha-value>)",
+          "low-bg": "hsl(var(--tier-low-bg) / <alpha-value>)",
+        },
         input: "hsl(var(--input) / <alpha-value>)",
         ring: "hsl(var(--ring) / <alpha-value>)",
         chart: {

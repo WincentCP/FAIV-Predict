@@ -228,7 +228,7 @@ export function BrandPatterns({
                   </p>
                 </div>
 
-                <Link href="/insights" className="inline-flex min-h-10 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline">
+                <Link href="/results?tab=published" className="inline-flex min-h-10 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline">
                   View results
                 </Link>
               </div>

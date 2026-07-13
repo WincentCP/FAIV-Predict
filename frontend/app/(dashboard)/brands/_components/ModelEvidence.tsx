@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   RefreshCw,
 } from "lucide-react";
-import { SectionHeader } from "@/components/SectionHeader";
 import { fetchWithRetry } from "@/lib/fetch-retry";
 import { type MlModel } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -49,7 +48,7 @@ function formatRelativeTime(iso: string | null): string {
   return "Just now";
 }
 
-export default function ModelHealthPage() {
+export function ModelEvidence() {
   const [models, setModels] = useState<ModelHealthModel[]>([]);
   const [connections, setConnections] = useState<IgConnection[]>([]);
   const [outcomeVerification, setOutcomeVerification] = useState<OutcomeVerification | null>(null);
@@ -118,22 +117,22 @@ export default function ModelHealthPage() {
   }, [connections, models]);
 
   return (
-    <div className="mx-auto min-h-dvh max-w-[1400px] space-y-7 px-4 py-6 md:px-8 md:py-8">
-      <SectionHeader
-        title="Prediction quality"
-        description="Check which prediction models are ready to use."
-        actions={
-          <button
-            type="button"
-            onClick={loadEvidence}
-            disabled={state === "loading"}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-foreground outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
-          >
-            <RefreshCw className={cn("h-4 w-4", state === "loading" && "animate-spin")} aria-hidden="true" />
-            Refresh
-          </button>
-        }
-      />
+    <div id="model-evidence" className="scroll-mt-24 space-y-7">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight">Model quality</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">Check which prediction models are ready to use and how they were evaluated.</p>
+        </div>
+        <button
+          type="button"
+          onClick={loadEvidence}
+          disabled={state === "loading"}
+          className="inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-full border border-border bg-surface px-4 text-sm font-semibold text-foreground outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
+        >
+          <RefreshCw className={cn("h-4 w-4", state === "loading" && "animate-spin")} aria-hidden="true" />
+          Refresh
+        </button>
+      </div>
 
       {loadError && (
         <div
@@ -162,8 +161,8 @@ export default function ModelHealthPage() {
           <section aria-labelledby="evidence-summary-title" className="overflow-hidden rounded-3xl border border-border bg-surface shadow-[var(--shadow-soft)]">
             <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
               <EvidenceSummary label="Active models" value={models.length} helper="Latest versions" />
-              <EvidenceSummary label="Ready" value={summary.validated} helper={`${summary.evaluated} checked`} />
-              <EvidenceSummary label="Use with caution" value={summary.exploratory} helper="Limited supporting data" />
+              <EvidenceSummary label="Reliable" value={summary.validated} helper={`${summary.evaluated} checked`} />
+              <EvidenceSummary label="Still learning" value={summary.exploratory} helper="Limited supporting data" />
               <EvidenceSummary label="Instagram connected" value={summary.freshConnections} helper="Accounts available" />
             </div>
             <h2 id="evidence-summary-title" className="sr-only">Prediction quality summary</h2>
@@ -199,9 +198,6 @@ export default function ModelHealthPage() {
                   Predictions use the latest synchronized data after retraining.
                 </p>
               </div>
-              <Link href="/niches" className="inline-flex min-h-10 items-center self-start rounded-lg px-2 text-sm font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40">
-                Manage brands
-              </Link>
             </div>
 
             {connections.length === 0 ? (
@@ -245,8 +241,8 @@ export default function ModelHealthPage() {
               <MetricDefinition term="Quadratic weighted kappa" description="Measures ordinal agreement and penalizes a two-tier error more than a one-tier error." />
               <MetricDefinition term="Test accuracy" description="The share of recent test posts classified correctly. It may look stronger when one performance level dominates the data." />
               <MetricDefinition term="Gain vs benchmark" description="Compares the model with a simple rule that always selects the most common level." />
-              <MetricDefinition term="Ready" description="The model passed the configured quality checks. Individual post results are still not guaranteed." />
-              <MetricDefinition term="Use with caution" description="The model is available, but its supporting data or test results are limited." />
+              <MetricDefinition term="Reliable" description="The model passed the configured quality checks. Individual post results are still not guaranteed." />
+              <MetricDefinition term="Still learning" description="The model is available, but its supporting data or test results are limited." />
             </dl>
           </details>
         </>
@@ -271,7 +267,7 @@ function ModelEvidenceCard({ model }: { model: ModelHealthModel }) {
         </div>
         <StatusBadge
           tone={validated ? "success" : evaluated ? "warning" : "neutral"}
-          label={validated ? "Ready" : evaluated ? "Use with caution" : "Not ready"}
+          label={validated ? "Reliable" : evaluated ? "Still learning" : "Not ready"}
         />
       </div>
 
@@ -385,9 +381,7 @@ function EmptyEvidence() {
       <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
         Connect Instagram and complete synchronization and retraining to create a model.
       </p>
-      <Link href="/niches" className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
-        Review brands
-      </Link>
+      <p className="mt-4 text-xs text-muted-foreground">Manage brands and connections in the section above.</p>
     </div>
   );
 }

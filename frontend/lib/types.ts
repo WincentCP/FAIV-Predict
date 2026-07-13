@@ -52,20 +52,20 @@ export function normalizeBrandReference(value: string): string {
 export const TIER_META: Record<Tier, { label: string; color: string; bg: string; ring: string }> = {
   High: {
     label: "HIGH",
-    color: "text-primary",
-    bg: "bg-primary/10",
-    ring: "ring-primary/25",
+    color: "text-tier-high",
+    bg: "bg-tier-high-bg",
+    ring: "ring-tier-high/25",
   },
   Average: {
     label: "AVERAGE",
-    color: "text-amber-700 dark:text-amber-300",
-    bg: "bg-warning/10",
-    ring: "ring-warning/30",
+    color: "text-tier-average",
+    bg: "bg-tier-average-bg",
+    ring: "ring-tier-average/30",
   },
   Low: {
     label: "LOW",
-    color: "text-destructive",
-    bg: "bg-destructive/10",
-    ring: "ring-destructive/25",
+    color: "text-tier-low",
+    bg: "bg-tier-low-bg",
+    ring: "ring-tier-low/25",
   },
 };

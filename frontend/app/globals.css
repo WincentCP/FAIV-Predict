@@ -8,17 +8,17 @@
   --font-plus-jakarta: "Plus Jakarta Sans Variable";
   --radius: 0.625rem;
 
-  --background: 260 24% 97%;
-  --foreground: 258 18% 13%;
+  --background: 288 60% 98%;
+  --foreground: 266 12% 12%;
   --surface: 0 0% 100%;
-  --surface-2: 260 20% 98%;
-  --surface-3: 260 14% 93%;
+  --surface-2: 282 45% 97%;
+  --surface-3: 280 28% 94%;
   --card: 0 0% 100%;
-  --card-foreground: 258 18% 13%;
+  --card-foreground: 266 12% 12%;
   --popover: 0 0% 100%;
-  --popover-foreground: 258 18% 13%;
+  --popover-foreground: 266 12% 12%;
 
-  --primary: 264 58% 44%;
+  --primary: 260 44% 45%;
   --primary-foreground: 0 0% 100%;
   --secondary: 263 20% 94%;
   --secondary-foreground: 260 18% 20%;
@@ -36,30 +36,37 @@
   --destructive: 3 70% 51%;
   --destructive-foreground: 0 0% 100%;
 
-  --border: 260 12% 88%;
-  --border-strong: 260 10% 78%;
-  --input: 260 10% 82%;
-  --ring: 264 58% 44%;
+  --border: 270 16% 87%;
+  --border-strong: 270 13% 77%;
+  --input: 270 12% 81%;
+  --ring: 260 44% 45%;
 
-  --chart-1: 264 58% 44%;
+  --tier-high: 140 72% 26%;
+  --tier-high-bg: 137 39% 93%;
+  --tier-average: 33 100% 33%;
+  --tier-average-bg: 46 94% 94%;
+  --tier-low: 0 66% 42%;
+  --tier-low-bg: 6 100% 93%;
+
+  --chart-1: 260 44% 45%;
   --chart-2: 153 52% 39%;
   --chart-3: 201 72% 46%;
   --chart-4: 39 91% 50%;
   --chart-5: 3 70% 54%;
 
   --sidebar: 0 0% 100%;
-  --sidebar-foreground: 258 12% 20%;
-  --sidebar-primary: 264 58% 44%;
+  --sidebar-foreground: 266 12% 20%;
+  --sidebar-primary: 260 44% 45%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 263 24% 95%;
-  --sidebar-accent-foreground: 258 18% 13%;
-  --sidebar-border: 260 12% 88%;
-  --sidebar-ring: 264 58% 44%;
+  --sidebar-accent: 282 45% 96%;
+  --sidebar-accent-foreground: 266 12% 12%;
+  --sidebar-border: 270 16% 87%;
+  --sidebar-ring: 260 44% 45%;
 
-  --shadow-soft: 0 1px 2px hsl(260 18% 15% / 0.04);
+  --shadow-soft: 0 10px 30px hsl(260 44% 55% / 0.08);
   --shadow-elevated:
-    0 1px 2px hsl(260 18% 15% / 0.05),
-    0 14px 36px -20px hsl(260 18% 15% / 0.24);
+    0 1px 2px hsl(260 30% 15% / 0.05),
+    0 15px 40px -18px hsl(260 44% 45% / 0.28);
 }
 
 .dark {
@@ -96,6 +103,13 @@
   --border-strong: 258 9% 32%;
   --input: 258 9% 29%;
   --ring: 264 74% 70%;
+
+  --tier-high: 140 50% 62%;
+  --tier-high-bg: 140 30% 14%;
+  --tier-average: 40 88% 62%;
+  --tier-average-bg: 40 42% 13%;
+  --tier-low: 4 80% 68%;
+  --tier-low-bg: 4 45% 14%;
 
   --chart-1: 264 74% 70%;
   --chart-2: 153 55% 55%;

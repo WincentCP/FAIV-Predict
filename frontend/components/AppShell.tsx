@@ -5,51 +5,36 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  BarChart3,
+  CalendarDays,
   ChevronDown,
+  Home,
   LogOut,
-  Menu,
   Moon,
+  Sparkles,
   Sun,
-  X,
+  Users,
+  type LucideIcon,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { buttonVariants } from "@/components/ui/button";
 import { GlossaryPopover } from "@/components/GlossaryPopover";
 import { cn } from "@/lib/utils";
 
-const NAV_GROUPS = [
-  {
-    label: "Workspace",
-    items: [
-      { to: "/dashboard", label: "Overview" },
-      { to: "/predict", label: "Predict" },
-      { to: "/calendar", label: "Plan" },
-    ],
-  },
-  {
-    label: "Review",
-    items: [
-      { to: "/insights", label: "Results" },
-      { to: "/history", label: "History" },
-    ],
-  },
-  {
-    label: "Manage",
-    items: [
-      { to: "/niches", label: "Brands" },
-      { to: "/model-health", label: "Quality" },
-    ],
-  },
-] as const;
+const NAV_ITEMS: ReadonlyArray<{ to: string; label: string; icon: LucideIcon }> = [
+  { to: "/dashboard", label: "Home", icon: Home },
+  { to: "/predict", label: "Predict", icon: Sparkles },
+  { to: "/calendar", label: "Planner", icon: CalendarDays },
+  { to: "/results", label: "Results", icon: BarChart3 },
+  { to: "/brands", label: "Brands", icon: Users },
+];
 
 const PAGE_CONTEXT: Record<string, { title: string; description: string }> = {
-  "/dashboard": { title: "Overview", description: "Priorities at a glance" },
-  "/predict": { title: "Predict", description: "Evaluate before publishing" },
-  "/calendar": { title: "Plan", description: "Plan upcoming content" },
-  "/insights": { title: "Results", description: "Review published performance" },
-  "/history": { title: "Previous predictions", description: "Review earlier results" },
-  "/niches": { title: "Brands", description: "Instagram and prediction readiness" },
-  "/model-health": { title: "Prediction quality", description: "Check model readiness" },
+  "/dashboard": { title: "Home", description: "Your workspace at a glance" },
+  "/predict": { title: "Predict", description: "Estimate performance before publishing" },
+  "/calendar": { title: "Planner", description: "Plan upcoming content" },
+  "/results": { title: "Results", description: "Published posts and prediction outcomes" },
+  "/brands": { title: "Brands", description: "Workspaces, connections, and model quality" },
 };
 
 const THEME_STORAGE_KEY = "faiv-theme";
@@ -62,46 +47,84 @@ function isActive(pathname: string, to: string) {
 function BrandLockup({ compact = false }: { compact?: boolean }) {
   return (
     <div className="min-w-0 leading-tight">
-      <div className="font-display text-sm font-bold tracking-[-0.025em] text-foreground">FAIV Predict</div>
+      <div className="font-display text-sm font-bold tracking-[-0.025em] text-primary">FAIV Predict</div>
       {!compact && (
         <div>
-          <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Content intelligence</div>
+          <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Creative partner</div>
         </div>
       )}
     </div>
   );
 }
 
-function Navigation({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function SidebarNavigation({ pathname }: { pathname: string }) {
   return (
     <nav aria-label="Primary navigation" className="flex-1 overflow-y-auto px-3 py-5">
-      {NAV_GROUPS.map((group) => (
-        <div key={group.label} className="mb-6 last:mb-0">
-          <div className="mb-2 px-3 text-[11px] font-semibold text-muted-foreground">{group.label}</div>
-          <ul className="space-y-1">
-            {group.items.map((item) => {
-              const active = isActive(pathname, item.to);
-              return (
-                <li key={item.to}>
-                  <Link
-                    href={item.to}
-                    onClick={onNavigate}
-                    aria-current={active ? "page" : undefined}
-                    className={cn(
-                      "group flex min-h-11 items-center rounded-xl px-3 text-[13px] font-semibold transition-[background-color,color,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
-                      active
-                        ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                        : "text-sidebar-foreground/72 hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                    )}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
+      <ul className="space-y-1.5">
+        {NAV_ITEMS.map((item) => {
+          const active = isActive(pathname, item.to);
+          const Icon = item.icon;
+          return (
+            <li key={item.to}>
+              <Link
+                href={item.to}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "group flex min-h-11 items-center gap-3 rounded-xl border-l-4 px-3 text-[13px] transition-[background-color,color] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
+                  active
+                    ? "border-primary bg-primary/[0.07] font-bold text-primary"
+                    : "border-transparent font-semibold text-sidebar-foreground/72 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                )}
+              >
+                <Icon
+                  aria-hidden="true"
+                  className={cn("h-[18px] w-[18px] shrink-0", active ? "text-primary" : "text-muted-foreground group-hover:text-sidebar-foreground")}
+                  strokeWidth={active ? 2.4 : 2}
+                />
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+function MobileBottomNav({ pathname }: { pathname: string }) {
+  return (
+    <nav
+      aria-label="Primary navigation"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
+    >
+      <ul className="flex h-16 items-stretch justify-around">
+        {NAV_ITEMS.map((item) => {
+          const active = isActive(pathname, item.to);
+          const Icon = item.icon;
+          return (
+            <li key={item.to} className="min-w-0 flex-1">
+              <Link
+                href={item.to}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex h-full flex-col items-center justify-center gap-1 text-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                  active ? "font-bold text-primary" : "font-medium text-muted-foreground",
+                )}
+              >
+                <span
+                  className={cn(
+                    "grid h-7 w-12 place-items-center rounded-full transition-colors",
+                    active && "bg-primary/[0.1]",
+                  )}
+                >
+                  <Icon aria-hidden="true" className="h-[19px] w-[19px]" strokeWidth={active ? 2.4 : 2} />
+                </span>
+                <span className="truncate">{item.label}</span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     </nav>
   );
 }
@@ -150,11 +173,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [themeReady, setThemeReady] = React.useState(false);
   const [sidebarUserOpen, setSidebarUserOpen] = React.useState(false);
   const [topbarUserOpen, setTopbarUserOpen] = React.useState(false);
-  const [mobileOpen, setMobileOpen] = React.useState(false);
   const [userEmail, setUserEmail] = React.useState("");
-  const mobileTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const mobileCloseRef = React.useRef<HTMLButtonElement>(null);
-  const mobileNavRef = React.useRef<HTMLElement>(null);
   const sidebarUserRef = React.useRef<HTMLDivElement>(null);
   const topbarUserRef = React.useRef<HTMLDivElement>(null);
 
@@ -194,39 +213,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  React.useEffect(() => {
-    if (!mobileOpen) return;
-    const mobileTrigger = mobileTriggerRef.current;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    mobileCloseRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileOpen(false);
-      if (event.key !== "Tab") return;
-      const focusable = Array.from(
-        mobileNavRef.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ) ?? [],
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = previousOverflow;
-      mobileTrigger?.focus();
-    };
-  }, [mobileOpen]);
-
   const displayName = userEmail ? userEmail.split("@")[0] : "Account";
   const avatarInitial = displayName.charAt(0).toUpperCase() || "?";
   const pageContext = PAGE_CONTEXT[pathname] ?? PAGE_CONTEXT[Object.keys(PAGE_CONTEXT).find((key) => pathname.startsWith(key)) ?? "/dashboard"];
@@ -250,57 +236,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         Skip to main content
       </a>
 
-      <AnimatePresence>
-        {mobileOpen && (
-          <motion.div
-            className="fixed inset-0 z-50 flex md:hidden"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Navigation"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={MOTION}
-          >
-            <button
-              type="button"
-              aria-label="Close navigation"
-              className="fixed inset-0 bg-foreground/30"
-              onClick={() => setMobileOpen(false)}
-            />
-            <motion.aside
-              ref={mobileNavRef}
-              id="mobile-navigation"
-              initial={{ x: -24 }}
-              animate={{ x: 0 }}
-              exit={{ x: -24 }}
-              transition={MOTION}
-              className="relative flex h-full w-[286px] max-w-[88vw] flex-col border-r border-sidebar-border bg-sidebar shadow-[var(--shadow-elevated)]"
-            >
-              <div className="flex h-[72px] items-center justify-between border-b border-sidebar-border px-4">
-                <BrandLockup />
-                <button
-                  ref={mobileCloseRef}
-                  type="button"
-                  onClick={() => setMobileOpen(false)}
-                  className="grid h-10 w-10 place-items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  aria-label="Close menu"
-                >
-                  <X aria-hidden="true" className="h-5 w-5" />
-                </button>
-              </div>
-              <Navigation pathname={pathname} onNavigate={() => setMobileOpen(false)} />
-            </motion.aside>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <div className="flex min-w-0">
         <aside className="sticky top-0 hidden h-[100dvh] w-[240px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex">
           <div className="flex h-[72px] shrink-0 items-center border-b border-sidebar-border px-5">
             <BrandLockup />
           </div>
-          <Navigation pathname={pathname} />
+          <SidebarNavigation pathname={pathname} />
           <div ref={sidebarUserRef} className="relative shrink-0 border-t border-sidebar-border p-3">
             <AnimatePresence>
               {sidebarUserOpen && (
@@ -333,17 +274,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="flex min-h-[100dvh] min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-30 flex h-[72px] shrink-0 items-center justify-between border-b border-border bg-surface/95 px-4 backdrop-blur-md sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
-              <button
-                ref={mobileTriggerRef}
-                type="button"
-                onClick={() => setMobileOpen(true)}
-                aria-label="Open navigation"
-                aria-expanded={mobileOpen}
-                aria-controls="mobile-navigation"
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
-              >
-                <Menu aria-hidden="true" className="h-5 w-5" />
-              </button>
               <div className="md:hidden"><BrandLockup compact /></div>
               <div className="hidden min-w-0 md:block">
                 <div className="truncate text-sm font-semibold text-foreground">{pageContext.title}</div>
@@ -355,7 +285,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {pathname !== "/predict" && (
                 <Link
                   href="/predict"
-                  className={cn(buttonVariants({ size: "sm" }), "hidden h-10 px-4 sm:inline-flex")}
+                  className={cn(buttonVariants({ size: "sm" }), "hidden h-10 rounded-full px-4 sm:inline-flex")}
                   aria-label="Start a new content prediction"
                 >
                   <span>New prediction</span>
@@ -396,11 +326,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </header>
 
-          <main id="main-content" tabIndex={-1} key={pathname} className="page-enter min-w-0 flex-1">
+          <main id="main-content" tabIndex={-1} key={pathname} className="page-enter min-w-0 flex-1 pb-20 md:pb-0">
             {children}
           </main>
         </div>
       </div>
+
+      <MobileBottomNav pathname={pathname} />
     </div>
   );
 }
