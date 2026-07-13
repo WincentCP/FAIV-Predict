@@ -271,6 +271,10 @@ def main() -> int:
         "NOTIFICATION_FROM_EMAIL=",
         "NOTIFICATION_TO_EMAIL=",
         "IG_SYNC_POST_LIMIT=",
+        # Meta access tokens live in IG_BRANDS_JSON and belong only to the ML
+        # service. n8n triggers a sync through an authenticated HTTP call and
+        # must never receive the Instagram credentials in its own environment.
+        "IG_BRANDS_JSON=",
     ):
         require(forbidden not in n8n_service, f"n8n service still receives {forbidden}")
 
