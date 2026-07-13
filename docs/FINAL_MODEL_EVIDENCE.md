@@ -1,4 +1,6 @@
-﻿# FAIV Predict final model evidence
+﻿# FAIV Predict archived pre-plan model evidence
+
+> **Not final thesis evidence.** The recorded model training-code fingerprint (`b3df9ef9...`) does not match the current final-source fingerprint (`935b0b55...`). The supported-format training query changed after these models were trained. Run the final verified sync/retrain cycle, export fresh Markdown and JSON, and pass `scripts/thesis_preflight.ps1` before citing any value below. This archived snapshot is retained only as a traceable input to the implementation review.
 
 Generated from the latest application-append-only `models.metrics` records. Raw captions and secrets are excluded.
 
@@ -2093,4 +2095,3 @@ Generated from the latest application-append-only `models.metrics` records. Raw 
 - `exploratory` is an honest usable result with insufficient or inconsistent scientific evidence. It must not be reported as validated merely because the operational promotion gate passed.
 - Raw Random Forest class scores are not calibrated probabilities, and counterfactual score changes are not causal engagement uplift.
 - The outcome is a relative cumulative likes-and-comments tier using the follower count captured at first observation, not an exact fixed seven-day outcome.
-

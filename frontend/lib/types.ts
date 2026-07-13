@@ -37,6 +37,7 @@ export interface MlModel {
   evaluationStatus?: "validated" | "exploratory" | null;
   macroF1?: number | null;
   balancedAccuracy?: number | null;
+  quadraticWeightedKappa?: number | null; // Raw ordinal agreement coefficient in [-1, 1].
   majorityBaselineAccuracy?: number | null;
   accuracyGain?: number | null;
   holdoutSamples?: number | null;

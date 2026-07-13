@@ -4,7 +4,9 @@ import { fetchWithRetry } from "@/lib/fetch-retry";
 import Link from "next/link";
 import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
+import { OutcomeComparison } from "@/components/OutcomeComparison";
 import { creativeBriefSummary, isStructuredCreativeBrief } from "@/lib/creative-brief";
+import type { RealizedClassBasis } from "@/lib/realized-outcomes";
 import { type ContentFormat, type Brand, type Tier, normalizeBrandReference } from "@/lib/types";
 import {
   UploadCloud,
@@ -49,6 +51,10 @@ type CalendarEntry = {
     time_known: boolean;
     model_version: string | null;
     actual_er: number | null;
+    realized_tier: Tier | null;
+    realized_class_basis: RealizedClassBasis | null;
+    tier_error: 0 | 1 | 2 | null;
+    verification_badge: "match" | "one_off" | "miss" | null;
   } | null;
   publication: {
     id: string;
@@ -1673,6 +1679,16 @@ function EntryModal({
                   ? ` Instagram post linked${draft.publication.observed_er !== null ? ` · engagement ${draft.publication.observed_er.toFixed(2)}%` : " · result pending"}.`
                   : " No Instagram post is linked yet."}
               </p>
+              {draft.prediction?.realized_tier && (
+                <div className="mt-3 border-t border-border pt-3">
+                  <OutcomeComparison
+                    predictedTier={draft.prediction.tier}
+                    realizedTier={draft.prediction.realized_tier}
+                    basis={draft.prediction.realized_class_basis}
+                    compact
+                  />
+                </div>
+              )}
               <Link
                 href={`/predict?plan_id=${encodeURIComponent(draft.id)}`}
                 className="mt-3 inline-flex min-h-10 items-center rounded-lg bg-primary px-3 font-bold text-primary-foreground hover:bg-primary/90"

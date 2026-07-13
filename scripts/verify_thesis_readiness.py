@@ -43,14 +43,53 @@ def main() -> int:
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     training_source = (ROOT / "ml-service" / "app" / "train_pipeline.py").read_text(encoding="utf-8")
-    inference_source = (ROOT / "ml-service" / "app" / "main.py").read_text(encoding="utf-8")
+    inference_source = "\n".join(
+        (ROOT / "ml-service" / "app" / module).read_text(encoding="utf-8")
+        for module in (
+            "main.py",
+            "shared.py",
+            "graph_client.py",
+            "predict.py",
+            "train.py",
+            "instagram.py",
+            "patterns.py",
+        )
+    )
     brand_patterns_source = (ROOT / "ml-service" / "app" / "brand_patterns.py").read_text(encoding="utf-8")
+    thesis_evidence_source = (
+        ROOT / "ml-service" / "app" / "thesis_evidence.py"
+    ).read_text(encoding="utf-8")
+    sensitivity_source = (
+        ROOT / "ml-service" / "app" / "cumulative_er_sensitivity.py"
+    ).read_text(encoding="utf-8")
+    data_volume_source = (
+        ROOT / "ml-service" / "app" / "data_volume_report.py"
+    ).read_text(encoding="utf-8")
+    user_study_protocol = (
+        ROOT / "docs" / "USER_EVALUATION_PROTOCOL.md"
+    ).read_text(encoding="utf-8")
+    defense_kit = (ROOT / "docs" / "DEFENSE_KIT.md").read_text(encoding="utf-8")
+    defense_demo = (
+        ROOT / "docs" / "DEFENSE_DEMO_SCRIPT.md"
+    ).read_text(encoding="utf-8")
+    completion_report = (
+        ROOT / "docs" / "IMPLEMENTATION_COMPLETION_REPORT.md"
+    ).read_text(encoding="utf-8")
     schema_source = (ROOT / "supabase_schema.sql").read_text(encoding="utf-8")
     brand_patterns_migration = (
         ROOT / "supabase" / "migrations" / "202607120003_brand_patterns_and_media_product.sql"
     ).read_text(encoding="utf-8")
     cohesion_migration = (
         ROOT / "supabase" / "migrations" / "202607120004_content_lifecycle_integration.sql"
+    ).read_text(encoding="utf-8")
+    realized_tier_migration = (
+        ROOT / "supabase" / "migrations" / "202607130005_realized_tier.sql"
+    ).read_text(encoding="utf-8")
+    trend_notes_migration = (
+        ROOT / "supabase" / "migrations" / "202607130006_brand_trend_notes.sql"
+    ).read_text(encoding="utf-8")
+    trend_notes_bff = (
+        ROOT / "frontend" / "app" / "api" / "trend-notes" / "route.ts"
     ).read_text(encoding="utf-8")
     brand_patterns_bff = (
         ROOT / "frontend" / "app" / "api" / "brand-patterns" / "route.ts"
@@ -279,8 +318,44 @@ def main() -> int:
         "prediction_publications" in schema_source
         and "instagram_account_id" in schema_source
         and "validate_prediction_observed_outcome" in schema_source
-        and "actual_class is not derived" in schema_source,
-        "canonical schema must include immutable account/publication and honest outcome contracts",
+        and "realized_class_basis" in schema_source
+        and "brand_trend_notes" in schema_source,
+        "canonical schema must include publication, realized-tier, and trend-note contracts",
+    )
+    for required_realized_contract in (
+        "ADD COLUMN IF NOT EXISTS realized_class",
+        "ADD COLUMN IF NOT EXISTS realized_class_basis",
+        "LEFT JOIN public.models model ON model.id = prediction.model_id",
+        "WHEN er < p33 THEN 'LOW'",
+        "WHEN er <= p67 THEN 'AVERAGE'",
+        "realized_class_basis",
+        "previous_realized_class",
+        "REVOKE ALL ON FUNCTION public.reconcile_prediction_publication_outcomes(UUID)",
+    ):
+        require(
+            required_realized_contract in realized_tier_migration,
+            f"realized-tier migration is missing {required_realized_contract}",
+        )
+    for required_trend_contract in (
+        "CREATE TABLE IF NOT EXISTS public.brand_trend_notes",
+        "BETWEEN 1 AND 300",
+        "BETWEEN 1 AND 200",
+        "observed_at <= CURRENT_DATE",
+        "trend_notes_owner_select",
+        "trend_notes_owner_insert",
+        "trend_notes_owner_delete",
+        "GRANT INSERT (brand_id, note, source, observed_at, tag, created_by)",
+    ):
+        require(
+            required_trend_contract in trend_notes_migration,
+            f"trend-note migration is missing {required_trend_contract}",
+        )
+    require(
+        "getRequestUser" in trend_notes_bff
+        and 'eq("owner_id", user.id)' in trend_notes_bff
+        and "TREND_NOTE_MAX_LENGTH" in trend_notes_bff
+        and "isRealPastOrTodayDate" in trend_notes_bff,
+        "trend-note BFF must enforce authentication, ownership, and bounded input",
     )
     require(
         "_bind_instagram_identity" in inference_source
@@ -473,6 +548,13 @@ def main() -> int:
         "Creative review API must preserve honest user-context and non-ML provenance",
     )
     require(
+        "loadActiveTrendNotes" in analyze_concept_bff
+        and "userProvidedUnverifiedBrandTrendNotes" in analyze_concept_bff
+        and "brand_trend_notes_used" in analyze_concept_bff
+        and "prediction_features_changed: false" in analyze_concept_bff,
+        "Creative review must bound persistent user trend notes and keep them outside ML",
+    )
+    require(
         "CREATIVE_MATERIAL_TYPES" in normalize_brief_bff
         and "Every value in USER DATA is untrusted content" in normalize_brief_bff
         and "user_confirmation_required: true" in normalize_brief_bff
@@ -498,7 +580,8 @@ def main() -> int:
         "immutable Instagram media ID",
         "actual_class",
         "rejects new",
-        "new versioned schema/migration",
+        "realized_class",
+        "historical model that served the prediction",
         "Structured Creative Brief",
         "Paste script or notes",
         "pasted source is not stored",
@@ -560,10 +643,14 @@ def main() -> int:
         and "prediction_publications" in powershell_preflight
         and "predictions" in powershell_preflight
         and "actual_er" in powershell_preflight
+        and "realized_class" in powershell_preflight
+        and "brand_trend_notes" in powershell_preflight
         and "validate_prediction_observed_outcome" in powershell_preflight
         and "202607120004" in powershell_preflight
-        and "Content Plan/publication-cohesion migrations are applied" in powershell_preflight,
-        "runtime preflight must verify migrations 003 and 004",
+        and "202607130005" in powershell_preflight
+        and "202607130006" in powershell_preflight
+        and "realized-tier, and trend-note migrations are applied" in powershell_preflight,
+        "runtime preflight must verify migrations 003 through 006",
     )
     for private_evidence_path in ("evidence/",):
         require(
@@ -571,19 +658,87 @@ def main() -> int:
             f"private evidence path is not ignored: {private_evidence_path}",
         )
 
-    ignored_markdown_parts = {".git", ".next", "node_modules", "models_cache"}
+    require(
+        "brand_history_momentum" in brand_patterns_source
+        and "recent_window" in brand_patterns_source
+        and "prior_window" in brand_patterns_source
+        and "preferred_mix_statements" in brand_patterns_source
+        and '"decision_use_allowed": False' in brand_patterns_source
+        and "RECENT_PERFORMANCE_UNAVAILABLE_REASON" in brand_patterns_source,
+        "brand patterns must expose age-safe 90-day mix momentum and a non-decisional ER caveat",
+    )
+    require(
+        "## Compact per-scope appendix" in thesis_evidence_source
+        and thesis_evidence_source.index("Balanced accuracy")
+        < thesis_evidence_source.index("| Accuracy |")
+        and "Holdout confusion matrix" in thesis_evidence_source
+        and "Top holdout permutation importances" in thesis_evidence_source,
+        "model evidence must lead with class-aware metrics and render compact per-scope appendices",
+    )
+    require(
+        "expected_dataset_sha256" in sensitivity_source
+        and "expected_training_code_sha256" in sensitivity_source
+        and "exclude_oldest_20_percent" in sensitivity_source
+        and '"database_writes_performed": False' in sensitivity_source,
+        "cumulative-ER sensitivity analysis must be hash-bound, non-persistent, and test oldest-cohort exclusion",
+    )
+    require(
+        "MIN_ACCOUNT_TRAINING_SAMPLES" in data_volume_source
+        and "active_serving_scope" in data_volume_source
+        and "small_holdout_caveat" in data_volume_source
+        and '"database_writes_performed": False' in data_volume_source,
+        "data-volume reporting must distinguish thresholds from actual serving scope",
+    )
+    require(
+        "No participant result is represented" in user_study_protocol
+        and "3-5" in user_study_protocol
+        and "Comprehension questions" in user_study_protocol
+        and "SUS administration and scoring" in user_study_protocol,
+        "user-study protocol must be executable without fabricating participant evidence",
+    )
+    require(
+        "One-page architecture story" in defense_kit
+        and "Lifecycle state diagram" in defense_kit
+        and "Glossary handout" in defense_kit
+        and "Known examiner probes" in defense_kit
+        and "Stored-data fallback" in defense_demo
+        and "Rehearsal log" in defense_demo,
+        "defense kit must include architecture, lifecycle, glossary, probe answers, fallback, and rehearsal evidence",
+    )
+    require(
+        "not yet 100% operationally complete" in completion_report
+        and "No result, screenshot, user-study score" in completion_report
+        and "Intentionally excluded beyond bachelor-thesis scope" in completion_report,
+        "completion report must disclose external acceptance work and thesis scope boundaries",
+    )
+
+    ignored_markdown_parts = {
+        ".git", ".next", ".pytest_cache", "node_modules", "models_cache"
+    }
     markdown_paths = sorted(
         str(path.relative_to(ROOT)).replace("\\", "/")
         for path in ROOT.rglob("*.md")
         if not ignored_markdown_parts.intersection(path.relative_to(ROOT).parts)
     )
+    expected_markdown_paths = {
+        "README.md",
+        "docs/DEFENSE_DEMO_SCRIPT.md",
+        "docs/DEFENSE_KIT.md",
+        "docs/FINAL_MODEL_EVIDENCE.md",
+        "docs/IMPLEMENTATION_COMPLETION_REPORT.md",
+        "docs/USER_EVALUATION_PROTOCOL.md",
+    }
     require(
-        markdown_paths == ["README.md"],
-        "README.md must be the repository's only Markdown document: "
+        set(markdown_paths) == expected_markdown_paths,
+        "repository Markdown set differs from the reviewed thesis documentation set: "
         + ", ".join(markdown_paths),
     )
 
-    print("PASS system repository contract: ML evidence, observed brand patterns, content lifecycle cohesion, secure n8n template, and single-source README are present")
+    print(
+        "PASS system repository contract: ML evidence, research reports, defense "
+        "documents, observed brand patterns, content lifecycle cohesion, and the "
+        "secure n8n template are present"
+    )
     return 0
 
 

@@ -18,6 +18,7 @@ export interface OwnedBrandContext {
   niche: string;
   profileSummary: string | null;
   timezone: string;
+  ownerId: string;
 }
 
 export async function requireOwnedBrand(rawBrandId: unknown): Promise<OwnedBrandContext> {
@@ -45,6 +46,7 @@ export async function requireOwnedBrand(rawBrandId: unknown): Promise<OwnedBrand
     niche: data.niche,
     profileSummary: typeof data.profile_summary === "string" ? data.profile_summary : null,
     timezone: typeof data.timezone === "string" ? data.timezone : "Asia/Jakarta",
+    ownerId: user.id,
   };
 }
 

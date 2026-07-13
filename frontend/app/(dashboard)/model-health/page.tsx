@@ -24,6 +24,18 @@ type IgConnection = {
 
 type LoadState = "loading" | "ready" | "error";
 
+type ModelHealthModel = MlModel & { quadraticWeightedKappa?: number | null };
+
+type OutcomeVerification = {
+  linkedMaturePredictions: number;
+  exactTierMatches: number;
+  withinOneTierMatches: number;
+  exactTierMatchRate: number | null;
+  withinOneTierRate: number | null;
+  meanAbsoluteTierError: number | null;
+  cumulativeErDisclaimer: string;
+};
+
 function formatRelativeTime(iso: string | null): string {
   if (!iso) return "Not updated yet";
   const timestamp = new Date(iso).getTime();
@@ -38,8 +50,9 @@ function formatRelativeTime(iso: string | null): string {
 }
 
 export default function ModelHealthPage() {
-  const [models, setModels] = useState<MlModel[]>([]);
+  const [models, setModels] = useState<ModelHealthModel[]>([]);
   const [connections, setConnections] = useState<IgConnection[]>([]);
+  const [outcomeVerification, setOutcomeVerification] = useState<OutcomeVerification | null>(null);
   const [state, setState] = useState<LoadState>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -47,13 +60,15 @@ export default function ModelHealthPage() {
     setState("loading");
     setLoadError(null);
     try {
-      const [modelsRes, connectionsRes] = await Promise.all([
+      const [modelsRes, connectionsRes, dashboardRes] = await Promise.all([
         fetchWithRetry("/api/models"),
         fetchWithRetry("/api/instagram-health", { cache: "no-store" }, 0),
+        fetchWithRetry("/api/dashboard", { cache: "no-store" }).catch(() => null),
       ]);
-      const [modelPayload, connectionPayload] = await Promise.all([
+      const [modelPayload, connectionPayload, dashboardPayload] = await Promise.all([
         modelsRes.json().catch(() => null),
         connectionsRes.json().catch(() => null),
+        dashboardRes?.json().catch(() => null) ?? null,
       ]);
 
       if (!modelsRes.ok || !Array.isArray(modelPayload)) {
@@ -66,13 +81,25 @@ export default function ModelHealthPage() {
           ? connectionPayload.connections
           : []
       );
-      if (!connectionsRes.ok) {
-        setLoadError("Prediction quality is available, but the latest Instagram update could not be checked.");
+      setOutcomeVerification(
+        dashboardRes?.ok && dashboardPayload?.outcomeVerification
+          ? dashboardPayload.outcomeVerification as OutcomeVerification
+          : null
+      );
+      if (!connectionsRes.ok || !dashboardRes?.ok) {
+        setLoadError(
+          !connectionsRes.ok && !dashboardRes?.ok
+            ? "Prediction quality is available, but Instagram status and observed-tier verification could not be checked."
+            : !connectionsRes.ok
+              ? "Prediction quality is available, but the latest Instagram update could not be checked."
+              : "Prediction quality is available, but observed-tier verification could not be checked."
+        );
       }
       setState("ready");
     } catch (error: unknown) {
       setModels([]);
       setConnections([]);
+      setOutcomeVerification(null);
       setState("error");
       setLoadError(error instanceof Error ? error.message : "Prediction quality is temporarily unavailable.");
     }
@@ -142,12 +169,14 @@ export default function ModelHealthPage() {
             <h2 id="evidence-summary-title" className="sr-only">Prediction quality summary</h2>
           </section>
 
+          <OutcomeVerificationPanel value={outcomeVerification} />
+
           <section aria-labelledby="model-evidence-title" className="space-y-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 id="model-evidence-title" className="text-xl font-semibold tracking-tight">Prediction readiness</h2>
                 <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                  Test results saved when each model was trained.
+                  Class-aware and ordinal metrics lead because raw accuracy can be misleading when one of three performance tiers is more common.
                 </p>
               </div>
               <span className="text-sm text-muted-foreground">{models.length} current record{models.length === 1 ? "" : "s"}</span>
@@ -211,9 +240,10 @@ export default function ModelHealthPage() {
               <span className="ml-auto text-sm font-normal text-muted-foreground group-open:hidden">Show definitions</span>
             </summary>
             <dl className="mt-4 grid gap-4 border-t border-border pt-4 text-sm sm:grid-cols-2">
-              <MetricDefinition term="Test accuracy" description="The share of recent test posts classified correctly. It may look stronger when one performance level dominates the data." />
-              <MetricDefinition term="Macro F1" description="Checks performance across all levels so weaker results are not hidden by the most common level." />
               <MetricDefinition term="Balanced accuracy" description="Gives each observed performance level equal weight." />
+              <MetricDefinition term="Macro F1" description="Checks performance across all levels so weaker results are not hidden by the most common level." />
+              <MetricDefinition term="Quadratic weighted kappa" description="Measures ordinal agreement and penalizes a two-tier error more than a one-tier error." />
+              <MetricDefinition term="Test accuracy" description="The share of recent test posts classified correctly. It may look stronger when one performance level dominates the data." />
               <MetricDefinition term="Gain vs benchmark" description="Compares the model with a simple rule that always selects the most common level." />
               <MetricDefinition term="Ready" description="The model passed the configured quality checks. Individual post results are still not guaranteed." />
               <MetricDefinition term="Use with caution" description="The model is available, but its supporting data or test results are limited." />
@@ -225,7 +255,7 @@ export default function ModelHealthPage() {
   );
 }
 
-function ModelEvidenceCard({ model }: { model: MlModel }) {
+function ModelEvidenceCard({ model }: { model: ModelHealthModel }) {
   const validated = model.evaluationStatus === "validated";
   const evaluated = model.evaluationStatus !== null;
   const holdoutAccuracy = model.baselineAccuracy;
@@ -245,10 +275,11 @@ function ModelEvidenceCard({ model }: { model: MlModel }) {
         />
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-4">
-        <MetricCell label="Test accuracy" value={formatMetric(holdoutAccuracy)} />
-        <MetricCell label="Precision and recall" value={formatMetric(model.macroF1)} />
+      <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-5">
         <MetricCell label="Accuracy across tiers" value={formatMetric(model.balancedAccuracy)} />
+        <MetricCell label="Macro F1" value={formatMetric(model.macroF1)} />
+        <MetricCell label="Quadratic weighted kappa" value={formatCoefficient(model.quadraticWeightedKappa)} />
+        <MetricCell label="Test accuracy" value={formatMetric(holdoutAccuracy)} />
         <MetricCell label="Test posts" value={model.holdoutSamples == null ? "—" : model.holdoutSamples.toLocaleString()} />
       </div>
 
@@ -274,6 +305,36 @@ function ModelEvidenceCard({ model }: { model: MlModel }) {
         <span>Trained with verified Instagram posts</span>
       </div>
     </article>
+  );
+}
+
+function OutcomeVerificationPanel({ value }: { value: OutcomeVerification | null }) {
+  return (
+    <section aria-labelledby="outcome-verification-title" className="rounded-3xl border border-border bg-surface p-5 shadow-[var(--shadow-soft)] md:p-6">
+      <div>
+        <h2 id="outcome-verification-title" className="text-lg font-semibold tracking-tight">Observed tier verification</h2>
+        <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+          Compares each prediction with its mature, verified Instagram outcome using the original model thresholds.
+        </p>
+      </div>
+      {!value ? (
+        <p className="mt-5 rounded-2xl border border-dashed border-border p-5 text-sm text-muted-foreground">Verification data is temporarily unavailable.</p>
+      ) : value.linkedMaturePredictions === 0 ? (
+        <p className="mt-5 rounded-2xl border border-dashed border-border p-5 text-sm text-muted-foreground">No mature linked predictions have an observed tier yet.</p>
+      ) : (
+        <>
+          <div className="mt-5 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-4">
+            <MetricCell label="Linked mature predictions" value={value.linkedMaturePredictions.toLocaleString()} />
+            <MetricCell label="Exact tier match" value={formatMetric(value.exactTierMatchRate)} />
+            <MetricCell label="Within one tier" value={formatMetric(value.withinOneTierRate)} />
+            <MetricCell label="Mean tier error" value={value.meanAbsoluteTierError == null ? "—" : value.meanAbsoluteTierError.toFixed(2)} />
+          </div>
+          <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+            Small samples can move these rates substantially. {value.cumulativeErDisclaimer}
+          </p>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -347,4 +408,8 @@ function EvidenceSkeleton() {
 
 function formatMetric(value: number | null | undefined): string {
   return value == null ? "—" : `${value.toFixed(1)}%`;
+}
+
+function formatCoefficient(value: number | null | undefined): string {
+  return value == null ? "—" : value.toFixed(2);
 }

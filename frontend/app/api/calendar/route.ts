@@ -6,6 +6,7 @@ import {
   publicErrorResponse,
   readJsonObject,
 } from "@/lib/http-errors";
+import { realizedOutcomeFields } from "@/lib/realized-outcomes";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +123,7 @@ export async function GET(request: Request) {
     const { data: predictions, error: predictionError } = predictionIds.length > 0
       ? await supabase
           .from("predictions")
-          .select("id, pred_class, prediction_status, time_known, model_version, actual_er, actual_source, created_at")
+          .select("id, pred_class, prediction_status, time_known, model_version, actual_er, actual_source, realized_class, realized_class_basis, created_at")
           .in("id", predictionIds)
           .eq("created_by", user.id)
       : { data: [], error: null };
@@ -158,6 +159,12 @@ export async function GET(request: Request) {
         ? Math.max(0, Math.floor((Date.now() - new Date(post.created_at).getTime()) / 86_400_000))
         : null;
       const outcomeObserved = prediction?.actual_source === "instagram_media_id";
+      const realized = prediction ? realizedOutcomeFields({
+        predicted: prediction.pred_class,
+        realized: prediction.realized_class,
+        basis: prediction.realized_class_basis,
+        actualSource: prediction.actual_source,
+      }) : null;
       return {
         ...entry,
         prediction: prediction ? {
@@ -169,6 +176,10 @@ export async function GET(request: Request) {
           actual_er: outcomeObserved && typeof prediction.actual_er === "number"
             ? prediction.actual_er
             : null,
+          realized_tier: realized?.realized_tier || null,
+          realized_class_basis: realized?.realized_class_basis || null,
+          tier_error: realized?.tier_error ?? null,
+          verification_badge: realized?.verification_badge || null,
         } : null,
         publication: publication && post ? {
           id: publication.id,
@@ -177,6 +188,10 @@ export async function GET(request: Request) {
           observed_er: outcomeObserved && typeof prediction?.actual_er === "number"
             ? prediction.actual_er
             : null,
+          realized_tier: realized?.realized_tier || null,
+          realized_class_basis: realized?.realized_class_basis || null,
+          tier_error: realized?.tier_error ?? null,
+          verification_badge: realized?.verification_badge || null,
           post_age_days: ageDays,
           synced_at: post.synced_at || null,
           outcome_status: outcomeObserved

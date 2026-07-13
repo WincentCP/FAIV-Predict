@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getRequestUser } from "@/lib/authz";
 import { publicErrorResponse, readJsonObject } from "@/lib/http-errors";
+import { realizedOutcomeFields } from "@/lib/realized-outcomes";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
 
     const { data: prediction, error: predictionError } = await supabase
       .from("predictions")
-      .select("id, brand_id, actual_er, actual_source")
+      .select("id, brand_id, pred_class, actual_er, actual_source, realized_class, realized_class_basis")
       .eq("id", prediction_id)
       .eq("created_by", user.id)
       .is("deleted_at", null)
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
     // client-computed tier.
     const { data: refreshed, error: refreshError } = await supabase
       .from("predictions")
-      .select("actual_er, actual_source")
+      .select("pred_class, actual_er, actual_source, realized_class, realized_class_basis")
       .eq("id", prediction.id)
       .eq("created_by", user.id)
       .single();
@@ -112,6 +113,12 @@ export async function POST(request: Request) {
       0,
       Math.floor((Date.now() - new Date(post.created_at).getTime()) / 86_400_000)
     );
+    const realized = realizedOutcomeFields({
+      predicted: refreshed.pred_class,
+      realized: refreshed.realized_class,
+      basis: refreshed.realized_class_basis,
+      actualSource: refreshed.actual_source,
+    });
     const response = NextResponse.json({
       status: "success",
       already_linked: Boolean(existing),
@@ -130,6 +137,7 @@ export async function POST(request: Request) {
         observed_er: refreshed.actual_source === "instagram_media_id" && typeof refreshed.actual_er === "number"
           ? refreshed.actual_er
           : null,
+        ...realized,
         post_age_days: postAgeDays,
         synced_at: post.synced_at || null,
       },

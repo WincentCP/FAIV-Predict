@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getRequestUser, getOwnedBrands } from "@/lib/authz";
 import { publicErrorResponse, readJsonObject } from "@/lib/http-errors";
+import { normalizeTier, realizedOutcomeFields } from "@/lib/realized-outcomes";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,8 @@ export async function GET() {
         pred_class,
         actual_er,
         actual_source,
+        realized_class,
+        realized_class_basis,
         created_at,
         scheduled_date,
         prediction_status,
@@ -89,6 +92,13 @@ export async function GET() {
       const observedEr = p.actual_source === "instagram_media_id" && typeof p.actual_er === "number"
         ? p.actual_er
         : null;
+      const predictedTier = normalizeTier(p.pred_class) || "Average";
+      const realized = realizedOutcomeFields({
+        predicted: predictedTier,
+        realized: p.realized_class,
+        basis: p.realized_class_basis,
+        actualSource: p.actual_source,
+      });
 
       return {
         id: p.id,
@@ -101,10 +111,9 @@ export async function GET() {
         account: p.brands?.name || "Unknown Brand",
         format,
         caption: p.caption || "",
-        tier: p.pred_class.charAt(0).toUpperCase() + p.pred_class.slice(1).toLowerCase(),
-        // Do not present a derived tier as ground truth. Outcomes are exposed
-        // as the observed ER snapshot plus post age and provenance.
-        actual: null,
+        tier: predictedTier,
+        actual: realized.realized_tier,
+        ...realized,
         publication_linked: Boolean(publication),
         publication_media_id: linkedPost?.instagram_media_id || null,
         observed_er: observedEr,

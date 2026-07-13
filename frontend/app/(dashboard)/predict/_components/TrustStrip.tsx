@@ -93,9 +93,9 @@ export function TrustStrip({
           </dl>
 
           <div className="mt-4 grid gap-x-8 gap-y-3 border-t border-border pt-4 text-sm sm:grid-cols-2">
-            <Metric label="Accuracy" value={modelAccuracy} />
-            <Metric label="Macro F1" value={modelMacroF1} />
             <Metric label="Balanced accuracy" value={modelBalancedAccuracy} />
+            <Metric label="Macro F1" value={modelMacroF1} />
+            <Metric label="Accuracy" value={modelAccuracy} />
             <Metric
               label="Gain vs majority baseline"
               value={accuracyGainOverBaseline}

@@ -515,6 +515,7 @@ export default function PredictPage() {
               creativeReview={creativeReview}
               isCreativeReviewStale={isCreativeReviewStale}
               brandName={predictionSnapshot?.brandName ?? undefined}
+              brandId={predictionSnapshot?.accountId ?? null}
               scheduledAt={predictionScheduledAt}
               hasPostTime={predictionSnapshot?.postHour != null}
               contentFormat={predictionSnapshot?.contentFormat ?? contentFormat}

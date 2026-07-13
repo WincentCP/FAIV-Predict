@@ -3,7 +3,6 @@
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useState } from "react";
 import { format as formatDate } from "date-fns";
 import {
   AlertTriangle,
@@ -11,6 +10,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { WhyThisScore, type WhyReason } from "@/components/WhyThisScore";
+import { TierBadge } from "@/components/TierBadge";
+import { formatModelScore } from "@/lib/model-scores";
 import { type Tier, type ContentFormat } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Panel } from "./Panel";
@@ -18,6 +19,7 @@ import { TrustStrip } from "./TrustStrip";
 import { MeasuredImprovements, type Counterfactual } from "./MeasuredImprovements";
 import { FormatComparison } from "./FormatComparison";
 import { type CreativeReviewSnapshot } from "./ConceptAssistant";
+import { TrendInsights } from "./TrendInsights";
 
 const FeatureAttributionChart = dynamic(() => import("@/components/FeatureAttributionChart"), {
   ssr: false,
@@ -58,7 +60,7 @@ function RawScoreBar({ tier, score, active }: { tier: Tier; score: number; activ
         <span className={cn("font-medium", active ? "text-foreground" : "text-muted-foreground")}>{tier}</span>
         <span className="font-semibold tabular-nums text-foreground">{value}/100</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-surface-3" role="img" aria-label={`${tier}: raw class score ${value} out of 100; not a calibrated probability`}>
+      <div className="h-2 overflow-hidden rounded-full bg-surface-3" role="img" aria-label={`${tier}: relative model score ${value} out of 100; uncalibrated and not a probability`}>
         <motion.div
           initial={false}
           animate={{ width: `${value}%` }}
@@ -79,6 +81,7 @@ export function InsightsView(props: {
   creativeReview: CreativeReviewSnapshot | null;
   isCreativeReviewStale: boolean;
   brandName?: string;
+  brandId: string | null;
   scheduledAt: Date;
   hasPostTime: boolean;
   contentFormat: ContentFormat;
@@ -103,6 +106,7 @@ export function InsightsView(props: {
     creativeReview,
     isCreativeReviewStale,
     brandName,
+    brandId,
     scheduledAt,
     hasPostTime,
     contentFormat,
@@ -119,13 +123,12 @@ export function InsightsView(props: {
     onSaveToContentPlan,
   } = props;
 
-  const [showModelContext, setShowModelContext] = useState(false);
   const formatProbes = prediction.counterfactuals.filter((probe) => probe.parameter === "format");
   const improvementProbes = prediction.counterfactuals.filter((probe) => probe.parameter !== "format");
   const comparisonScope = prediction.isPersonalModel
     ? `${brandName || "this brand"}'s own verified history`
     : "the selected niche's verified history";
-  const modelMatch = Math.max(0, Math.min(100, Math.round(prediction.classScore)));
+  const headlineReason = [...whyReasons].sort((a, b) => b.weight - a.weight)[0] ?? null;
 
   return (
     <motion.div
@@ -153,7 +156,7 @@ export function InsightsView(props: {
       )}
 
       <section aria-labelledby="prediction-verdict" className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
-        <div className="grid gap-8 p-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] lg:p-8">
+        <div className="p-6 lg:p-8">
           <div className="flex flex-col justify-center">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">Expected performance</span>
@@ -161,39 +164,22 @@ export function InsightsView(props: {
               {prediction.status === "provisional" && <span className="rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning">Add time for final result</span>}
             </div>
 
-            <h2 id="prediction-verdict" className="mt-5 font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-              {prediction.tier}
-            </h2>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-              Expected <strong className="text-foreground">{prediction.tier.toLowerCase()} engagement</strong> compared with {comparisonScope}. This estimate uses likes and comments; it does not estimate reach or sales.
+            <div className="mt-5"><TierBadge tier={prediction.tier} className="px-4 py-2 text-sm" /></div>
+            <h2 id="prediction-verdict" className="sr-only">Expected {prediction.tier.toLowerCase()} performance</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+              Expected <strong className="text-foreground">{prediction.tier.toLowerCase()} engagement</strong> compared with {comparisonScope}; this estimate uses likes and comments, not reach or sales.
+            </p>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-foreground">
+              <strong>One leading model input:</strong>{" "}
+              {headlineReason
+                ? `${headlineReason.label} — ${headlineReason.detail}`
+                : "No feature-attribution summary was available for this model."}
             </p>
             {prediction.status === "provisional" && (
               <p className="mt-3 text-sm font-medium text-warning">Add a publish time and update the estimate before final approval.</p>
             )}
           </div>
 
-          <div className="flex flex-col items-center justify-center rounded-2xl border border-border bg-surface-2/45 p-5 text-center">
-            <div
-              role="img"
-              aria-label={`Model match ${modelMatch} out of 100. This is not a success probability.`}
-              className="grid h-40 w-40 place-items-center rounded-full"
-              style={{ background: `conic-gradient(hsl(var(--primary)) ${modelMatch}%, hsl(var(--surface-3)) 0)` }}
-            >
-              <div className="grid h-[126px] w-[126px] place-items-center rounded-full bg-surface shadow-inner">
-                <div>
-                  <div className="text-4xl font-semibold tabular-nums text-foreground">{modelMatch}</div>
-                  <div className="mt-1 text-xs font-semibold text-muted-foreground">Model match</div>
-                </div>
-              </div>
-            </div>
-            <p className="mt-4 max-w-xs text-xs leading-relaxed text-muted-foreground">A relative model score—not a success percentage.</p>
-            <details className="group mt-4 w-full border-t border-border pt-3 text-left">
-              <summary className="cursor-pointer list-none text-center text-xs font-semibold text-primary marker:hidden">Compare performance levels</summary>
-              <div className="mt-4 space-y-4">
-                {prediction.classScores.map((item) => <RawScoreBar key={item.tier} tier={item.tier} score={item.score} active={item.tier === prediction.tier} />)}
-              </div>
-            </details>
-          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border bg-surface-2/35 px-6 py-4 text-sm text-muted-foreground lg:px-8">
@@ -209,6 +195,8 @@ export function InsightsView(props: {
         </div>
       </section>
 
+      <TrendInsights brandId={brandId} brandName={brandName} />
+
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <main className="space-y-5">
           {creativeReview && <CreativeReviewSummary review={creativeReview} stale={isCreativeReviewStale} />}
@@ -217,38 +205,39 @@ export function InsightsView(props: {
           <MeasuredImprovements counterfactuals={improvementProbes} note={prediction.counterfactualsNote} appliedRecs={appliedRecs} onToggle={onToggleRec} />
           <FormatComparison formatProbes={formatProbes} currentFormat={contentFormat} />
 
-          <TrustStrip
-            isPersonalModel={prediction.isPersonalModel}
-            trainedSamples={prediction.trainedSamples}
-            modelAccuracy={prediction.modelAccuracy}
-            modelMacroF1={prediction.modelMacroF1}
-            modelBalancedAccuracy={prediction.modelBalancedAccuracy}
-            baselineAccuracy={prediction.baselineAccuracy}
-            accuracyGainOverBaseline={prediction.accuracyGainOverBaseline}
-            testSamples={prediction.testSamples}
-            heldOutClassesComplete={prediction.heldOutClassesComplete}
-            evaluationStatus={prediction.evaluationStatus}
-            modelVersion={prediction.modelVersion}
-            outOfRange={prediction.outOfRange}
-          />
-
-          <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
-            <button
-              type="button"
-              aria-expanded={showModelContext}
-              aria-controls="prediction-model-context"
-              onClick={() => setShowModelContext((open) => !open)}
-              className="flex min-h-16 w-full items-center justify-between gap-4 p-5 text-left hover:bg-surface-2/40"
-            >
+          <details className="group overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--shadow-soft)]">
+            <summary className="flex min-h-16 cursor-pointer list-none items-center justify-between gap-4 p-5 text-left outline-none hover:bg-surface-2/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">
               <div>
-                <h3 className="text-base font-semibold text-foreground">How this result was calculated</h3>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">See the inputs and model signals behind this estimate.</p>
+                <h3 className="text-base font-semibold text-foreground">Evidence &amp; model details</h3>
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Raw scores, input-range warnings, model evidence, and global feature signals.</p>
               </div>
-              <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", showModelContext && "rotate-180")} />
-            </button>
-
-            {showModelContext && (
-              <div id="prediction-model-context" className="grid gap-5 border-t border-border p-5 md:grid-cols-2">
+              <span className="flex items-center gap-2">
+                {prediction.outOfRange.length > 0 && <span className="rounded-full bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">{prediction.outOfRange.length} warning{prediction.outOfRange.length === 1 ? "" : "s"}</span>}
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
+              </span>
+            </summary>
+            <div className="space-y-5 border-t border-border p-5">
+              <Panel title="Relative model scores" subtitle="Uncalibrated class scores; they are not probabilities or success percentages.">
+                <p className="mb-4 text-sm font-semibold text-foreground">{formatModelScore(prediction.classScore)}</p>
+                <div className="space-y-4">
+                  {prediction.classScores.map((item) => <RawScoreBar key={item.tier} tier={item.tier} score={item.score} active={item.tier === prediction.tier} />)}
+                </div>
+              </Panel>
+              <TrustStrip
+                isPersonalModel={prediction.isPersonalModel}
+                trainedSamples={prediction.trainedSamples}
+                modelAccuracy={prediction.modelAccuracy}
+                modelMacroF1={prediction.modelMacroF1}
+                modelBalancedAccuracy={prediction.modelBalancedAccuracy}
+                baselineAccuracy={prediction.baselineAccuracy}
+                accuracyGainOverBaseline={prediction.accuracyGainOverBaseline}
+                testSamples={prediction.testSamples}
+                heldOutClassesComplete={prediction.heldOutClassesComplete}
+                evaluationStatus={prediction.evaluationStatus}
+                modelVersion={prediction.modelVersion}
+                outOfRange={prediction.outOfRange}
+              />
+              <div className="grid gap-5 md:grid-cols-2">
                 <WhyThisScore reasons={whyReasons} context="The strongest signals across the model. They are associations, not causes." />
                 <Panel title="What the model considers" subtitle="Relative influence across the saved model, not a guarantee for this post.">
                   <div className="mt-2 h-56 w-full">
@@ -260,8 +249,8 @@ export function InsightsView(props: {
                   </div>
                 </Panel>
               </div>
-            )}
-          </section>
+            </div>
+          </details>
         </main>
 
         <aside className="space-y-5 xl:sticky xl:top-24" aria-label="Prediction actions">

@@ -11,6 +11,7 @@ import { fetchWithRetry } from "@/lib/fetch-retry";
 import { type Brand, type Tier } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { creativeBriefSummary } from "@/lib/creative-brief";
+import { formatModelScore } from "@/lib/model-scores";
 
 type DashboardSummary = {
   totalPredictions: number;
@@ -389,7 +390,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold text-muted-foreground">
                     <span>{formatDateTime(prediction.when)}</span>
-                    {prediction.confidence != null && <span>{prediction.confidence}/100 raw class score</span>}
+                    {prediction.confidence != null && <span>{formatModelScore(prediction.confidence)}</span>}
                   </div>
                 </li>
               ))}

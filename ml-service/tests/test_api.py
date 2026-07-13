@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.main import app
+from app import instagram as instagram_module
+from app import patterns as patterns_module
 from app.model_loader import ModelLoader, ModelUnavailableError
 from app.preprocessing import CTA_PATTERN
 from app.brand_patterns import build_brand_patterns
@@ -23,6 +25,50 @@ client = TestClient(app)
 _token = os.getenv("INTERNAL_API_TOKEN")
 if _token:
     client.headers.update({"X-Internal-Token": _token})
+
+
+def test_main_composes_focused_routers_without_changing_api_paths():
+    from app import predict as predict_module
+    from app import train as train_module
+
+    expected_modules = {
+        ("POST", "/predict"): "app.predict",
+        ("POST", "/train"): "app.train",
+        ("GET", "/train/{job_id}"): "app.train",
+        ("GET", "/instagram/health"): "app.instagram",
+        ("GET", "/instagram/posts"): "app.instagram",
+        ("POST", "/instagram/post-insights"): "app.instagram",
+        ("POST", "/sync/now"): "app.instagram",
+        ("GET", "/brand/patterns"): "app.patterns",
+    }
+    actual = {}
+    routers = (
+        predict_module.router,
+        train_module.router,
+        instagram_module.router,
+        patterns_module.router,
+    )
+    for route in (route for router in routers for route in router.routes):
+        for method in route.methods:
+            actual[(method, route.path)] = route.endpoint.__module__
+
+    assert actual == expected_modules
+    openapi_operations = {
+        (method.upper(), path)
+        for path, operations in app.openapi()["paths"].items()
+        for method in operations
+    }
+    assert openapi_operations == set(expected_modules)
+
+
+def test_main_keeps_legacy_helper_imports_as_compatibility_reexports():
+    import app.main as main_module
+
+    assert main_module.build_counterfactuals.__module__ == "app.predict"
+    assert main_module.run_training_job_async.__module__ == "app.train"
+    assert main_module._fetch_ig_posts.__module__ == "app.graph_client"
+    assert main_module._sync_and_retrain_pipeline.__module__ == "app.instagram"
+    assert main_module.brand_patterns.__module__ == "app.patterns"
 
 
 def test_predict_requires_internal_token_when_configured():
@@ -775,6 +821,61 @@ def test_thesis_evidence_export_selects_latest_scope_and_omits_secrets():
     assert "access_token" not in rendered
 
 
+def test_thesis_evidence_leads_with_class_aware_metrics_and_compact_appendix():
+    metrics = {
+        "accuracy": 0.6,
+        "candidate": {
+            "accuracy": 0.6,
+            "balanced_accuracy": 0.55,
+            "quadratic_weighted_kappa": 0.4,
+            "ordinal_mae": 0.45,
+            "macro": {"f1_score": 0.5},
+            "confusion_matrix": {
+                "labels": ["LOW", "AVERAGE", "HIGH"],
+                "matrix": [[3, 1, 0], [1, 2, 1], [0, 1, 3]],
+            },
+        },
+        "baseline": {"accuracy": 0.4},
+        "comparators": {"logistic_regression": {"accuracy": 0.5}},
+        "accuracy_gain_over_baseline": 0.2,
+        "p33_threshold": 1.25,
+        "p67_threshold": 2.75,
+        "train_samples": 48,
+        "test_samples": 12,
+        "dataset": {
+            "dataset_sha256": "a" * 64,
+            "first_post_at": "2025-01-01T00:00:00+00:00",
+            "last_post_at": "2026-01-01T00:00:00+00:00",
+        },
+        "training_code_sha256": "b" * 64,
+        "promotion_gate": {"passed": True, "decision": "promote"},
+        "scientific_gate": {"passed": True, "decision": "validated_for_thesis_claim"},
+        "evaluation_status": "validated",
+        "holdout_permutation_importance": {
+            "available": True,
+            "features": [{"feature": "is_reels", "mean": 0.12, "std": 0.02}],
+        },
+    }
+    rendered = format_markdown([{
+        "brand_id": "brand-1",
+        "brand_name": "Auditable brand",
+        "version": "v1",
+        "model_type": "account",
+        "metrics": metrics,
+    }])
+
+    summary_header = next(line for line in rendered.splitlines() if line.startswith("| Scope |"))
+    assert summary_header.index("Balanced accuracy") < summary_header.index("Accuracy")
+    assert summary_header.index("Macro F1") < summary_header.index("Accuracy")
+    assert summary_header.index("QWK") < summary_header.index("Accuracy")
+    assert "## Compact per-scope appendix" in rendered
+    assert "#### Holdout confusion matrix" in rendered
+    assert "| LOW | 3 | 1 | 0 |" in rendered
+    assert "#### Top holdout permutation importances" in rendered
+    assert "`is_reels`" in rendered
+    assert "Raw accuracy is retained for completeness" in rendered
+
+
 def test_thesis_evidence_scope_uses_only_valid_explicit_and_configured_brands(monkeypatch):
     first = "7c8316af-6692-481d-b6f7-2e5483afa5e1"
     second = "d2850e10-2788-4833-be1b-cbbb782b68e9"
@@ -1113,13 +1214,13 @@ def test_instagram_posts_uses_verified_sync_er_instead_of_current_followers(monk
     executed_queries = []
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
-    monkeypatch.setattr(main_module, "_get_instagram_connection", lambda _brand_id: {
+    monkeypatch.setattr(instagram_module, "_get_instagram_connection", lambda _brand_id: {
         "brand_id": brand_id,
         "name": "Verified brand",
         "instagram_id": "17840000000000000",
         "access_token": "token",
     })
-    monkeypatch.setattr(main_module, "_fetch_ig_profile", lambda *_args: 1000)
+    monkeypatch.setattr(instagram_module, "_fetch_ig_profile", lambda *_args: 1000)
 
     class Cursor:
         def __init__(self):
@@ -1231,14 +1332,14 @@ def test_instagram_posts_falls_back_to_stored_verified_history(monkeypatch):
     created_at = datetime.datetime(2026, 6, 1, tzinfo=datetime.timezone.utc)
     synced_at = datetime.datetime(2026, 7, 10, tzinfo=datetime.timezone.utc)
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
-    monkeypatch.setattr(main_module, "_get_instagram_connection", lambda _brand_id: {
+    monkeypatch.setattr(instagram_module, "_get_instagram_connection", lambda _brand_id: {
         "brand_id": brand_id,
         "name": "Stored brand",
         "instagram_id": "17840000000000000",
         "access_token": "secret",
     })
     monkeypatch.setattr(
-        main_module,
+        instagram_module,
         "_fetch_ig_profile",
         lambda *_args: (_ for _ in ()).throw(RuntimeError("offline")),
     )
@@ -1335,7 +1436,7 @@ def test_post_detail_prediction_match_uses_meta_verified_caption(monkeypatch):
     ]
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
-    monkeypatch.setattr(main_module, "_get_instagram_connection", lambda _brand_id: {
+    monkeypatch.setattr(instagram_module, "_get_instagram_connection", lambda _brand_id: {
         "brand_id": brand_id,
         "name": "Verified brand",
         "instagram_id": "17840000000000000",
@@ -1486,7 +1587,7 @@ def test_post_detail_resolves_immutable_link_even_when_caption_is_empty(monkeypa
     media_id = "17900000000000001"
     prediction_queries = []
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
-    monkeypatch.setattr(main_module, "_get_instagram_connection", lambda _brand_id: {
+    monkeypatch.setattr(instagram_module, "_get_instagram_connection", lambda _brand_id: {
         "brand_id": brand_id,
         "name": "Verified brand",
         "instagram_id": "17840000000000000",
@@ -1590,7 +1691,8 @@ def test_post_detail_resolves_immutable_link_even_when_caption_is_empty(monkeypa
     assert payload["prediction"]["match_method"] == "verified_media_id"
     assert payload["prediction"]["publication_linked"] is True
     assert payload["prediction"]["actual_er"] == 4.1
-    assert payload["prediction"]["actual_tier"] is None
+    assert payload["prediction"]["realized_tier"] is None
+    assert payload["prediction"]["realized_class_basis"] is None
     assert all("actual_class" not in query for query in prediction_queries)
 
 
@@ -1629,7 +1731,7 @@ def test_persisted_instagram_identity_mismatch_is_rejected_before_graph_io(monke
     main_module = importlib.import_module("app.main")
     brand_id = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
-    monkeypatch.setattr(main_module, "_get_brands_config", lambda: [{
+    monkeypatch.setattr(instagram_module, "_get_brands_config", lambda: [{
         "brand_id": brand_id,
         "instagram_id": "17840000000000001",
         "access_token": "runtime-only-secret",
@@ -1753,6 +1855,54 @@ def test_publication_migration_keeps_continuous_outcome_academically_honest():
     assert "SET actual_er = eligible.er" in migration
     assert "actual_source = 'instagram_media_id'" in migration
     assert "SET actual_class = NULL" not in migration
+    assert "access_token" not in migration.lower()
+
+
+def test_realized_tier_migration_uses_historical_serving_model_thresholds():
+    migration = (
+        Path(__file__).resolve().parents[2]
+        / "supabase"
+        / "migrations"
+        / "202607130005_realized_tier.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "ADD COLUMN IF NOT EXISTS realized_class" in migration
+    assert "ADD COLUMN IF NOT EXISTS realized_class_basis" in migration
+    assert "LEFT JOIN public.models model ON model.id = prediction.model_id" in migration
+    assert "model.metrics->'p33_threshold'" in migration
+    assert "model.metrics->'p67_threshold'" in migration
+    assert "WHEN er < p33 THEN 'LOW'" in migration
+    assert "WHEN er <= p67 THEN 'AVERAGE'" in migration
+    assert "'model_id', eligible.model_id::TEXT" in migration
+    assert "'minimum_post_age_days', 7" in migration
+    assert "prediction.actual_class IS NULL" in migration
+    assert "previous_realized_class" in migration
+    assert (
+        "REVOKE ALL ON FUNCTION public.reconcile_prediction_publication_outcomes(UUID)"
+        in migration
+    )
+    assert "ORDER BY model.created_at" not in migration
+    assert "access_token" not in migration.lower()
+
+
+def test_brand_trend_notes_migration_is_bounded_owner_scoped_and_not_updatable():
+    migration = (
+        Path(__file__).resolve().parents[2]
+        / "supabase"
+        / "migrations"
+        / "202607130006_brand_trend_notes.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE IF NOT EXISTS public.brand_trend_notes" in migration
+    assert "BETWEEN 1 AND 300" in migration
+    assert "BETWEEN 1 AND 200" in migration
+    assert "observed_at <= CURRENT_DATE" in migration
+    assert migration.count("brand.owner_id = auth.uid()") == 3
+    assert "created_by = auth.uid()" in migration
+    assert "GRANT SELECT, DELETE" in migration
+    assert "GRANT INSERT (brand_id, note, source, observed_at, tag, created_by)" in migration
+    assert "FOR UPDATE TO authenticated" not in migration
+    assert "GRANT UPDATE" not in migration
     assert "access_token" not in migration.lower()
 
 
@@ -1981,16 +2131,13 @@ def test_instagram_media_fetch_rejects_malformed_graph_payload(monkeypatch):
 
 
 def test_invalid_instagram_sync_limit_fails_before_binding_or_graph_io(monkeypatch):
-    import importlib
-
-    main_module = importlib.import_module("app.main")
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
     monkeypatch.setenv("IG_SYNC_POST_LIMIT", "0")
 
     def should_not_bind():
         raise AssertionError("brand binding must not run for invalid sync config")
 
-    monkeypatch.setattr(main_module, "_bound_instagram_configs", should_not_bind)
+    monkeypatch.setattr(instagram_module, "_bound_instagram_configs", should_not_bind)
 
     result = _sync_and_retrain_pipeline()
 
@@ -2000,13 +2147,10 @@ def test_invalid_instagram_sync_limit_fails_before_binding_or_graph_io(monkeypat
 
 
 def test_graph_http_failure_never_logs_access_token(monkeypatch, caplog):
-    import importlib
-
-    main_module = importlib.import_module("app.main")
     secret = "must-not-appear-in-logs"
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
     monkeypatch.setenv("IG_SYNC_POST_LIMIT", "500")
-    monkeypatch.setattr(main_module, "_bound_instagram_configs", lambda: [{
+    monkeypatch.setattr(instagram_module, "_bound_instagram_configs", lambda: [{
         "brand_id": "d2850e10-2788-4833-be1b-cbbb782b68e9",
         "name": "Safe test",
         "niche": "Bakery",
@@ -2027,7 +2171,7 @@ def test_graph_http_failure_never_logs_access_token(monkeypatch, caplog):
             response=response,
         )
 
-    monkeypatch.setattr(main_module, "_fetch_ig_profile", rejected_profile)
+    monkeypatch.setattr(instagram_module, "_fetch_ig_profile", rejected_profile)
     caplog.set_level(logging.INFO)
 
     result = _sync_and_retrain_pipeline()
@@ -2058,7 +2202,7 @@ def test_instagram_health_filters_before_graph_requests(monkeypatch):
     first = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
     second = "15663b0a-d1fc-4cb9-bac2-bb0251307441"
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
-    monkeypatch.setattr(main_module, "_bound_instagram_configs", lambda: [
+    monkeypatch.setattr(instagram_module, "_bound_instagram_configs", lambda: [
         {
             "brand_id": first,
             "name": "Owned brand",
@@ -2299,10 +2443,74 @@ def test_brand_patterns_use_only_modeled_mature_rows_and_never_return_raw_conten
     assert result["recent_publishing_mix"]["performance_comparison_available"] is False
 
 
-def test_brand_patterns_endpoint_validates_brand_and_returns_aggregates(monkeypatch):
-    import importlib
+def test_brand_history_momentum_uses_equal_windows_and_keeps_er_context_non_decisional():
+    now = datetime.datetime(2026, 7, 13, tzinfo=datetime.timezone.utc)
+    rows = []
+    # Prior window: 15 single images and 5 Reels. Recent window: 5 single images
+    # and 15 Reels. ER is deliberately much higher in the prior window so the
+    # test proves the product reports the distribution but does not call it a
+    # performance trend.
+    observations = []
+    for index in range(20):
+        observations.append((170 - index, index >= 15, 10.0 - index / 10))
+    for index in range(20):
+        observations.append((80 - index, index >= 5, 2.0 + index / 10))
+    for index, (days_ago, is_reels, er) in enumerate(observations):
+        rows.append({
+            "instagram_media_id": f"private-{index}",
+            "caption": f"private momentum caption {index}",
+            "er": er,
+            "is_single_image": not is_reels,
+            "is_carousel": False,
+            "is_reels": is_reels,
+            "media_product_type": "REELS" if is_reels else "FEED",
+            "post_hour": 19 if is_reels else 9,
+            "created_at": now - datetime.timedelta(days=days_ago),
+            "synced_at": now,
+        })
 
-    main_module = importlib.import_module("app.main")
+    result = build_brand_patterns(
+        rows,
+        brand_id="brand-id",
+        brand_name="Momentum brand",
+        niche="Fitness",
+        now=now,
+    )
+    momentum = result["brand_history_momentum"]
+
+    assert momentum["window_days"] == 90
+    assert momentum["prior_window"]["posts"] == 20
+    assert momentum["recent_window"]["posts"] == 20
+    reels = next(
+        item for item in momentum["format_mix_changes"] if item["key"] == "reels"
+    )
+    assert reels == {
+        "key": "reels",
+        "label": "Reels",
+        "recent_sample_size": 15,
+        "prior_sample_size": 5,
+        "recent_share": 0.75,
+        "prior_share": 0.25,
+        "share_change_pp": 50.0,
+        "evidence_level": "exploratory",
+    }
+    assert momentum["preferred_mix_statements"][0].startswith(
+        "Reels share of mature modeled posts rose from 25% to 75%"
+    )
+    assert momentum["er_context"]["decision_use_allowed"] is False
+    assert momentum["er_context"]["interpretation"] == "descriptive_only_age_confounded"
+    assert "equal post-age horizon" in momentum["er_context"]["caveat"]
+    reels_er = next(
+        item for item in momentum["er_context"]["formats"] if item["key"] == "reels"
+    )
+    assert reels_er["prior"]["sample_size"] == 5
+    assert reels_er["recent"]["sample_size"] == 15
+    serialized = json.dumps(momentum)
+    assert "private momentum caption" not in serialized
+    assert "private-0" not in serialized
+
+
+def test_brand_patterns_endpoint_validates_brand_and_returns_aggregates(monkeypatch):
     brand_id = "bfd6dbca-613d-4950-8b1e-45ad7dcf1088"
     queries = []
 
@@ -2346,7 +2554,7 @@ def test_brand_patterns_endpoint_validates_brand_and_returns_aggregates(monkeypa
         def close():
             pass
 
-    monkeypatch.setattr(main_module, "get_db_connection", lambda: Connection())
+    monkeypatch.setattr(patterns_module, "get_db_connection", lambda: Connection())
 
     response = client.get(f"/brand/patterns?brand_id={brand_id}")
 

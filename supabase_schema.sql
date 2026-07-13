@@ -74,8 +74,10 @@ CREATE TABLE IF NOT EXISTS predictions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     scheduled_date DATE,
     actual_er NUMERIC,               -- Real ER once the predicted post is synced back
-    actual_class VARCHAR(50),        -- Realized tier, graded with the same percentile method
+    actual_class VARCHAR(50),        -- Quarantined legacy tier; no new writes
     actual_source VARCHAR(50),       -- NULL quarantines legacy caption-matched outcomes
+    realized_class VARCHAR(10),      -- Verified tier under this prediction's serving model thresholds
+    realized_class_basis JSONB,      -- Serving model ID, P33/P67, computation time, maturity policy
     model_version VARCHAR(50),       -- Version of the model that produced this prediction
     prediction_status VARCHAR(20) DEFAULT 'current' NOT NULL,
     time_known BOOLEAN DEFAULT true NOT NULL,
@@ -103,6 +105,8 @@ CREATE TABLE IF NOT EXISTS predictions (
 
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS actual_source VARCHAR(50);
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS realized_class VARCHAR(10);
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS realized_class_basis JSONB;
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS prediction_status VARCHAR(20) DEFAULT 'current' NOT NULL;
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS time_known BOOLEAN DEFAULT true NOT NULL;
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS stale_reason TEXT;
@@ -148,6 +152,30 @@ BEGIN
   ) THEN
     ALTER TABLE public.predictions ADD CONSTRAINT predictions_status_check
       CHECK (prediction_status IN ('current', 'provisional', 'stale', 'superseded'));
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'predictions_realized_class_check' AND conrelid = 'public.predictions'::regclass
+  ) THEN
+    ALTER TABLE public.predictions ADD CONSTRAINT predictions_realized_class_check
+      CHECK (realized_class IS NULL OR realized_class IN ('LOW', 'AVERAGE', 'HIGH'));
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'predictions_realized_basis_pair_check' AND conrelid = 'public.predictions'::regclass
+  ) THEN
+    ALTER TABLE public.predictions ADD CONSTRAINT predictions_realized_basis_pair_check CHECK (
+      (realized_class IS NULL AND realized_class_basis IS NULL)
+      OR (
+        realized_class IS NOT NULL
+        AND jsonb_typeof(realized_class_basis) = 'object'
+        AND realized_class_basis ?& ARRAY['model_id', 'p33_threshold', 'p67_threshold', 'computed_at']
+        AND jsonb_typeof(realized_class_basis->'model_id') = 'string'
+        AND jsonb_typeof(realized_class_basis->'p33_threshold') = 'number'
+        AND jsonb_typeof(realized_class_basis->'p67_threshold') = 'number'
+        AND jsonb_typeof(realized_class_basis->'computed_at') = 'string'
+      )
+    );
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
@@ -264,6 +292,21 @@ CREATE TABLE IF NOT EXISTS prediction_publications (
       CHECK (link_method = 'verified_media_confirmation')
 );
 
+CREATE TABLE IF NOT EXISTS brand_trend_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    brand_id UUID REFERENCES brands(id) ON DELETE CASCADE NOT NULL,
+    note TEXT NOT NULL,
+    source TEXT NOT NULL,
+    observed_at DATE NOT NULL,
+    tag VARCHAR(80),
+    created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    CONSTRAINT brand_trend_notes_note_length_check CHECK (char_length(btrim(note)) BETWEEN 1 AND 300),
+    CONSTRAINT brand_trend_notes_source_length_check CHECK (char_length(btrim(source)) BETWEEN 1 AND 200),
+    CONSTRAINT brand_trend_notes_observed_at_check CHECK (observed_at <= CURRENT_DATE),
+    CONSTRAINT brand_trend_notes_tag_length_check CHECK (tag IS NULL OR char_length(btrim(tag)) BETWEEN 1 AND 80)
+);
+
 -- Create Indexes for optimization
 CREATE INDEX IF NOT EXISTS idx_posts_brand_id ON posts(brand_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_instagram_media
@@ -283,6 +326,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_predictions_one_successor ON predictions(s
 CREATE INDEX IF NOT EXISTS idx_predictions_visible_history ON predictions(created_by, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_predictions_model_id ON predictions(model_id) WHERE model_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_predictions_input_hash ON predictions(created_by, input_hash) WHERE input_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_predictions_realized_outcomes ON predictions(created_by, realized_class, created_at DESC) WHERE realized_class IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_models_brand_id ON models(brand_id);
 CREATE INDEX IF NOT EXISTS idx_models_niche ON models(niche);
 CREATE INDEX IF NOT EXISTS idx_model_retrain_jobs_brand_id ON model_retrain_jobs(brand_id);
@@ -297,6 +341,10 @@ CREATE INDEX IF NOT EXISTS idx_prediction_publications_owner_time
   ON prediction_publications(owner_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_prediction_publications_brand_time
   ON prediction_publications(brand_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_brand_trend_notes_brand_observed
+  ON brand_trend_notes(brand_id, observed_at DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_brand_trend_notes_creator
+  ON brand_trend_notes(created_by, created_at DESC);
 
 DO $$
 BEGIN
@@ -359,6 +407,12 @@ END $$;
 
 COMMENT ON COLUMN public.posts.media_product_type IS
   'Normalized Meta media_product_type. VIDEO is modeled as Reels only when this value is REELS.';
+COMMENT ON COLUMN public.predictions.realized_class IS
+  'Verified mature cumulative-ER tier under the exact thresholds of the model that served this prediction.';
+COMMENT ON COLUMN public.predictions.realized_class_basis IS
+  'Immutable computation basis: serving model ID, training P33/P67, computation time, and maturity policy.';
+COMMENT ON TABLE public.brand_trend_notes IS
+  'Owner-scoped, user-provided and unverified brand context; advisory only and excluded from ML features.';
 
 -- Row-Level Security
 -- RLS is enabled on every table. The ML service connects as the table owner
@@ -373,6 +427,7 @@ ALTER TABLE model_retrain_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE calendar_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE content_lifecycle_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prediction_publications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE brand_trend_notes ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS authenticated_read ON brands;
 DROP POLICY IF EXISTS authenticated_insert_brands ON brands;
@@ -455,6 +510,39 @@ CREATE POLICY publication_owner_select ON prediction_publications FOR SELECT TO 
 USING (owner_id = auth.uid());
 REVOKE ALL ON public.prediction_publications FROM anon, authenticated;
 GRANT SELECT ON public.prediction_publications TO authenticated;
+
+DROP POLICY IF EXISTS trend_notes_owner_select ON brand_trend_notes;
+DROP POLICY IF EXISTS trend_notes_owner_insert ON brand_trend_notes;
+DROP POLICY IF EXISTS trend_notes_owner_delete ON brand_trend_notes;
+CREATE POLICY trend_notes_owner_select ON brand_trend_notes FOR SELECT TO authenticated
+USING (
+  created_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM brands b
+    WHERE b.id = brand_trend_notes.brand_id AND b.owner_id = auth.uid()
+  )
+);
+CREATE POLICY trend_notes_owner_insert ON brand_trend_notes FOR INSERT TO authenticated
+WITH CHECK (
+  created_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM brands b
+    WHERE b.id = brand_trend_notes.brand_id AND b.owner_id = auth.uid()
+  )
+);
+CREATE POLICY trend_notes_owner_delete ON brand_trend_notes FOR DELETE TO authenticated
+USING (
+  created_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM brands b
+    WHERE b.id = brand_trend_notes.brand_id AND b.owner_id = auth.uid()
+  )
+);
+REVOKE ALL ON public.brand_trend_notes FROM anon, authenticated;
+GRANT SELECT, DELETE ON public.brand_trend_notes TO authenticated;
+GRANT INSERT (brand_id, note, source, observed_at, tag, created_by)
+  ON public.brand_trend_notes TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.normalize_prediction_soft_delete()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -996,11 +1084,17 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
   verified_er NUMERIC;
+  model_p33 NUMERIC;
+  model_p67 NUMERIC;
+  expected_class TEXT;
+  basis_computed_at TIMESTAMPTZ;
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF NEW.actual_er IS NOT NULL
       OR NEW.actual_source IS NOT NULL
-      OR NEW.actual_class IS NOT NULL THEN
+      OR NEW.actual_class IS NOT NULL
+      OR NEW.realized_class IS NOT NULL
+      OR NEW.realized_class_basis IS NOT NULL THEN
       RAISE EXCEPTION 'Observed outcomes may only be attached through a verified publication link.'
         USING ERRCODE = '23514';
     END IF;
@@ -1011,7 +1105,9 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
   IF NEW.actual_er IS NOT DISTINCT FROM OLD.actual_er
-    AND NEW.actual_source IS NOT DISTINCT FROM OLD.actual_source THEN
+    AND NEW.actual_source IS NOT DISTINCT FROM OLD.actual_source
+    AND NEW.realized_class IS NOT DISTINCT FROM OLD.realized_class
+    AND NEW.realized_class_basis IS NOT DISTINCT FROM OLD.realized_class_basis THEN
     RETURN NEW;
   END IF;
   IF NEW.actual_source IS DISTINCT FROM 'instagram_media_id' THEN
@@ -1019,7 +1115,7 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
   IF NEW.actual_class IS NOT NULL THEN
-    RAISE EXCEPTION 'Verified outcomes store continuous ER only; actual_class is not derived.'
+    RAISE EXCEPTION 'actual_class is legacy-only; verified tiers use realized_class with a versioned basis.'
       USING ERRCODE = '23514';
   END IF;
   SELECT post.er INTO verified_er
@@ -1036,12 +1132,58 @@ BEGIN
     RAISE EXCEPTION 'Verified outcome must equal a linked mature Instagram post ER.'
       USING ERRCODE = '23514';
   END IF;
+
+  SELECT
+    CASE WHEN jsonb_typeof(model.metrics->'p33_threshold') = 'number'
+      THEN (model.metrics->>'p33_threshold')::NUMERIC END,
+    CASE WHEN jsonb_typeof(model.metrics->'p67_threshold') = 'number'
+      THEN (model.metrics->>'p67_threshold')::NUMERIC END
+  INTO model_p33, model_p67
+  FROM public.models model
+  WHERE model.id = NEW.model_id;
+  IF model_p33 IS NULL OR model_p67 IS NULL OR model_p33 > model_p67 THEN
+    IF NEW.realized_class IS NOT NULL OR NEW.realized_class_basis IS NOT NULL THEN
+      RAISE EXCEPTION 'A realized tier requires valid persisted thresholds from the serving model.'
+        USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  expected_class := CASE
+    WHEN NEW.actual_er < model_p33 THEN 'LOW'
+    WHEN NEW.actual_er <= model_p67 THEN 'AVERAGE'
+    ELSE 'HIGH'
+  END;
+  IF NEW.realized_class IS DISTINCT FROM expected_class THEN
+    RAISE EXCEPTION 'Realized tier does not match the serving model thresholds.'
+      USING ERRCODE = '23514';
+  END IF;
+  IF jsonb_typeof(NEW.realized_class_basis) IS DISTINCT FROM 'object'
+    OR NEW.realized_class_basis->>'model_id' IS DISTINCT FROM NEW.model_id::TEXT
+    OR jsonb_typeof(NEW.realized_class_basis->'p33_threshold') IS DISTINCT FROM 'number'
+    OR (NEW.realized_class_basis->>'p33_threshold')::NUMERIC IS DISTINCT FROM model_p33
+    OR jsonb_typeof(NEW.realized_class_basis->'p67_threshold') IS DISTINCT FROM 'number'
+    OR (NEW.realized_class_basis->>'p67_threshold')::NUMERIC IS DISTINCT FROM model_p67
+    OR jsonb_typeof(NEW.realized_class_basis->'computed_at') IS DISTINCT FROM 'string' THEN
+    RAISE EXCEPTION 'Realized tier basis does not match the serving model metadata.'
+      USING ERRCODE = '23514';
+  END IF;
+  BEGIN
+    basis_computed_at := (NEW.realized_class_basis->>'computed_at')::TIMESTAMPTZ;
+  EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN
+    RAISE EXCEPTION 'Realized tier basis has an invalid computation timestamp.'
+      USING ERRCODE = '23514';
+  END;
+  IF basis_computed_at > now() + interval '5 minutes' THEN
+    RAISE EXCEPTION 'Realized tier basis computation timestamp cannot be in the future.'
+      USING ERRCODE = '23514';
+  END IF;
   RETURN NEW;
 END
 $$;
 DROP TRIGGER IF EXISTS predictions_validate_observed_outcome ON public.predictions;
 CREATE TRIGGER predictions_validate_observed_outcome
-BEFORE UPDATE OF actual_er, actual_source, actual_class ON public.predictions
+BEFORE UPDATE OF actual_er, actual_source, actual_class, realized_class, realized_class_basis ON public.predictions
 FOR EACH ROW EXECUTE FUNCTION public.validate_prediction_observed_outcome();
 DROP TRIGGER IF EXISTS predictions_validate_initial_outcome ON public.predictions;
 CREATE TRIGGER predictions_validate_initial_outcome
@@ -1056,7 +1198,9 @@ SET search_path = pg_catalog, public
 AS $$
 BEGIN
   IF OLD.actual_er IS NOT DISTINCT FROM NEW.actual_er
-    AND OLD.actual_source IS NOT DISTINCT FROM NEW.actual_source THEN
+    AND OLD.actual_source IS NOT DISTINCT FROM NEW.actual_source
+    AND OLD.realized_class IS NOT DISTINCT FROM NEW.realized_class
+    AND OLD.realized_class_basis IS NOT DISTINCT FROM NEW.realized_class_basis THEN
     RETURN NEW;
   END IF;
   INSERT INTO public.content_lifecycle_events (
@@ -1072,7 +1216,9 @@ BEGIN
       'previous_actual_er', OLD.actual_er,
       'actual_er', NEW.actual_er,
       'actual_source', NEW.actual_source,
-      'actual_class_derived', false
+      'previous_realized_class', OLD.realized_class,
+      'realized_class', NEW.realized_class,
+      'realized_class_basis', NEW.realized_class_basis
     ))
   );
   RETURN NEW;
@@ -1080,7 +1226,7 @@ END
 $$;
 DROP TRIGGER IF EXISTS predictions_audit_observed_outcome ON public.predictions;
 CREATE TRIGGER predictions_audit_observed_outcome
-AFTER UPDATE OF actual_er, actual_source ON public.predictions
+AFTER UPDATE OF actual_er, actual_source, realized_class, realized_class_basis ON public.predictions
 FOR EACH ROW EXECUTE FUNCTION public.audit_prediction_observed_outcome();
 
 CREATE OR REPLACE FUNCTION public.reconcile_prediction_publication_outcomes(
@@ -1094,11 +1240,19 @@ AS $$
 DECLARE
   changed_count INTEGER := 0;
 BEGIN
-  WITH eligible AS (
-    SELECT publication.id AS publication_id, publication.prediction_id, post.er
+  WITH raw_eligible AS (
+    SELECT publication.prediction_id,
+           post.er,
+           prediction.model_id,
+           prediction.model_version,
+           CASE WHEN jsonb_typeof(model.metrics->'p33_threshold') = 'number'
+             THEN (model.metrics->>'p33_threshold')::NUMERIC END AS p33,
+           CASE WHEN jsonb_typeof(model.metrics->'p67_threshold') = 'number'
+             THEN (model.metrics->>'p67_threshold')::NUMERIC END AS p67
     FROM public.prediction_publications publication
     JOIN public.posts post ON post.id = publication.post_id
     JOIN public.predictions prediction ON prediction.id = publication.prediction_id
+    LEFT JOIN public.models model ON model.id = prediction.model_id
     WHERE (p_brand_id IS NULL OR publication.brand_id = p_brand_id)
       AND prediction.actual_class IS NULL
       AND post.brand_id = publication.brand_id
@@ -1107,14 +1261,47 @@ BEGIN
       AND post.er IS NOT NULL
       AND post.created_at IS NOT NULL
       AND post.created_at <= now() - (7 * interval '1 day')
+  ), eligible AS (
+    SELECT raw_eligible.*,
+           CASE
+             WHEN model_id IS NULL OR p33 IS NULL OR p67 IS NULL OR p33 > p67 THEN NULL
+             WHEN er < p33 THEN 'LOW'
+             WHEN er <= p67 THEN 'AVERAGE'
+             ELSE 'HIGH'
+           END AS computed_class
+    FROM raw_eligible
   ), updated AS (
     UPDATE public.predictions prediction
-    SET actual_er = eligible.er, actual_source = 'instagram_media_id'
+    SET actual_er = eligible.er,
+        actual_source = 'instagram_media_id',
+        realized_class = eligible.computed_class,
+        realized_class_basis = CASE WHEN eligible.computed_class IS NULL THEN NULL
+          ELSE jsonb_build_object(
+            'model_id', eligible.model_id::TEXT,
+            'model_version', eligible.model_version,
+            'p33_threshold', eligible.p33,
+            'p67_threshold', eligible.p67,
+            'computed_at', now(),
+            'minimum_post_age_days', 7,
+            'observation_policy', 'cumulative_at_latest_sync_after_maturity_gate',
+            'maturity_policy', 'cumulative_at_latest_sync_after_7_day_gate'
+          )
+        END
     FROM eligible
     WHERE prediction.id = eligible.prediction_id
       AND (
         prediction.actual_er IS DISTINCT FROM eligible.er
         OR prediction.actual_source IS DISTINCT FROM 'instagram_media_id'
+        OR prediction.realized_class IS DISTINCT FROM eligible.computed_class
+        OR (
+          eligible.computed_class IS NOT NULL
+          AND (
+            prediction.realized_class_basis->>'model_id' IS DISTINCT FROM eligible.model_id::TEXT
+            OR prediction.realized_class_basis->>'p33_threshold' IS DISTINCT FROM eligible.p33::TEXT
+            OR prediction.realized_class_basis->>'p67_threshold' IS DISTINCT FROM eligible.p67::TEXT
+          )
+        )
+        OR (eligible.computed_class IS NULL AND prediction.realized_class_basis IS NOT NULL)
       )
     RETURNING prediction.id
   )

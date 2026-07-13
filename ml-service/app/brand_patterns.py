@@ -20,6 +20,12 @@ MIN_GROUP_SAMPLES = 5
 DIRECTIONAL_GROUP_SAMPLES = 15
 MIN_TOTAL_FOR_HIGHLIGHT = 20
 RECENT_PUBLISHING_WINDOW_DAYS = 90
+MOMENTUM_WINDOW_DAYS = 90
+RECENT_PERFORMANCE_UNAVAILABLE_REASON = (
+    "Recent performance trend is unavailable because cumulative engagement rates "
+    "were not captured at an equal post-age horizon. Fixed-horizon metric snapshots "
+    "are required before recent and older posts can be compared fairly."
+)
 WIB = dt.timezone(dt.timedelta(hours=7))
 
 
@@ -188,6 +194,175 @@ def _highlight(dimension: str, groups: List[Dict[str, Any]], total: int):
     return {"dimension": dimension, **strongest}
 
 
+def _window_summary(
+    rows: List[Dict[str, Any]],
+    *,
+    start: dt.datetime,
+    end: dt.datetime,
+) -> Dict[str, Any]:
+    """Summarize one half-open, equal-length publishing window.
+
+    The returned mix is age-safe because it counts publication choices rather
+    than comparing cumulative outcomes. ER distributions are retained only as
+    explicitly confounded descriptive context in ``_build_momentum``.
+    """
+    window_rows = [row for row in rows if start <= row["created_at"] < end]
+    format_counts = Counter(_format_key(row) for row in window_rows)
+    total = len(window_rows)
+    format_mix = [
+        {
+            "key": key,
+            "label": label,
+            "sample_size": count,
+            "share": round(count / total, 4) if total else 0.0,
+        }
+        for (key, label), count in sorted(
+            format_counts.items(), key=lambda item: item[0][1]
+        )
+    ]
+    return {
+        "start_at": start.isoformat(),
+        "end_at": end.isoformat(),
+        "posts": total,
+        "format_mix": format_mix,
+        "_rows": window_rows,
+    }
+
+
+def _group_er_distributions(
+    rows: List[Dict[str, Any]],
+    classifier: Callable[[Dict[str, Any]], Tuple[str, str]],
+) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    grouped: Dict[Tuple[str, str], List[float]] = defaultdict(list)
+    for row in rows:
+        grouped[classifier(row)].append(row["er"])
+    return {
+        key: {
+            "sample_size": len(values),
+            "median_er": _percentile(values, 50),
+            "q1_er": _percentile(values, 25),
+            "q3_er": _percentile(values, 75),
+        }
+        for key, values in grouped.items()
+    }
+
+
+def _paired_er_context(
+    recent_rows: List[Dict[str, Any]],
+    prior_rows: List[Dict[str, Any]],
+    classifier: Callable[[Dict[str, Any]], Tuple[str, str]],
+) -> List[Dict[str, Any]]:
+    recent = _group_er_distributions(recent_rows, classifier)
+    prior = _group_er_distributions(prior_rows, classifier)
+    output = []
+    for key, label in sorted(set(recent) | set(prior), key=lambda item: item[1]):
+        recent_value = recent.get((key, label))
+        prior_value = prior.get((key, label))
+        recent_median = recent_value["median_er"] if recent_value else None
+        prior_median = prior_value["median_er"] if prior_value else None
+        output.append({
+            "key": key,
+            "label": label,
+            "recent": recent_value,
+            "prior": prior_value,
+            "median_difference_pp": (
+                round(recent_median - prior_median, 4)
+                if recent_median is not None and prior_median is not None
+                else None
+            ),
+            "evidence_level": _evidence_level(min(
+                recent_value["sample_size"] if recent_value else 0,
+                prior_value["sample_size"] if prior_value else 0,
+            )),
+        })
+    return output
+
+
+def _build_momentum(
+    rows: List[Dict[str, Any]],
+    *,
+    now_utc: dt.datetime,
+) -> Dict[str, Any]:
+    """Compare two equal 90-day windows without claiming recent ER uplift."""
+    recent_start = now_utc - dt.timedelta(days=MOMENTUM_WINDOW_DAYS)
+    prior_start = recent_start - dt.timedelta(days=MOMENTUM_WINDOW_DAYS)
+    recent = _window_summary(rows, start=recent_start, end=now_utc)
+    prior = _window_summary(rows, start=prior_start, end=recent_start)
+
+    recent_mix = {item["key"]: item for item in recent["format_mix"]}
+    prior_mix = {item["key"]: item for item in prior["format_mix"]}
+    mix_changes = []
+    for key in sorted(set(recent_mix) | set(prior_mix)):
+        recent_item = recent_mix.get(key)
+        prior_item = prior_mix.get(key)
+        label = (recent_item or prior_item or {}).get("label", key)
+        recent_share = recent_item["share"] if recent_item else 0.0
+        prior_share = prior_item["share"] if prior_item else 0.0
+        mix_changes.append({
+            "key": key,
+            "label": label,
+            "recent_sample_size": recent_item["sample_size"] if recent_item else 0,
+            "prior_sample_size": prior_item["sample_size"] if prior_item else 0,
+            "recent_share": recent_share,
+            "prior_share": prior_share,
+            "share_change_pp": round((recent_share - prior_share) * 100, 2),
+            "evidence_level": _evidence_level(min(
+                recent_item["sample_size"] if recent_item else 0,
+                prior_item["sample_size"] if prior_item else 0,
+            )),
+        })
+    mix_changes.sort(key=lambda item: (-abs(item["share_change_pp"]), item["label"]))
+
+    preferred_statements = []
+    if recent["posts"] and prior["posts"]:
+        statement_candidates = [
+            item for item in mix_changes if item["evidence_level"] != "limited"
+        ]
+        for item in statement_candidates[:2]:
+            direction = (
+                "rose" if item["share_change_pp"] > 0
+                else "fell" if item["share_change_pp"] < 0
+                else "held"
+            )
+            connector = "from" if direction != "held" else "at"
+            prior_percent = round(item["prior_share"] * 100)
+            recent_percent = round(item["recent_share"] * 100)
+            if direction == "held":
+                statement = (
+                    f"{item['label']} share of mature modeled posts held at "
+                    f"{recent_percent}% (prior n={item['prior_sample_size']}; "
+                    f"recent n={item['recent_sample_size']})."
+                )
+            else:
+                statement = (
+                    f"{item['label']} share of mature modeled posts {direction} {connector} "
+                    f"{prior_percent}% to {recent_percent}% "
+                    f"(prior n={item['prior_sample_size']}; recent n={item['recent_sample_size']})."
+                )
+            preferred_statements.append(statement)
+
+    recent_rows = recent.pop("_rows")
+    prior_rows = prior.pop("_rows")
+    return {
+        "window_days": MOMENTUM_WINDOW_DAYS,
+        "recent_window": recent,
+        "prior_window": prior,
+        "format_mix_changes": mix_changes,
+        "preferred_mix_statements": preferred_statements,
+        "er_context": {
+            "decision_use_allowed": False,
+            "interpretation": "descriptive_only_age_confounded",
+            "caveat": RECENT_PERFORMANCE_UNAVAILABLE_REASON,
+            "formats": _paired_er_context(recent_rows, prior_rows, _format_key),
+            "dayparts": _paired_er_context(
+                recent_rows,
+                prior_rows,
+                lambda row: _daypart(row["post_hour"]),
+            ),
+        },
+    }
+
+
 def build_brand_patterns(
     rows: Iterable[Dict[str, Any]],
     *,
@@ -244,6 +419,7 @@ def build_brand_patterns(
             "highlights": [],
             "freshness": {"status": "empty", "external_trends_included": False},
             "recent_publishing_mix": None,
+            "brand_history_momentum": _build_momentum([], now_utc=now_utc),
             "not_measured": unsupported,
             "limitations": [
                 (
@@ -307,6 +483,7 @@ def build_brand_patterns(
     recent_eligible = [row for row in recent if _is_modeled_format(row)]
     recent_formats = Counter(_format_key(row)[1] for row in recent)
     recent_dayparts = Counter(_daypart(row["post_hour"])[1] for row in recent)
+    momentum = _build_momentum(normalized, now_utc=now_utc)
 
     return {
         "status": "success",
@@ -358,11 +535,9 @@ def build_brand_patterns(
             "format_counts": dict(sorted(recent_formats.items())),
             "daypart_counts": dict(sorted(recent_dayparts.items())),
             "performance_comparison_available": False,
-            "reason": (
-                "Current ER is cumulative and not captured at an equal post age; "
-                "recent-versus-prior performance would be confounded by exposure time."
-            ),
+            "reason": RECENT_PERFORMANCE_UNAVAILABLE_REASON,
         },
+        "brand_history_momentum": momentum,
         "not_measured": unsupported,
         "limitations": [
             "Patterns are descriptive associations, not causal audience preferences.",

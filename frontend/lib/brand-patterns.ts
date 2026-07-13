@@ -17,6 +17,60 @@ export interface BrandPatternHighlight extends BrandPatternGroup {
   dimension: string;
 }
 
+export interface MomentumMixItem {
+  key: string;
+  label: string;
+  sample_size: number;
+  share: number;
+}
+
+export interface MomentumWindow {
+  start_at: string | null;
+  end_at: string | null;
+  posts: number;
+  format_mix: MomentumMixItem[];
+}
+
+export interface MomentumErDistribution {
+  sample_size: number;
+  median_er: number;
+  q1_er: number;
+  q3_er: number;
+}
+
+export interface MomentumErGroup {
+  key: string;
+  label: string;
+  recent: MomentumErDistribution | null;
+  prior: MomentumErDistribution | null;
+  median_difference_pp: number | null;
+  evidence_level: BrandPatternEvidenceLevel;
+}
+
+export interface BrandHistoryMomentum {
+  window_days: number;
+  recent_window: MomentumWindow;
+  prior_window: MomentumWindow;
+  format_mix_changes: Array<{
+    key: string;
+    label: string;
+    recent_sample_size: number;
+    prior_sample_size: number;
+    recent_share: number;
+    prior_share: number;
+    share_change_pp: number;
+    evidence_level: BrandPatternEvidenceLevel;
+  }>;
+  preferred_mix_statements: string[];
+  er_context: {
+    decision_use_allowed: false;
+    interpretation: "descriptive_only_age_confounded";
+    caveat: string;
+    formats: MomentumErGroup[];
+    dayparts: MomentumErGroup[];
+  };
+}
+
 export interface BrandPatternsPayload {
   status: "success" | "empty";
   brand: { id: string; name: string; niche: string };
@@ -62,6 +116,7 @@ export interface BrandPatternsPayload {
     performance_comparison_available: boolean;
     reason: string;
   } | null;
+  brand_history_momentum: BrandHistoryMomentum | null;
   not_measured: Array<{ key: string; label: string; reason: string }>;
   limitations: string[];
 }
@@ -138,6 +193,109 @@ function patternGroup(value: unknown): BrandPatternGroup | null {
     high_tier_share: Math.max(0, Math.min(1, number(source.high_tier_share))),
     evidence_level: evidenceLevel,
     eligible_for_highlight: source.eligible_for_highlight === true,
+  };
+}
+
+function momentumMixItem(value: unknown): MomentumMixItem | null {
+  const source = record(value);
+  const key = text(source?.key, 80);
+  const label = text(source?.label, 140);
+  if (!source || !key || !label) return null;
+  return {
+    key,
+    label,
+    sample_size: nonNegativeInteger(source.sample_size),
+    share: Math.max(0, Math.min(1, number(source.share))),
+  };
+}
+
+function momentumWindow(value: unknown): MomentumWindow {
+  const source = record(value) || {};
+  return {
+    start_at: isoDate(source.start_at),
+    end_at: isoDate(source.end_at),
+    posts: nonNegativeInteger(source.posts),
+    format_mix: Array.isArray(source.format_mix)
+      ? source.format_mix.map(momentumMixItem).filter((item): item is MomentumMixItem => item !== null).slice(0, 12)
+      : [],
+  };
+}
+
+function momentumDistribution(value: unknown): MomentumErDistribution | null {
+  const source = record(value);
+  if (!source) return null;
+  return {
+    sample_size: nonNegativeInteger(source.sample_size),
+    median_er: number(source.median_er),
+    q1_er: number(source.q1_er),
+    q3_er: number(source.q3_er),
+  };
+}
+
+function momentumErGroup(value: unknown): MomentumErGroup | null {
+  const source = record(value);
+  const key = text(source?.key, 80);
+  const label = text(source?.label, 140);
+  const evidenceLevel = text(source?.evidence_level, 20) as BrandPatternEvidenceLevel | null;
+  if (!source || !key || !label || !evidenceLevel || !EVIDENCE_LEVELS.has(evidenceLevel)) return null;
+  return {
+    key,
+    label,
+    recent: momentumDistribution(source.recent),
+    prior: momentumDistribution(source.prior),
+    median_difference_pp: typeof source.median_difference_pp === "number" && Number.isFinite(source.median_difference_pp)
+      ? source.median_difference_pp
+      : null,
+    evidence_level: evidenceLevel,
+  };
+}
+
+function brandHistoryMomentum(value: unknown): BrandHistoryMomentum | null {
+  const source = record(value);
+  const er = record(source?.er_context);
+  if (!source || !er || er.decision_use_allowed !== false || er.interpretation !== "descriptive_only_age_confounded") return null;
+  const caveat = text(er.caveat, 700);
+  if (!caveat) return null;
+  const changes = Array.isArray(source.format_mix_changes)
+    ? source.format_mix_changes.flatMap((value) => {
+        const item = record(value);
+        const key = text(item?.key, 80);
+        const label = text(item?.label, 140);
+        const evidenceLevel = text(item?.evidence_level, 20) as BrandPatternEvidenceLevel | null;
+        if (!item || !key || !label || !evidenceLevel || !EVIDENCE_LEVELS.has(evidenceLevel)) return [];
+        return [{
+          key,
+          label,
+          recent_sample_size: nonNegativeInteger(item.recent_sample_size),
+          prior_sample_size: nonNegativeInteger(item.prior_sample_size),
+          recent_share: Math.max(0, Math.min(1, number(item.recent_share))),
+          prior_share: Math.max(0, Math.min(1, number(item.prior_share))),
+          share_change_pp: number(item.share_change_pp),
+          evidence_level: evidenceLevel,
+        }];
+      }).slice(0, 12)
+    : [];
+  const groups = (value: unknown) => Array.isArray(value)
+    ? value.map(momentumErGroup).filter((item): item is MomentumErGroup => item !== null).slice(0, 20)
+    : [];
+  return {
+    window_days: nonNegativeInteger(source.window_days, 90),
+    recent_window: momentumWindow(source.recent_window),
+    prior_window: momentumWindow(source.prior_window),
+    format_mix_changes: changes,
+    preferred_mix_statements: Array.isArray(source.preferred_mix_statements)
+      ? source.preferred_mix_statements.flatMap((value) => {
+          const statement = text(value, 300);
+          return statement ? [statement] : [];
+        }).slice(0, 2)
+      : [],
+    er_context: {
+      decision_use_allowed: false,
+      interpretation: "descriptive_only_age_confounded",
+      caveat,
+      formats: groups(er.formats),
+      dayparts: groups(er.dayparts),
+    },
   };
 }
 
@@ -239,6 +397,7 @@ export function sanitizeBrandPatterns(
           reason: text(recent.reason, 400) || "A comparable performance window is not available.",
         }
       : null,
+    brand_history_momentum: brandHistoryMomentum(source.brand_history_momentum),
     not_measured: Array.isArray(source.not_measured)
       ? source.not_measured.flatMap((value) => {
           const item = record(value);

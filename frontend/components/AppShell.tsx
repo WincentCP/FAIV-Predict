@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { buttonVariants } from "@/components/ui/button";
+import { GlossaryPopover } from "@/components/GlossaryPopover";
 import { cn } from "@/lib/utils";
 
 const NAV_GROUPS = [
@@ -360,6 +361,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <span>New prediction</span>
                 </Link>
               )}
+              <GlossaryPopover />
               <button
                 type="button"
                 onClick={() => setTheme(theme === "dark" ? "light" : "dark")}

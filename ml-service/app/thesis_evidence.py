@@ -37,6 +37,95 @@ def _metrics(row: Dict[str, Any]) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _markdown_cell(value: Any) -> str:
+    return str(value if value is not None else "not recorded").replace("|", "\\|")
+
+
+def _gate_summary(gate: Dict[str, Any]) -> str:
+    decision = gate.get("decision") or "not recorded"
+    passed = gate.get("passed")
+    if isinstance(passed, bool):
+        return f"{decision} ({'passed' if passed else 'failed'})"
+    return str(decision)
+
+
+def _compact_appendix(row: Dict[str, Any]) -> List[str]:
+    """Render one auditable, human-sized appendix block for a served model."""
+    metrics = _metrics(row)
+    candidate = metrics.get("candidate") or {}
+    dataset = metrics.get("dataset") or {}
+    confusion = candidate.get("confusion_matrix") or {}
+    labels = confusion.get("labels") or []
+    matrix = confusion.get("matrix") or []
+    permutation = metrics.get("holdout_permutation_importance") or {}
+    features = permutation.get("features") or []
+    scope = row.get("brand_name") or row.get("niche") or row.get("brand_id") or "unknown"
+    lines = [
+        f"### {_markdown_cell(scope)} - {_markdown_cell(row.get('version') or 'unknown version')}",
+        "",
+        "| Evidence field | Frozen value |",
+        "| --- | --- |",
+        f"| Scope type | `{_markdown_cell(row.get('model_type') or 'unknown')}` |",
+        f"| Dataset window | `{_markdown_cell(dataset.get('first_post_at'))}` to `{_markdown_cell(dataset.get('last_post_at'))}` |",
+        f"| Train / holdout n | {metrics.get('train_samples', '?')} / {metrics.get('test_samples', '?')} |",
+        f"| P33 / P67 thresholds | {_number(metrics.get('p33_threshold'))} / {_number(metrics.get('p67_threshold'))} |",
+        f"| Balanced accuracy | {_number(candidate.get('balanced_accuracy'))} |",
+        f"| Macro-F1 | {_number((candidate.get('macro') or {}).get('f1_score'))} |",
+        f"| Quadratic weighted kappa | {_number(candidate.get('quadratic_weighted_kappa'))} |",
+        f"| Raw accuracy | {_number(candidate.get('accuracy', metrics.get('accuracy')))} |",
+        f"| Operational gate | {_markdown_cell(_gate_summary(metrics.get('promotion_gate') or {}))} |",
+        f"| Operational warnings | {_markdown_cell(', '.join((metrics.get('promotion_gate') or {}).get('warnings') or []) or 'none')} |",
+        f"| Scientific gate | {_markdown_cell(_gate_summary(metrics.get('scientific_gate') or {}))} |",
+        f"| Scientific failure reasons | {_markdown_cell(', '.join((metrics.get('scientific_gate') or {}).get('failure_reasons') or []) or 'none')} |",
+        f"| Scientific status | `{_markdown_cell(metrics.get('evaluation_status') or 'not assessed')}` |",
+        f"| Dataset SHA-256 | `{_markdown_cell(dataset.get('dataset_sha256'))}` |",
+        f"| Training-code SHA-256 | `{_markdown_cell(metrics.get('training_code_sha256'))}` |",
+        "",
+        "#### Holdout confusion matrix",
+        "",
+    ]
+    if labels and len(matrix) == len(labels) and all(
+        isinstance(values, list) and len(values) == len(labels) for values in matrix
+    ):
+        lines.extend([
+            "| Actual \\ Predicted | " + " | ".join(_markdown_cell(label) for label in labels) + " |",
+            "| --- | " + " | ".join("---:" for _ in labels) + " |",
+        ])
+        for label, values in zip(labels, matrix):
+            lines.append(
+                f"| {_markdown_cell(label)} | "
+                + " | ".join(str(value) for value in values)
+                + " |"
+            )
+    else:
+        lines.append("Confusion-matrix evidence was not recorded for this model.")
+
+    lines.extend(["", "#### Top holdout permutation importances", ""])
+    available_features = sorted([
+        item for item in features
+        if isinstance(item, dict) and isinstance(item.get("mean"), (int, float))
+    ], key=lambda item: float(item["mean"]), reverse=True)[:5]
+    if permutation.get("available") is True and available_features:
+        lines.extend([
+            "| Rank | Feature | Mean balanced-accuracy importance | Standard deviation |",
+            "| ---: | --- | ---: | ---: |",
+        ])
+        for rank, item in enumerate(available_features, start=1):
+            lines.append(
+                f"| {rank} | `{_markdown_cell(item.get('feature'))}` | "
+                f"{_number(item.get('mean'))} | {_number(item.get('std'))} |"
+            )
+    else:
+        lines.append("Holdout permutation importance was unavailable for this model.")
+    lines.extend([
+        "",
+        "> Interpretation guard: class-aware and ordinal metrics lead this appendix. "
+        "Raw accuracy is retained for completeness, not treated as sufficient evidence on its own.",
+        "",
+    ])
+    return lines
+
+
 def _is_served_model(row: Dict[str, Any]) -> bool:
     """Apply the same provenance and promotion contract as ModelLoader."""
     metrics = _metrics(row)
@@ -139,7 +228,7 @@ def format_markdown(rows: Iterable[Dict[str, Any]]) -> str:
         "",
         "Generated from the latest application-append-only `models.metrics` records. Raw captions and secrets are excluded.",
         "",
-        "| Scope | Version | Scientific status | Train/Test | Accuracy | Macro F1 | Balanced accuracy | Dummy accuracy | Logistic accuracy | Accuracy gain | Ordinal MAE | QWK | Dataset SHA-256 |",
+        "| Scope | Version | Scientific status | Train/Test | Balanced accuracy | Macro F1 | QWK | Accuracy | Ordinal MAE | Dummy accuracy | Logistic accuracy | Accuracy gain | Dataset SHA-256 |",
         "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in rows:
@@ -154,7 +243,7 @@ def format_markdown(rows: Iterable[Dict[str, Any]]) -> str:
         if len(dataset_hash) == 64:
             dataset_hash = f"`{dataset_hash}`"
         lines.append(
-            "| {scope} | {version} | {status} | {train}/{test} | {accuracy} | {macro_f1} | {balanced} | {baseline} | {logistic} | {gain} | {ordinal_mae} | {qwk} | {dataset_hash} |".format(
+            "| {scope} | {version} | {status} | {train}/{test} | {balanced} | {macro_f1} | {qwk} | {accuracy} | {ordinal_mae} | {baseline} | {logistic} | {gain} | {dataset_hash} |".format(
                 scope=str(scope).replace("|", "\\|"),
                 version=row.get("version") or "not recorded",
                 status=metrics.get("evaluation_status") or "legacy/not assessed",
@@ -172,7 +261,17 @@ def format_markdown(rows: Iterable[Dict[str, Any]]) -> str:
             )
         )
 
-    lines.extend(["", "## Reproducibility details", ""])
+    lines.extend([
+        "",
+        "Balanced accuracy, macro-F1, and quadratic weighted kappa are shown before raw accuracy because the three classes can be imbalanced. Raw accuracy can be dominated by the most frequent tier and must be interpreted with the class-aware, ordinal, per-class, and confusion-matrix evidence below.",
+        "",
+        "## Compact per-scope appendix",
+        "",
+    ])
+    for row in rows:
+        lines.extend(_compact_appendix(row))
+
+    lines.extend(["## Full reproducibility details", ""])
     for row in rows:
         metrics = _metrics(row)
         dataset = metrics.get("dataset") or {}
@@ -207,6 +306,8 @@ def format_markdown(rows: Iterable[Dict[str, Any]]) -> str:
             f"- Runtime: Python `{runtime.get('python') or 'unknown'}`, scikit-learn `{runtime.get('scikit_learn') or 'unknown'}`, pandas `{runtime.get('pandas') or 'unknown'}`, NumPy `{runtime.get('numpy') or 'unknown'}`",
             f"- Promotion decision: `{(metrics.get('promotion_gate') or {}).get('decision') or 'legacy'}`",
             f"- Evaluation contract: `{metrics.get('evaluation_contract') or 'legacy'}`",
+            "",
+            "#### Full machine-readable metrics snapshot",
             "",
             "```json",
             json.dumps(metrics, ensure_ascii=False, indent=2, sort_keys=True),

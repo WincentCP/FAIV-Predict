@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getRequestUser, getOwnedBrands } from "@/lib/authz";
+import { realizedOutcomeFields } from "@/lib/realized-outcomes";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,15 @@ export async function GET() {
         highCount: 0, avgCount: 0, lowCount: 0,
         staleCount: 0, provisionalCount: 0, observedCount: 0,
         accuracyTrend: [], recent: [],
+        outcomeVerification: {
+          linkedMaturePredictions: 0,
+          exactTierMatches: 0,
+          withinOneTierMatches: 0,
+          exactTierMatchRate: null,
+          withinOneTierRate: null,
+          meanAbsoluteTierError: null,
+          cumulativeErDisclaimer: "Verified outcomes use cumulative engagement rate after the seven-day maturity gate; small samples should be interpreted cautiously.",
+        },
       });
     }
 
@@ -48,7 +58,7 @@ export async function GET() {
           .contains("metrics", { data_source: "instagram_graph", identity_key: "instagram_media_id" })
       : Promise.resolve({ data: [], error: null });
 
-    const [totalResult, highResult, averageResult, lowResult, staleResult, provisionalResult, observedResult, recentResult, personalModelResult, cohortModelResult] =
+    const [totalResult, highResult, averageResult, lowResult, staleResult, provisionalResult, observedResult, recentResult, personalModelResult, cohortModelResult, outcomeVerificationResult] =
       await Promise.all([
         activePredictions(),
         activePredictions().eq("pred_class", "HIGH"),
@@ -60,12 +70,20 @@ export async function GET() {
         supabase.from("predictions").select("id, caption, pred_class, created_at, features, brands(name)").in("brand_id", brandIds).eq("created_by", user.id).is("deleted_at", null).in("prediction_status", ["current", "provisional"]).order("created_at", { ascending: false }).limit(5),
         personalModels,
         cohortModels,
+        supabase.from("predictions")
+          .select("pred_class, actual_source, realized_class, realized_class_basis")
+          .in("brand_id", brandIds)
+          .eq("created_by", user.id)
+          .eq("actual_source", "instagram_media_id")
+          .not("realized_class", "is", null)
+          .not("realized_class_basis", "is", null),
       ]);
 
     const firstError = [
       totalResult.error, highResult.error, averageResult.error, lowResult.error,
       staleResult.error, provisionalResult.error, observedResult.error,
       recentResult.error, personalModelResult.error, cohortModelResult.error,
+      outcomeVerificationResult.error,
     ].find(Boolean);
     if (firstError) throw firstError;
 
@@ -104,6 +122,33 @@ export async function GET() {
       confidence: typeof row.features?.confidence === "number" ? Math.round(row.features.confidence) : null,
       when: row.created_at,
     }));
+    const tierErrors = (outcomeVerificationResult.data || []).flatMap((row: any) => {
+      const outcome = realizedOutcomeFields({
+        predicted: row.pred_class,
+        realized: row.realized_class,
+        basis: row.realized_class_basis,
+        actualSource: row.actual_source,
+      });
+      return outcome.tier_error === null ? [] : [outcome.tier_error];
+    });
+    const linkedMaturePredictions = tierErrors.length;
+    const exactTierMatches = tierErrors.filter((error) => error === 0).length;
+    const withinOneTierMatches = tierErrors.filter((error) => error <= 1).length;
+    const outcomeVerification = {
+      linkedMaturePredictions,
+      exactTierMatches,
+      withinOneTierMatches,
+      exactTierMatchRate: linkedMaturePredictions > 0
+        ? (exactTierMatches / linkedMaturePredictions) * 100
+        : null,
+      withinOneTierRate: linkedMaturePredictions > 0
+        ? (withinOneTierMatches / linkedMaturePredictions) * 100
+        : null,
+      meanAbsoluteTierError: linkedMaturePredictions > 0
+        ? tierErrors.reduce<number>((sum, error) => sum + error, 0) / linkedMaturePredictions
+        : null,
+      cumulativeErDisclaimer: "Verified outcomes use cumulative engagement rate after the seven-day maturity gate; small samples should be interpreted cautiously.",
+    };
 
     return NextResponse.json({
       totalPredictions: total,
@@ -113,7 +158,7 @@ export async function GET() {
       staleCount: staleResult.count || 0,
       provisionalCount: provisionalResult.count || 0,
       observedCount: observedResult.count || 0,
-      accuracyTrend, recent,
+      accuracyTrend, recent, outcomeVerification,
     });
   } catch (error: any) {
     console.error("[BFF Dashboard] Failed to fetch dashboard aggregates:", error);

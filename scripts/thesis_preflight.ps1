@@ -119,6 +119,9 @@ try:
              to_regclass(%s) IS NOT NULL,
              EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s),
              EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s),
+             EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s),
+             EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=%s AND table_name=%s AND column_name=%s),
+             to_regclass(%s) IS NOT NULL,
              to_regprocedure(%s) IS NOT NULL,
              to_regprocedure(%s) IS NOT NULL,
              to_regprocedure(%s) IS NOT NULL""",
@@ -127,6 +130,9 @@ try:
             "public.prediction_publications",
             "public", "predictions", "actual_er",
             "public", "brands", "instagram_account_id",
+            "public", "predictions", "realized_class",
+            "public", "predictions", "realized_class_basis",
+            "public.brand_trend_notes",
             "public.link_prediction_publication(uuid,uuid)",
             "public.reconcile_prediction_publication_outcomes(uuid)",
             "public.validate_prediction_observed_outcome()",
@@ -138,7 +144,7 @@ finally:
 '@
     $SchemaOutput = Invoke-MlPython -Code $SchemaCode -FailureMessage "database schema command failed"
     $SchemaFlags = ([string]($SchemaOutput | Select-Object -Last 1)).Trim().ToLowerInvariant().Split("|")
-    if ($SchemaFlags.Count -ne 7 -or $SchemaFlags[0] -ne "true") {
+    if ($SchemaFlags.Count -ne 10 -or $SchemaFlags[0] -ne "true") {
         throw "posts.media_product_type is missing; apply migration 202607120003 before rebuilding/retraining"
     }
     if (
@@ -147,11 +153,14 @@ finally:
         $SchemaFlags[3] -ne "true" -or
         $SchemaFlags[4] -ne "true" -or
         $SchemaFlags[5] -ne "true" -or
-        $SchemaFlags[6] -ne "true"
+        $SchemaFlags[6] -ne "true" -or
+        $SchemaFlags[7] -ne "true" -or
+        $SchemaFlags[8] -ne "true" -or
+        $SchemaFlags[9] -ne "true"
     ) {
-        throw "prediction publication cohesion schema is missing; apply migration 202607120004"
+        throw "prediction publication, realized-tier, or trend-note schema is missing; apply migrations 202607120004, 202607130005, and 202607130006"
     }
-    Write-Pass "Meta media-product and Content Plan/publication-cohesion migrations are applied"
+    Write-Pass "Meta media-product, publication, realized-tier, and trend-note migrations are applied"
 } catch {
     Write-Fail "Database migration contract failed: $($_.Exception.Message)"
 }

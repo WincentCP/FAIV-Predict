@@ -13,7 +13,10 @@ import {
 } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
+import { OutcomeComparison } from "@/components/OutcomeComparison";
 import { fetchWithRetry } from "@/lib/fetch-retry";
+import { formatModelScore } from "@/lib/model-scores";
+import type { RealizedClassBasis } from "@/lib/realized-outcomes";
 import { type ContentFormat, type Tier } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +38,10 @@ type HistoryItem = {
   observed_er: number | null;
   observed_post_age_days: number | null;
   observed_at: string | null;
+  realized_tier: Tier | null;
+  realized_class_basis: RealizedClassBasis | null;
+  tier_error: 0 | 1 | 2 | null;
+  verification_badge: "match" | "one_off" | "miss" | null;
   observation_status: ObservationStatus;
   confidence: number | null;
   when: string;
@@ -69,17 +76,25 @@ export default function HistoryPage() {
   const [lifecycle, setLifecycle] = useState<LifecycleFilter>("all");
   const [scope, setScope] = useState<VersionScope>("latest");
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [hasBrands, setHasBrands] = useState<boolean | null>(null);
 
   const loadHistory = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const response = await fetchWithRetry("/api/history");
+      const [response, brandsResponse] = await Promise.all([
+        fetchWithRetry("/api/history"),
+        fetchWithRetry("/api/brands").catch(() => null),
+      ]);
       const payload = await response.json().catch(() => null);
       if (!response.ok || !Array.isArray(payload)) {
         throw new Error("Prediction history could not be loaded.");
       }
       setHistory(payload);
+      if (brandsResponse?.ok) {
+        const brandsPayload = await brandsResponse.json().catch(() => null);
+        setHasBrands(Array.isArray(brandsPayload) ? brandsPayload.length > 0 : null);
+      }
     } catch (error: unknown) {
       setHistory([]);
       setLoadError(error instanceof Error ? error.message : "Prediction history could not be loaded.");
@@ -257,7 +272,7 @@ export default function HistoryPage() {
         {isLoading ? (
           <LedgerSkeleton />
         ) : filtered.length === 0 ? (
-          <EmptyLedger hasHistory={history.length > 0} onClear={() => { setQuery(""); setBrand("All"); setLifecycle("all"); setScope("latest"); }} />
+          <EmptyLedger hasHistory={history.length > 0} hasBrands={hasBrands} onClear={() => { setQuery(""); setBrand("All"); setLifecycle("all"); setScope("latest"); }} />
         ) : (
           <ul className="space-y-3" aria-label="Previous predictions">
             {filtered.map((item) => (
@@ -322,7 +337,7 @@ function PredictionRecord({
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <TierBadge tier={item.tier} />
               <span className="text-sm text-muted-foreground">
-                {item.confidence == null ? "Prediction score unavailable" : `${item.confidence}/100 prediction score`}
+                {formatModelScore(item.confidence)}
               </span>
               <PredictionStatusBadge item={item} />
             </div>
@@ -391,6 +406,16 @@ function OutcomeState({ item }: { item: HistoryItem }) {
           <span className="text-xl font-semibold tabular-nums">Engagement {item.observed_er.toFixed(2)}%</span>
         </div>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Instagram post · {item.observed_post_age_days ?? "—"} days old</p>
+        {item.realized_tier && (
+          <div className="mt-4 border-t border-border pt-4">
+            <OutcomeComparison
+              predictedTier={item.tier}
+              realizedTier={item.realized_tier}
+              basis={item.realized_class_basis}
+              compact
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -461,19 +486,25 @@ function LedgerSkeleton() {
   );
 }
 
-function EmptyLedger({ hasHistory, onClear }: { hasHistory: boolean; onClear: () => void }) {
+function EmptyLedger({ hasHistory, hasBrands, onClear }: { hasHistory: boolean; hasBrands: boolean | null; onClear: () => void }) {
+  const noBrand = !hasHistory && hasBrands === false;
   return (
     <div className="rounded-3xl border border-dashed border-border bg-surface p-10 text-center">
-      <h3 className="text-lg font-semibold">{hasHistory ? "No predictions match these filters" : "No predictions yet"}</h3>
+      <h3 className="text-lg font-semibold">{hasHistory ? "No predictions match these filters" : noBrand ? "Set up a brand first" : "No predictions yet"}</h3>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
-        {hasHistory ? "Change or clear the filters to see more predictions." : "Create a prediction to start your history."}
+        {hasHistory ? "Change or clear the filters to see more predictions." : noBrand ? "Add a brand workspace, then connect data and check model readiness." : "Create a prediction to start your history."}
       </p>
       {hasHistory ? (
         <button type="button" onClick={onClear} className="mt-5 min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2">Clear filters</button>
-      ) : (
-        <Link href="/predict" className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
-          Create prediction
+      ) : noBrand ? (
+        <Link href="/niches" className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+          Set up a brand
         </Link>
+      ) : (
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <Link href="/predict" className="inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Create prediction</Link>
+          <Link href="/niches" className="inline-flex min-h-11 items-center rounded-xl border border-border bg-surface px-4 text-sm font-semibold hover:bg-surface-2">Manage brands</Link>
+        </div>
       )}
     </div>
   );

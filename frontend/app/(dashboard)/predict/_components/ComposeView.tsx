@@ -22,6 +22,7 @@ import { Panel, Label } from "./Panel";
 import { AiToolsAccordion } from "./AiToolsAccordion";
 import { BrandPatterns } from "./BrandPatterns";
 import { type CreativeReviewSnapshot } from "./ConceptAssistant";
+import { TrendInsights } from "./TrendInsights";
 
 const FORMATS: Array<{ value: ContentFormat; label: string }> = [
   { value: "Reels", label: "Reel" },
@@ -157,9 +158,12 @@ export function ComposeView(props: {
             </select>
 
             {brandsList.length === 0 ? (
-              <p className="mt-3 text-sm font-medium leading-relaxed text-destructive">
-                {brandsError || "No brand account is available. Add one from Brands."}
-              </p>
+              <div className="mt-3 space-y-2">
+                <p className="text-sm font-medium leading-relaxed text-destructive">
+                  {brandsError || "No brand account is available. Add one from Brands."}
+                </p>
+                <Link href="/niches" className="inline-flex min-h-10 items-center rounded-lg px-2 text-sm font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40">Set up a brand</Link>
+              </div>
             ) : account ? (
               <div className="mt-3 space-y-1.5">
                 <ModelMaturity samples={account.samples ?? 0} activeScope={account.active_model_scope} variant="compact" />
@@ -170,6 +174,9 @@ export function ComposeView(props: {
                       ? `Uses the ${account.niche} niche model while personal history grows.`
                       : "Sync and train a model before predicting."}
                 </p>
+                {account.active_model_scope === "none" && (
+                  <Link href="/model-health" className="inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40">Review model readiness</Link>
+                )}
               </div>
             ) : null}
           </div>
@@ -226,6 +233,8 @@ export function ComposeView(props: {
           </div>
         </div>
       </Panel>
+
+      <TrendInsights brandId={accountId} brandName={account?.name} editable />
 
       <AiToolsAccordion
         visualConcept={visualConcept}

@@ -9,7 +9,10 @@ import { fetchWithRetry } from "@/lib/fetch-retry";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TierBadge } from "@/components/TierBadge";
+import { OutcomeComparison } from "@/components/OutcomeComparison";
 import { type Tier, type Brand } from "@/lib/types";
+import { formatModelScore } from "@/lib/model-scores";
+import type { RealizedClassBasis } from "@/lib/realized-outcomes";
 import {
   AlertTriangle,
   CalendarDays,
@@ -81,6 +84,10 @@ type PostDetail = {
     prediction_id: string | null;
     tier: Tier;
     actual_er: number | null;
+    realized_tier: Tier | null;
+    realized_class_basis: RealizedClassBasis | null;
+    tier_error: 0 | 1 | 2 | null;
+    verification_badge: "match" | "one_off" | "miss" | null;
     confidence: number | null;
     model_version: string | null;
     match_method: "verified_media_id" | "verified_graph_caption_candidate" | null;
@@ -595,7 +602,7 @@ function PostAnalysis({
                       Instagram post linked
                     </span>
                   )}
-                  <span>{detail.prediction.confidence !== null ? `${Math.round(detail.prediction.confidence)}/100 prediction score` : "Prediction score unavailable"}</span>
+                  <span>{formatModelScore(detail.prediction.confidence)}</span>
                   {detail.prediction.actual_er !== null && <span>Published engagement: <strong>{detail.prediction.actual_er.toFixed(2)}%</strong></span>}
                   {detail.prediction.model_version && <span className="font-mono text-xs text-muted-foreground">Model {detail.prediction.model_version}</span>}
                   <p className="w-full text-sm leading-relaxed text-muted-foreground">
@@ -605,6 +612,15 @@ function PostAnalysis({
                         ? "This prediction is already linked to another Instagram post."
                       : "Possible match based on the caption. Check the post and publication date before linking."}
                   </p>
+                  {detail.prediction.realized_tier && (
+                    <div className="w-full rounded-xl border border-border bg-surface-2/35 p-4">
+                      <OutcomeComparison
+                        predictedTier={detail.prediction.tier}
+                        realizedTier={detail.prediction.realized_tier}
+                        basis={detail.prediction.realized_class_basis}
+                      />
+                    </div>
+                  )}
                   {!detail.prediction.linked &&
                     !detail.prediction.linked_elsewhere &&
                     detail.prediction.prediction_id &&
@@ -781,7 +797,7 @@ function PublicationLinkDialog({ post, prediction, acknowledged, onAcknowledged,
         </div>
         <div className="space-y-5 p-5 md:p-6">
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-border p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Prediction</p><div className="mt-3 flex items-center gap-2"><TierBadge tier={prediction.tier} /><span className="text-sm">{prediction.confidence == null ? "Score unavailable" : `${Math.round(prediction.confidence)}/100 score`}</span></div></div>
+            <div className="rounded-2xl border border-border p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Prediction</p><div className="mt-3 flex flex-wrap items-center gap-2"><TierBadge tier={prediction.tier} /><span className="text-sm text-muted-foreground">{formatModelScore(prediction.confidence)}</span></div></div>
             <div className="rounded-2xl border border-border p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Instagram post</p><p className="mt-3 text-sm font-semibold">{mediaBadge(post).label} · {formatDate(post.timestamp)}</p><p className="mt-2 line-clamp-3 text-sm leading-relaxed text-muted-foreground">{post.caption || "Post without caption"}</p></div>
           </div>
           <div className="flex items-start gap-3 rounded-2xl border border-warning/25 bg-warning/[0.04] p-4 text-sm leading-relaxed text-muted-foreground"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden="true" /><p>This match is based on the caption. Check the post and publication date before continuing.</p></div>

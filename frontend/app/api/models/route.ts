@@ -94,6 +94,9 @@ export async function GET() {
         balancedAccuracy: typeof m.metrics?.candidate?.balanced_accuracy === "number"
           ? m.metrics.candidate.balanced_accuracy * 100
           : null,
+        quadraticWeightedKappa: typeof m.metrics?.candidate?.quadratic_weighted_kappa === "number"
+          ? m.metrics.candidate.quadratic_weighted_kappa
+          : null,
         majorityBaselineAccuracy: typeof m.metrics?.baseline?.accuracy === "number"
           ? m.metrics.baseline.accuracy * 100
           : null,

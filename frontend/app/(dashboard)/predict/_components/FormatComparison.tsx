@@ -55,13 +55,13 @@ export function FormatComparison({
                 )}
               </div>
               <div className="mt-4 flex items-end justify-between font-mono tabular-nums">
-                <span className="text-xs text-muted-foreground">High score</span>
+                <span className="text-xs text-muted-foreground">High relative score (uncalibrated)</span>
                 <span className="text-lg font-black text-foreground">{highClassScore}/100</span>
               </div>
               <div
                 className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-3"
                 role="img"
-                aria-label={`${cell.format}: raw High class score ${highClassScore} out of 100; not a calibrated probability`}
+                aria-label={`${cell.format}: High relative model score ${highClassScore} out of 100; uncalibrated and not a probability`}
               >
                 <div
                   className={cn("h-full rounded-full", cell.current ? "bg-primary" : "bg-muted-foreground/50")}

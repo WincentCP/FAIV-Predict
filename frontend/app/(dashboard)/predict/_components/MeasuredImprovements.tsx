@@ -38,13 +38,16 @@ export function MeasuredImprovements({
   appliedRecs: Record<string, boolean>;
   onToggle: (parameter: string) => void;
 }) {
-  const gains = counterfactuals.filter((c) => c.delta_high > 0);
+  const gains = counterfactuals
+    .filter((c) => c.delta_high > 0)
+    .sort((a, b) => b.delta_high - a.delta_high)
+    .slice(0, 3);
   const flat = counterfactuals.filter((c) => c.delta_high <= 0);
 
   return (
     <Panel
       title="What to try"
-      subtitle="Quick score tests with one change at a time. Results are planning clues, not guaranteed improvements."
+      subtitle="Top score tests with one change at a time. Scores are relative, uncalibrated planning clues—not probabilities or guaranteed improvements."
     >
       {note ? (
         <p className="rounded-xl border border-border bg-surface-2/50 p-4 text-sm leading-relaxed text-muted-foreground">{note}</p>
@@ -77,7 +80,7 @@ export function MeasuredImprovements({
                     </div>
                     <p className="text-sm font-semibold text-foreground">{c.change}</p>
                     <p className="flex flex-wrap items-center gap-1.5 text-sm tabular-nums text-muted-foreground">
-                      High score {c.from_prob_high}/100
+                      High relative score {c.from_prob_high}/100
                       <ArrowRight className="h-3 w-3" />
                       <span className="font-bold text-foreground">{c.to_prob_high}/100</span>
                       <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">

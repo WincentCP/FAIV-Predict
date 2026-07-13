@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getRequestUser } from "@/lib/authz";
 import { publicUpstreamStatus, whitelistedUpstreamMessage } from "@/lib/http-errors";
+import { realizedOutcomeFields } from "@/lib/realized-outcomes";
 
 export const dynamic = "force-dynamic";
 
@@ -147,6 +148,12 @@ export async function POST(request: Request) {
       ? rawPrediction.tier
       : null;
     const rawMatchMethod = rawPrediction?.match_method;
+    const realized = rawPrediction ? realizedOutcomeFields({
+      predicted: predictionTier,
+      realized: rawPrediction.realized_tier,
+      basis: rawPrediction.realized_class_basis,
+      actualSource: rawPrediction.realized_tier ? "instagram_media_id" : null,
+    }) : null;
     const prediction = rawPrediction && predictionTier ? {
       prediction_id:
         typeof rawPrediction.id === "string" && UUID_PATTERN.test(rawPrediction.id)
@@ -156,6 +163,10 @@ export async function POST(request: Request) {
             : null,
       tier: predictionTier,
       actual_er: finiteNumber(rawPrediction.actual_er),
+      realized_tier: realized?.realized_tier || null,
+      realized_class_basis: realized?.realized_class_basis || null,
+      tier_error: realized?.tier_error ?? null,
+      verification_badge: realized?.verification_badge || null,
       confidence: finiteNumber(rawPrediction.confidence, 100),
       model_version: typeof rawPrediction.model_version === "string" ? rawPrediction.model_version : null,
       match_method:

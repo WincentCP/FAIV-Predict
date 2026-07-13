@@ -89,7 +89,7 @@ The **historical ML performance estimate** is the research contribution: a versi
 
 The thesis uses an **operator-assisted** Instagram connection instead of public OAuth. The Predict interface provides a **Structured Creative Brief** and an optional **Paste script or notes** intake, but the **pasted source is not stored**. **Current context** requires a user-provided source and observation date and is not an external trend feed. All of these inputs remain separate from Random Forest inference.
 
-For realized outcomes, the database **rejects new** `actual_class` values because the current evidence contract supports continuous cumulative ER only. Adding a defensible categorical realized tier requires a **new versioned schema/migration** and validation against the original model thresholds and maturity policy.
+For realized outcomes, the database still rejects new legacy `actual_class` values. Verified mature publications now use the versioned `realized_class` contract: cumulative ER is retained unchanged, while the tier is computed under the exact P33/P67 thresholds of the historical model that served the prediction. `realized_class_basis` records that model, thresholds, computation time, and maturity policy.
 
 ## Technology stack
 
@@ -205,13 +205,17 @@ Generated folders such as `node_modules`, `.next`, Python caches, local `.env` f
 ├── .env.example                       # Root environment template for Compose
 ├── .github/workflows/ci.yml           # Repository, frontend, Python, and PowerShell CI
 ├── docker-compose.yml                 # Frontend, ML service, n8n, health checks, volume
-├── README.md                          # Single source of project documentation
+├── README.md                          # Primary engineering and operations guide
+├── LICENSE                            # Conservative academic-review use terms
+├── docs/                              # Evidence status and defense/evaluation kits
 ├── supabase_schema.sql                # Canonical bootstrap schema for a fresh project
 ├── supabase/migrations/               # Ordered upgrades for an existing database
 │   ├── 202607110001_user_data_ownership_and_calendar.sql
 │   ├── 202607110002_prediction_lifecycle.sql
 │   ├── 202607120003_brand_patterns_and_media_product.sql
-│   └── 202607120004_content_lifecycle_integration.sql
+│   ├── 202607120004_content_lifecycle_integration.sql
+│   ├── 202607130005_realized_tier.sql
+│   └── 202607130006_brand_trend_notes.sql
 ├── frontend/
 │   ├── app/
 │   │   ├── page.tsx                   # Supabase email/password sign-in
@@ -227,6 +231,7 @@ Generated folders such as `node_modules`, `.next`, Python caches, local `.env` f
 │   │   │   └── model-health/page.tsx  # Active model quality and retraining
 │   │   └── api/                       # Authenticated Next.js BFF endpoints
 │   ├── components/                    # App shell, charts, date/time and reusable UI
+│   ├── tests/                         # Creative Brief and decision-helper unit tests
 │   ├── lib/
 │   │   ├── supabase/                  # Browser/server clients and session middleware
 │   │   ├── server/                    # Server-only brand pattern context
@@ -241,13 +246,21 @@ Generated folders such as `node_modules`, `.next`, Python caches, local `.env` f
 │   └── tsconfig.json
 ├── ml-service/
 │   ├── app/
-│   │   ├── main.py                    # FastAPI, inference, Graph sync, insights, jobs
+│   │   ├── main.py                    # Lean FastAPI composition root and compatibility exports
+│   │   ├── shared.py                  # Configuration, authentication, schemas, DB helper
+│   │   ├── predict.py                 # Prediction APIRouter and counterfactuals
+│   │   ├── train.py                   # Training-job APIRouter
+│   │   ├── instagram.py               # Health, insights, reconciliation, sync router
+│   │   ├── graph_client.py            # Bounded Meta Graph requests and pagination
+│   │   ├── patterns.py                # Brand-pattern APIRouter
 │   │   ├── preprocessing.py           # Deterministic feature extraction and labeling
 │   │   ├── train_pipeline.py          # Training, evaluation, promotion, artifact storage
 │   │   ├── model_loader.py            # Model lookup, validation, download, memory cache
-│   │   ├── brand_patterns.py          # Descriptive planning evidence
-│   │   └── thesis_evidence.py         # Markdown/JSON model-evidence exporter
-│   ├── tests/test_api.py              # Unit and API contract tests
+│   │   ├── brand_patterns.py          # Descriptive planning evidence and momentum
+│   │   ├── thesis_evidence.py         # Markdown/JSON/appendix evidence exporter
+│   │   ├── cumulative_er_sensitivity.py # Age-confound sensitivity analysis
+│   │   └── data_volume_report.py      # Data-volume and serving-scope report
+│   ├── tests/                         # Unit, API, research, and schema contract tests
 │   ├── Dockerfile                     # Non-root Python 3.12 image
 │   ├── requirements.txt               # Runtime dependencies
 │   ├── requirements-dev.txt           # pytest and Ruff
@@ -287,7 +300,7 @@ Create a Supabase project, then choose exactly one database path:
 
 1. Open Supabase SQL Editor.
 2. Run `supabase_schema.sql` once.
-3. Do not run migrations 001–004 afterward; their final contracts are already included.
+3. Do not run migrations 001–006 afterward; their final contracts are already included.
 
 **Existing FAIV Predict project**
 
@@ -468,12 +481,13 @@ Supabase provides PostgreSQL, Auth, PostgREST, and object Storage. The browser u
 | --- | --- |
 | `brands` | Ownership root: `owner_id`, name, niche, followers, immutable `instagram_account_id`, profile summary, timezone, active model type |
 | `posts` | Verified synchronized media: brand, caption, cumulative ER, follower snapshot, format flags, post hour, derived caption fields, Instagram media ID, Meta product type, source, sync timestamp |
-| `predictions` | Immutable score snapshot: creator/brand, caption, features JSON, predicted class, model/version/schema/input hash, optional schedule time, lifecycle state, supersession link, soft archive, verified observed ER |
+| `predictions` | Immutable score snapshot: creator/brand, caption, features JSON, predicted class, model/version/schema/input hash, optional schedule time, lifecycle state, supersession link, soft archive, verified observed ER, and serving-model realized tier/basis |
 | `models` | Versioned personal or niche artifact metadata, Storage path/URL, accuracy, and complete JSON evaluation evidence |
 | `model_retrain_jobs` | Background retraining status, safe error message, creation and completion timestamps |
 | `calendar_entries` | User-owned Content Plan records, scheduling, format, serialized brief/details, caption, workflow status, source, and optional prediction link |
 | `content_lifecycle_events` | Append-only audit events for prediction, plan, publication, and observed-outcome transitions |
 | `prediction_publications` | One-to-one verified mapping between prediction, stored post, and immutable Instagram media ID |
+| `brand_trend_notes` | Owner-scoped, bounded, user-provided trend/context notes with source and observation date; advisory only and excluded from ML |
 
 ### Key relationships and consistency rules
 
@@ -485,7 +499,7 @@ Supabase provides PostgreSQL, Auth, PostgREST, and object Storage. The browser u
 - A Content Plan may link only to a prediction owned by the same user and, when both have brands, the same brand.
 - Each prediction and each verified post can have only one publication mapping. The brand/media pair is also unique.
 - `actual_er` may be written only from an explicitly linked verified Instagram post after the seven-day maturity gate.
-- New `actual_class` values are rejected. The system reports continuous observed ER because a defensible historical tier contract has not been implemented.
+- New legacy `actual_class` values remain rejected. `realized_class` is attached only by privileged mature-publication reconciliation and must match the original serving model's persisted thresholds; the continuous observed ER remains available.
 - The first successful Graph sync stores `brands.instagram_account_id`; a trigger prevents identity replacement.
 
 ### Indexes
@@ -503,7 +517,7 @@ Important indexes cover:
 
 ### Row-Level Security
 
-RLS is enabled on all eight tables.
+RLS is enabled on all nine tables.
 
 - Brand CRUD is restricted to `owner_id = auth.uid()`; column grants prevent clients from writing followers or Instagram identity.
 - Authenticated users may read only verified Graph posts belonging to owned brands.
@@ -512,13 +526,14 @@ RLS is enabled on all eight tables.
 - Retraining jobs are readable through their owned brand.
 - Content Plan CRUD requires the owner and validates referenced brand/prediction ownership.
 - Lifecycle events and publication links are read-only for their owner. Privileged functions/triggers perform writes.
+- Trend notes allow owner-scoped select/insert/delete only; client updates are not granted, and SQL constraints repeat all BFF length/date bounds.
 - Anonymous users receive no application data.
 
 ### Migration process
 
-`supabase_schema.sql` is the canonical final schema for a new project. The four migration files are upgrades for an older installation; do not blindly combine both paths. Apply SQL in Supabase SQL Editor and record successful execution. Rebuild services after schema changes.
+`supabase_schema.sql` is the canonical final schema for a new project. The six migration files are upgrades for an older installation; do not blindly combine both paths. Apply SQL in Supabase SQL Editor and record successful execution. Rebuild services after schema changes.
 
-Migration 003 changes Reel eligibility by preserving `media_product_type`; migration 004 adds publication cohesion and observed-outcome contracts. Models trained against older training logic or schema must be retrained before serving.
+Migration 003 changes Reel eligibility by preserving `media_product_type`; migration 004 adds publication cohesion and continuous observed outcomes; migration 005 adds the historical-serving-model realized tier; migration 006 adds owner-scoped trend notes. Models trained against older training logic or schema must be retrained before serving.
 
 ## Machine learning
 
@@ -588,15 +603,17 @@ Regularized depth and leaf size reduce overfitting risk on small datasets. A sha
 
 Every candidate records:
 
-- accuracy, balanced accuracy, weighted/macro/per-class precision, recall, and F1;
+- balanced accuracy, macro/per-class precision, recall and F1, quadratic weighted kappa, and ordinal mean absolute error;
+- raw accuracy and weighted metrics as secondary context;
 - fixed-label confusion matrix;
-- ordinal mean absolute error and quadratic weighted kappa;
 - class support in train and holdout;
 - comparison with a majority `DummyClassifier`;
 - comparison with scaled Logistic Regression;
 - three expanding-window evaluations within the oldest 80%, with fold-local thresholds;
 - holdout permutation importance using balanced accuracy;
 - dataset SHA-256, training-source SHA-256, runtime/dependency evidence, feature ranges, thresholds, and reference values.
+
+#### Why operational and scientific gates are separate
 
 Operational promotion and scientific interpretation are separate:
 
@@ -656,15 +673,18 @@ All browser-facing `/api/*` routes require a valid Supabase session. Middleware 
 | `POST /api/calendar` | One plan object or an array | Inserted plans | Validates brand, date/time, format, workflow enums, field lengths, prediction ownership |
 | `PATCH /api/calendar` | `id` plus writable plan fields | Updated plan | Only allowlisted fields; database trigger may stale linked prediction |
 | `DELETE /api/calendar` | `id` | Deletion confirmation | Owned plan only; restrictive links prevent unsafe deletion |
-| `GET /api/history` | None | Visible and archived prediction snapshots with publication/outcome context | Immutable evidence ordered newest first |
+| `GET /api/history` | None | Visible prediction snapshots with publication ER, realized tier/basis, and ordinal comparison badge | Immutable evidence ordered newest first |
 | `PATCH /api/history` | Prediction `id` plus rename or restore/archive action | Updated display/archive state | Scored fields cannot be edited |
 | `DELETE /api/history` | Prediction `id` | Soft-archive confirmation | No hard delete |
 | `POST /api/publication-links` | `prediction_id`, numeric `media_id`, `confirmed: true` | Verified publication mapping | Same owner/brand, verified post, uniqueness checks; confirmation is mandatory |
 | `GET /api/instagram-posts?brand_id=UUID` | Owned brand | Up to 24 live/fallback posts and provenance | BFF calls internal endpoint with limit 24; degraded stored fallback is supported |
 | `POST /api/instagram-post-insights` | `brand_id`, numeric `media_id` | Supported metrics, unavailable metrics, comparison eligibility, candidate prediction context | Verifies account/media ownership through Meta |
 | `GET /api/instagram-health` | None | Sanitized health for all owned brands | Always sends tenant-scoped IDs; 20 s timeout |
-| `GET /api/dashboard` | None | Prediction/model/brand counts, tier mix, status counts, recent predictions, model accuracy trend | `503` on aggregate failure; never returns fabricated zeros after a failed query |
+| `GET /api/dashboard` | None | Prediction/model/brand counts, tier mix, status counts, recent predictions, model accuracy trend, and realized-tier verification aggregate | `503` on aggregate failure; never returns fabricated zeros after a failed query |
 | `GET /api/models` | None | Latest relevant promoted personal/niche models and evaluation summaries | Verified Graph models only |
+| `GET /api/trend-notes?brand_id=UUID` | Owned brand query | Up to 100 user-provided notes with computed staleness | Owner scoped; private no-store response |
+| `POST /api/trend-notes` | `brand_id`, note, source, observed date, optional tag | Created trend note | SQL and BFF enforce matching bounds; notes remain outside ML |
+| `DELETE /api/trend-notes` | Trend note `id` | Deletion confirmation | Owner scoped; updates are intentionally unsupported |
 | `POST /api/train` | `brand_id` | Background `job_id` and pending state | Verifies brand ownership; 30 s start timeout |
 | `GET /api/train?job_id=UUID` | Retraining job ID | `pending`, `running`, `success`, or `failed` with timestamps/safe error | Verifies job through owned brand; 20 s timeout |
 | `POST /api/classify` | `name`, optional `bio` | Up to three supported niche suggestions with reasons | Max request 8 KiB; manual selection remains available; `501` without Gemini |
@@ -745,8 +765,8 @@ The old `/result` and `/diagnose` routes redirect to `/predict`.
 ### Component architecture
 
 - `AppShell` provides responsive sidebar/topbar navigation, user menu, theme switcher, focus handling, mobile dialog, and skip link.
-- The Predict page is split into focused components for Compose, Insights, format-aware brief import, brand patterns, caption refinement, AI review, trust metadata, and measured alternatives.
-- Reusable components cover tier badges, model maturity, feature charts, score explanations, date/time input, headers, and base buttons/popovers.
+- The Predict page is split into focused components for Compose, Insights, format-aware brief import, brand patterns, editable Trend Insights, caption refinement, AI review, trust metadata, and measured alternatives.
+- Reusable components cover tier badges, predicted-vs-observed outcomes, the glossary, model maturity, feature charts, score explanations, date/time input, headers, and base buttons/popovers.
 - Server-only brand context remains under `lib/server` to keep privileged calls out of client bundles.
 
 ### State and data flow
@@ -782,18 +802,9 @@ Provider responses are sanitized before they reach the browser. Critical externa
 
 ### FastAPI service
 
-`main.py` exposes strict service endpoints and contains:
+`main.py` is a small composition root: it configures CORS, registers `/healthz`, and includes the `predict`, `train`, `instagram`, and `patterns` APIRouters. Shared authentication, request schemas, and database configuration live in `shared.py`; bounded Meta requests live in `graph_client.py`. Compatibility re-exports keep established scripts and imports working without concentrating endpoint behavior back in the composition root.
 
-- service-to-service authentication and CORS allowlisting;
-- prediction request validation and persistence;
-- retraining-job orchestration;
-- Meta credential binding and health checks;
-- paginated media synchronization and idempotent upsert;
-- post listing and supported lifetime metric retrieval;
-- publication-outcome reconciliation;
-- descriptive brand-pattern aggregation.
-
-Scientific logic is separated into `preprocessing.py`, `train_pipeline.py`, `model_loader.py`, and `brand_patterns.py`. Database connections are opened per operation and closed in `finally` blocks. User-facing messages are generic; detailed exceptions remain in service logs.
+Scientific logic remains separated in `preprocessing.py`, `train_pipeline.py`, `model_loader.py`, and `brand_patterns.py`. Database connections are opened per operation and closed in `finally` blocks. User-facing messages are generic; detailed exceptions remain in service logs.
 
 ## Prediction workflow
 
@@ -839,7 +850,7 @@ After publication:
 2. The user explicitly confirms which same-brand media belongs to the prediction.
 3. `prediction_publications` stores the one-to-one identity link.
 4. Synchronization refreshes the post and invokes database reconciliation.
-5. Once mature, verified cumulative ER is copied into the prediction with source and observation timestamp.
+5. Once mature, verified cumulative ER is copied into the prediction; when the serving model has persisted thresholds, its realized tier and complete threshold basis are computed atomically.
 6. The lifecycle event table records prediction, plan, publication, stale/superseded, archive, and observed-outcome changes.
 7. Future retraining consumes the verified post independently of the prediction; predictions are evidence, not training labels manufactured from user expectations.
 
@@ -934,6 +945,7 @@ These choices are appropriate for the current thesis/demo scale but should be re
 cd frontend
 npm ci
 npm audit --audit-level=moderate
+npm test
 npm run lint
 npx tsc --noEmit
 npm run build
@@ -979,9 +991,20 @@ It checks Docker/Compose, container health, HTTP readiness, n8n secret isolation
 New-Item -ItemType Directory -Force .\evidence | Out-Null
 docker compose exec -T ml-service python -m app.thesis_evidence --format markdown |
   Out-File -Encoding utf8 .\evidence\FINAL_MODEL_EVIDENCE.md
+docker compose exec -T ml-service python -m app.thesis_evidence --format json |
+  Out-File -Encoding utf8 .\evidence\FINAL_MODEL_EVIDENCE.json
 ```
 
-The `evidence/` directory is intentionally untracked. JSON is also available with `--format json`.
+The Markdown export includes the compact per-scope appendix. The `evidence/` directory is intentionally untracked. A final export is valid only after the final sync/retrain and when the model training-code hash matches the running source.
+
+Run the read-only research reports against that same frozen database and record their output beside the evidence:
+
+```bash
+docker compose exec -T ml-service python -m app.cumulative_er_sensitivity --help
+docker compose exec -T ml-service python -m app.data_volume_report --help
+```
+
+Defense and human-evaluation preparation lives in `docs/DEFENSE_KIT.md`, `docs/DEFENSE_DEMO_SCRIPT.md`, and `docs/USER_EVALUATION_PROTOCOL.md`. These documents deliberately distinguish prepared procedures from empirical runs that still require the thesis machine, private credentials, or real participants.
 
 ### Continuous integration
 
@@ -989,7 +1012,7 @@ GitHub Actions runs on pushes and pull requests to `main`:
 
 - repository contract and Compose interpolation;
 - PowerShell parser and Python-argument quote roundtrip on Windows;
-- npm clean install, moderate vulnerability audit, lint, type check, and production build;
+- npm clean install, vulnerability audit, unit tests, lint, type check, and production build;
 - Python dependency install, Ruff, and pytest.
 
 ## Deployment
@@ -1145,7 +1168,7 @@ These improvements should not be simulated with placeholder data. Each requires 
 
 ## License
 
-No license file is currently included. Unless the repository owner adds an explicit license, the source is not granted for redistribution or reuse beyond rights provided by applicable law. Add a reviewed `LICENSE` file before distributing the project publicly or accepting external contributions.
+The root `LICENSE` retains all rights and permits academic review/thesis evaluation only. This conservative default avoids granting public redistribution rights without an explicit owner decision. Replace it only after the owner deliberately chooses and reviews an open-source or commercial license.
 
 ---
 
