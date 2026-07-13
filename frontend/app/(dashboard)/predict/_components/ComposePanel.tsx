@@ -197,7 +197,7 @@ export function ComposePanel(props: {
                 );
               })}
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Story and feed video are not available for prediction yet.</p>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Story and Feed video are not available for prediction yet.</p>
           </div>
 
           <div className="grid gap-5 sm:grid-cols-2">

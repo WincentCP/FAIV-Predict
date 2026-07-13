@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -16,7 +17,27 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+def tracked_paths() -> set[str]:
+    """Return git-tracked repository paths as forward-slash relative strings.
+
+    The contract validates what is committed, not what happens to exist in a
+    working tree. This keeps the check identical to what CI checks out and
+    immune to untracked working material — generated evidence exports the
+    README tells operators to create, local design notes, or developer tooling
+    that .gitignore already excludes.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
 def main() -> int:
+    tracked = tracked_paths()
+
     for development_artifact in (
         ".agents",
         ".claude",
@@ -28,8 +49,12 @@ def main() -> int:
         "frontend/.prettierrc",
         "frontend/components.json",
     ):
+        committed = any(
+            path == development_artifact or path.startswith(development_artifact + "/")
+            for path in tracked
+        )
         require(
-            not (ROOT / development_artifact).exists(),
+            not committed,
             f"development-only artifact must not be committed: {development_artifact}",
         )
 
@@ -112,8 +137,16 @@ def main() -> int:
     instagram_post_insights_bff = (
         ROOT / "frontend" / "app" / "api" / "instagram-post-insights" / "route.ts"
     ).read_text(encoding="utf-8")
+    # The former standalone /insights page is now the Published tab of the
+    # unified /results view. Its verified-outcome content is unchanged.
     insights_ui = (
-        ROOT / "frontend" / "app" / "(dashboard)" / "insights" / "page.tsx"
+        ROOT
+        / "frontend"
+        / "app"
+        / "(dashboard)"
+        / "results"
+        / "_components"
+        / "PublishedView.tsx"
     ).read_text(encoding="utf-8")
     calendar_ui = (
         ROOT / "frontend" / "app" / "(dashboard)" / "calendar" / "page.tsx"
@@ -712,26 +745,22 @@ def main() -> int:
         "completion report must disclose external acceptance work and thesis scope boundaries",
     )
 
-    ignored_markdown_parts = {
-        ".git", ".next", ".pytest_cache", "node_modules", "models_cache"
-    }
-    markdown_paths = sorted(
-        str(path.relative_to(ROOT)).replace("\\", "/")
-        for path in ROOT.rglob("*.md")
-        if not ignored_markdown_parts.intersection(path.relative_to(ROOT).parts)
-    )
+    markdown_paths = {path for path in tracked if path.endswith(".md")}
     expected_markdown_paths = {
         "README.md",
         "docs/DEFENSE_DEMO_SCRIPT.md",
         "docs/DEFENSE_KIT.md",
+        "docs/FINAL_AUDIT_REPORT.md",
+        "docs/FINAL_IMPLEMENTATION_PLAN.md",
         "docs/FINAL_MODEL_EVIDENCE.md",
         "docs/IMPLEMENTATION_COMPLETION_REPORT.md",
+        "docs/UI_REBUILD_SPEC.md",
         "docs/USER_EVALUATION_PROTOCOL.md",
     }
     require(
-        set(markdown_paths) == expected_markdown_paths,
-        "repository Markdown set differs from the reviewed thesis documentation set: "
-        + ", ".join(markdown_paths),
+        markdown_paths == expected_markdown_paths,
+        "committed Markdown set differs from the reviewed thesis documentation set: "
+        + ", ".join(sorted(markdown_paths)),
     )
 
     print(
